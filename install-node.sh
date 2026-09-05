@@ -370,6 +370,14 @@ resolve_version() {
             | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
     fi
 
+    # /releases/latest молчит, пока все релизы помечены пререлизами: пока проект
+    # в альфе, это норма, а не отсутствие релиза.
+    if [ -z "$tag" ]; then
+        tag="$(curl -fsSL "https://api.github.com/repos/$REPO/releases?per_page=1" 2>/dev/null \
+            | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+        [ -n "$tag" ] && say "latest release is a pre-release: $tag"
+    fi
+
     [ -n "$tag" ] || die "cannot work out the latest release of $REPO, pass --version vX.Y.Z"
     printf "%s" "$tag"
 }
