@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 
 import { isPanelUpdateAvailable } from '@/lib/panel-version';
 
+// Parity with web/service/panel.go isNewerVersion.
 describe('isPanelUpdateAvailable', () => {
   it('flags a strictly newer latest', () => {
     expect(isPanelUpdateAvailable('2.6.5', '2.6.4')).toBe(true);

@@ -239,7 +239,7 @@ public final class Guard {
                 Intent keeper = component("com.miui.powerkeeper",
                         "com.miui.powerkeeper.ui.HiddenAppsConfigActivity");
                 keeper.putExtra("package_name", host.getPackageName());
-                keeper.putExtra("package_label", "QUIC Diver");
+                keeper.putExtra("package_label", "qd");
                 out.add(keeper);
                 break;
             case ROM_SAMSUNG:

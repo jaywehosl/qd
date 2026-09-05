@@ -175,6 +175,8 @@ func (a *API) buildClients() ([]map[string]any, []string, error) {
 			"lastOnline": lastOnline,
 		}
 
+		// Kept beside the network-wide figure so an entrypoint can show what
+		// crossed its own node rather than the whole fleet's total.
 		perNode := map[string]map[string]uint64{}
 		for id, t := range saved.ByNode {
 			perNode[strconv.Itoa(id)] = map[string]uint64{"up": t.Up, "down": t.Down}
@@ -265,6 +267,8 @@ type keptStats struct {
 		Down uint64 `json:"down"`
 		At   int64  `json:"at"`
 	}
+	// The same figure split by the node that carried it: a client's row wants
+	// the whole network, an entrypoint's row wants only its own node.
 	ByNode    map[int]carriedTotals
 	Addresses []address
 	Devices   []deviceRow
@@ -369,6 +373,10 @@ func (a *API) askCarried() any {
 	return out
 }
 
+// Traffic is counted per node, so a figure for the whole network is the sum of
+// what each node carried — not whatever one node's replica happens to hold.
+// Nothing here is written back: the totals live only in this answer, so handing
+// the database to a node never overwrites a client's history.
 func (a *API) askStored() any {
 	out := map[int]keptStats{}
 
@@ -412,6 +420,8 @@ func (a *API) askStored() any {
 	}
 
 	for nodeID, answer := range answers {
+		// A node that predates the split reports no share of its own; falling
+		// back to its whole replica beats showing nothing.
 		counted := answer.Mine
 		if !shares {
 			counted = answer.Traffic
@@ -474,6 +484,8 @@ func (a *API) askStored() any {
 		}
 	}
 
+	// Only one node can be asked without the split, and then its replica already
+	// holds every node's rows — adding them again would double the bytes.
 	if !shares && len(answers) > 1 {
 		best := map[int]totals{}
 		for _, answer := range answers {
@@ -661,6 +673,9 @@ func (a *API) clientsPaged(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The panel has always sent ?search=; nothing here ever read it, so typing a
+	// name filtered nothing. Matching is case-insensitive over the fields a
+	// person would type: the tag and the comment.
 	if needle := strings.TrimSpace(r.URL.Query().Get("search")); needle != "" {
 		needle = strings.ToLower(needle)
 		kept := make([]map[string]any, 0, len(rows))
@@ -715,6 +730,8 @@ func (a *API) clientsPaged(w http.ResponseWriter, r *http.Request) {
 			online = append(online, email)
 		}
 
+		// Active means still carrying traffic: enabled and not run out. A client
+		// about to expire is warned about, not counted as gone.
 		if expiry > 0 && expiry < now {
 			depleted = append(depleted, email)
 			continue

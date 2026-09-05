@@ -12,6 +12,7 @@ export interface DrawerProps {
   side?: 'left' | 'right';
 }
 
+/** Side panel built on Radix Dialog (focus-trap, ESC, scroll-lock, a11y). */
 export function Drawer({ open, onOpenChange, title, children, footer, width = 420, side = 'right' }: DrawerProps) {
   const closing = useClosing(open);
   if (!open && !closing) return null;

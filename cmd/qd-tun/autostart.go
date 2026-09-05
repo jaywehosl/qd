@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-const autostartTask = "QUIC Diver"
+const autostartTask = appName
 
 func autostartHeld() bool {
 	out, err := run("schtasks", "/query", "/tn", autostartTask)

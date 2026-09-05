@@ -38,7 +38,7 @@ public class ImportPage {
         root.setBackground(skin.backdrop());
         root.setPadding(skin.dp(24), skin.dp(24), skin.dp(24), skin.dp(24));
 
-        TextView head = skin.label("QUIC Diver", skin.good, 28);
+        TextView head = skin.label("qd", skin.good, 28);
         head.setGravity(Gravity.CENTER);
         root.addView(head);
 

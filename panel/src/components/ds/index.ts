@@ -1,3 +1,5 @@
+// Design System (ds/) — Antigravity glass primitives on a headless core
+// (Radix UI + TanStack Table). Import from '@/components/ds'.
 export { Button } from './Button';
 export type { ButtonProps, ButtonVariant, ButtonSize } from './Button';
 

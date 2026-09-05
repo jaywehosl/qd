@@ -2,8 +2,8 @@ const OVERLAY_ID = 'qd-client-closed';
 
 export function showClientClosed(): void {
   showOverlay(
-    'QUIC Diver is closed',
-    'The client is no longer running, so this page has nothing to talk to. Start QUIC Diver again and open it from the tray icon.',
+    'qd is closed',
+    'The client is no longer running, so this page has nothing to talk to. Start qd again and open it from the tray icon.',
   );
 }
 

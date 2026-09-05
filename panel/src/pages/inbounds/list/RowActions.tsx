@@ -25,6 +25,10 @@ interface RowActionsMenuProps {
   isMobile?: boolean;
 }
 
+/**
+ * Build the row-action menu as DS MenuEntry[]. Each entry's onSelect dispatches
+ * the corresponding RowAction through the supplied handler.
+ */
 export function buildRowActionsMenu({
   record,
   subEnable,

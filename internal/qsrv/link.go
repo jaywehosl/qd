@@ -150,6 +150,7 @@ type links struct {
 	token string
 	self  string
 	held  map[string]*link
+	won   map[uint32]string
 }
 
 func seatKey(endpoint string, seat uint32) string {
@@ -157,7 +158,62 @@ func seatKey(endpoint string, seat uint32) string {
 }
 
 func newLinks(token, self string, say func(string, ...any)) *links {
-	return &links{token: token, self: self, say: say, held: map[string]*link{}}
+	return &links{token: token, self: self, say: say, held: map[string]*link{}, won: map[uint32]string{}}
+}
+
+// standing отдаёт уже живую связь с одним из кандидатов: сперва ту, что выиграла
+// прошлую гонку для этого места, иначе первую живую по порядку узлов. Порядок
+// стабилен, поэтому выход не скачет от флоу к флоу.
+func (ls *links) standing(runners []Peer, seat uint32) (*http3.ClientConn, string, bool) {
+	ls.mu.Lock()
+	won := ls.won[seat]
+	ls.mu.Unlock()
+
+	if won != "" {
+		for _, p := range runners {
+			if p.Endpoint != won {
+				continue
+			}
+			if cc, ok := ls.alive(p.Endpoint, seat); ok {
+				return cc, p.Endpoint, true
+			}
+		}
+	}
+
+	for _, p := range runners {
+		if cc, ok := ls.alive(p.Endpoint, seat); ok {
+			ls.chose(seat, p.Endpoint)
+			return cc, p.Endpoint, true
+		}
+	}
+	return nil, "", false
+}
+
+func (ls *links) alive(endpoint string, seat uint32) (*http3.ClientConn, bool) {
+	ls.mu.Lock()
+	l := ls.held[seatKey(endpoint, seat)]
+	ls.mu.Unlock()
+	if l == nil {
+		return nil, false
+	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.cc == nil || l.conn == nil {
+		return nil, false
+	}
+	select {
+	case <-l.conn.QUIC().Context().Done():
+		return nil, false
+	default:
+		return l.cc, true
+	}
+}
+
+func (ls *links) chose(seat uint32, endpoint string) {
+	ls.mu.Lock()
+	ls.won[seat] = endpoint
+	ls.mu.Unlock()
 }
 
 func (ls *links) to(endpoint string, seat uint32) *link {
@@ -192,21 +248,7 @@ func (ls *links) closeAll() {
 		l.close()
 	}
 	ls.held = map[string]*link{}
-}
-
-func (ls *links) drop(endpoint string, seat uint32) {
-	key := seatKey(endpoint, seat)
-
-	ls.mu.Lock()
-	l, ok := ls.held[key]
-	if ok {
-		delete(ls.held, key)
-	}
-	ls.mu.Unlock()
-
-	if ok {
-		l.close()
-	}
+	ls.won = map[uint32]string{}
 }
 
 func (ls *links) forget(seat uint32) {
@@ -218,6 +260,7 @@ func (ls *links) forget(seat uint32) {
 			delete(ls.held, key)
 		}
 	}
+	delete(ls.won, seat)
 	ls.mu.Unlock()
 
 	for _, l := range going {

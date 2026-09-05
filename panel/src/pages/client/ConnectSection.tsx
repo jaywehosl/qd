@@ -37,6 +37,8 @@ export default function ConnectSection({
     }
   }, [state.connected, onConnect, onDisconnect]);
 
+  // A refused exit has to be visible — silently staying off is the one
+  // behaviour that leaves the operator guessing.
   const flipEgress = useCallback(async (v: boolean) => {
     const next = await onEgress(v);
     if (!next) toast.error(t('client.connect.exitRefused'));

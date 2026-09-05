@@ -11,12 +11,17 @@ import (
 
 var ErrNothingToPublish = errors.New("store: no draft to publish")
 
+// Revision numbering has one rule: the highest number is the draft unless it
+// has a published_at, in which case the draft does not exist yet and the next
+// edit creates it.
 type Revision struct {
 	Number      int
 	CreatedAt   int64
 	PublishedAt int64
 }
 
+// Draft returns the unpublished revision, or nil when the tables match what the
+// nodes are already running.
 func (d *DB) Draft() (*Revision, error) {
 	r, err := d.topRevision()
 	if err != nil || r == nil || r.PublishedAt != 0 {
@@ -25,6 +30,7 @@ func (d *DB) Draft() (*Revision, error) {
 	return r, nil
 }
 
+// LastPublished is what a discard rewinds to.
 func (d *DB) LastPublished() (*Revision, error) {
 	var r Revision
 	err := d.sql.QueryRow(
@@ -54,6 +60,9 @@ func (d *DB) topRevision() (*Revision, error) {
 	return &r, nil
 }
 
+// Touch opens a draft if none is open. Every configuration write calls it, so
+// the revision number tracks "differs from what the nodes hold" rather than
+// "somebody clicked something".
 func (d *DB) Touch(now int64) (int, error) {
 	top, err := d.topRevision()
 	if err != nil {
@@ -75,6 +84,10 @@ func (d *DB) Touch(now int64) (int, error) {
 	return next, nil
 }
 
+// Publish freezes the current configuration into the draft revision and marks
+// it published. The snapshot is the whole configuration half rather than the
+// per-node projections: those are lossy — they carry no tags or comments — so
+// they could never be replayed back into the tables by a discard or a rollback.
 func (d *DB) Publish(now int64) (*netstate.State, error) {
 	draft, err := d.Draft()
 	if err != nil {
@@ -103,6 +116,13 @@ func (d *DB) Publish(now int64) (*netstate.State, error) {
 	return state, nil
 }
 
+// Discard throws the draft away and puts the configuration tables back to the
+// last published revision.
+//
+// Telemetry is untouched, and that is not incidental: the restore below deletes
+// every configuration row before reinserting, so a foreign key from any
+// telemetry table would take the collected statistics with it. See the note at
+// the top of schema.sql.
 func (d *DB) Discard() error {
 	draft, err := d.Draft()
 	if err != nil || draft == nil {
@@ -124,6 +144,8 @@ func (d *DB) Discard() error {
 			return fmt.Errorf("store: revision %d snapshot is unreadable: %w", pub.Number, err)
 		}
 	}
+	// With no published revision the nodes hold nothing, so "back to what they
+	// have" is an empty configuration — which the zero State already is.
 
 	tx, err := d.sql.Begin()
 	if err != nil {
@@ -140,6 +162,9 @@ func (d *DB) Discard() error {
 	return tx.Commit()
 }
 
+// RevisionState reads back a published snapshot. This is the only way to see
+// what the nodes are actually running: the live tables are the draft and have
+// already moved on.
 func (d *DB) RevisionState(number int) (*netstate.State, error) {
 	var blob string
 	err := d.sql.QueryRow(
@@ -158,6 +183,11 @@ func (d *DB) RevisionState(number int) (*netstate.State, error) {
 	return &s, nil
 }
 
+// RecordNodeProgress writes what a node is running into the telemetry half.
+//
+// Telemetry, not configuration: it must not be rewound by a discard, and it
+// only moves forward — a stale report arriving after a newer one must not drag
+// the record backwards.
 func (d *DB) RecordNodeProgress(nodeID, applied, staged int, status string, now int64) error {
 	_, err := d.sql.Exec(`
 		INSERT INTO node_state (node_id, applied_revision, staged_revision, status, last_seen)
@@ -171,6 +201,7 @@ func (d *DB) RecordNodeProgress(nodeID, applied, staged int, status string, now 
 	return err
 }
 
+// NodeProgress is what the nodes list shows as drift.
 type NodeProgress struct {
 	NodeID   int
 	Applied  int
@@ -193,6 +224,10 @@ func (d *DB) NodeProgress() (map[int]NodeProgress, error) {
 	return out, err
 }
 
+// Rollback republishes an earlier revision by restoring its snapshot into the
+// tables as a fresh draft. It does not resurrect the old revision number: what
+// the nodes ran at 31 and what they will run now are different events even when
+// the bytes match.
 func (d *DB) Rollback(number int, now int64) error {
 	var blob string
 	err := d.sql.QueryRow(
@@ -229,6 +264,9 @@ func (d *DB) Rollback(number int, now int64) error {
 	return err
 }
 
+// restoreConfig replaces the configuration half wholesale. Order matters on the
+// way out (children first) and on the way back in (parents first) because the
+// foreign keys within the configuration half are real.
 func restoreConfig(tx *sql.Tx, s *netstate.State) error {
 	for _, q := range []string{
 		`DELETE FROM group_entrypoints`,

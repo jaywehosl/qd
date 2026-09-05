@@ -103,6 +103,7 @@ export default function LogModal({ open, onClose }: LogModalProps) {
     if (msg?.success) await refresh();
   }
 
+  // Pulls the node's full log bundle, not the level-filtered view on screen.
   async function downloadAll() {
     if (nodeId === null) return;
     const msg = await HttpUtil.get<string>(`/panel/api/nodes/${nodeId}/logs/download`);

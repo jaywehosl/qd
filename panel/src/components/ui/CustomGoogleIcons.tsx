@@ -1,9 +1,11 @@
 import React from 'react';
 
+// Standard props for SVG components
 export interface IconProps extends React.SVGProps<SVGSVGElement> {
   size?: number;
 }
 
+// 1. Dashboard / Telemetry Icon (Radial dial + needle)
 export function DashboardIcon({ size = 20, ...props }: IconProps) {
   return (
     <svg
@@ -21,6 +23,7 @@ export function DashboardIcon({ size = 20, ...props }: IconProps) {
   );
 }
 
+// 2. Inbounds Icon (Incoming data stream into a bracket)
 export function InboundsIcon({ size = 20, ...props }: IconProps) {
   return (
     <svg
@@ -48,6 +51,7 @@ export function InboundsIcon({ size = 20, ...props }: IconProps) {
   );
 }
 
+// 3. Clients Icon (Connected enterprise/user circles - professional.svg)
 export function ClientsIcon({ size = 20, ...props }: IconProps) {
   return (
     <svg
@@ -87,6 +91,7 @@ export function ClientsIcon({ size = 20, ...props }: IconProps) {
   );
 }
 
+// 4. Groups Icon (Stacked tags/folder categories)
 export function GroupsIcon({ size = 20, ...props }: IconProps) {
   return (
     <svg
@@ -104,6 +109,7 @@ export function GroupsIcon({ size = 20, ...props }: IconProps) {
   );
 }
 
+// 5. Nodes Icon (Futuristic floating isometric layers - fullstack.svg)
 export function NodesIcon({ size = 20, ...props }: IconProps) {
   return (
     <svg
@@ -143,6 +149,7 @@ export function NodesIcon({ size = 20, ...props }: IconProps) {
   );
 }
 
+// 6. Settings Icon (Futuristic sliders)
 export function SettingsIcon({ size = 20, ...props }: IconProps) {
   return (
     <svg
@@ -160,6 +167,7 @@ export function SettingsIcon({ size = 20, ...props }: IconProps) {
   );
 }
 
+// 7. Xray Core Settings Icon (Science beaker - science.svg)
 export function XrayIcon({ size = 20, ...props }: IconProps) {
   return (
     <svg
@@ -178,6 +186,7 @@ export function XrayIcon({ size = 20, ...props }: IconProps) {
   );
 }
 
+// 8. API Docs Icon (Frontend code file brackets - frontend.svg)
 export function ApiDocsIcon({ size = 20, ...props }: IconProps) {
   return (
     <svg
@@ -217,6 +226,7 @@ export function ApiDocsIcon({ size = 20, ...props }: IconProps) {
   );
 }
 
+// 9. Logout Icon (Sleek standby/power symbol)
 export function LogoutIcon({ size = 20, ...props }: IconProps) {
   return (
     <svg

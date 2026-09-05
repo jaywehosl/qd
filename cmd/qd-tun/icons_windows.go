@@ -84,6 +84,9 @@ var iconCache struct {
 	seen map[string]string
 }
 
+// The picker shows one row per executable, so an icon is looked up once per
+// path and kept: the bitmap does not change while the file sits on disk, and
+// the list refreshes every few seconds.
 func processIcon(path string) string {
 	if path == "" {
 		return ""
@@ -173,6 +176,9 @@ func iconToImage(icon windows.Handle) image.Image {
 		}
 	}
 
+	// A 32bpp icon carries its own alpha. A 24bpp one (or an old icon whose
+	// alpha channel is all zero) is cut out by the AND mask instead, where a
+	// set bit means "leave the background showing".
 	var mask []uint32
 	if opaque && ii.MaskBmp != 0 {
 		mask = readBits(ii.MaskBmp, bmp.Width, bmp.Height)
@@ -215,7 +221,7 @@ func readBits(bmp windows.Handle, width, height int32) []uint32 {
 	head := bitmapInfoHeader{
 		Size:        uint32(unsafe.Sizeof(bitmapInfoHeader{})),
 		Width:       width,
-		Height:      -height,
+		Height:      -height, // top-down, so row 0 is the top one
 		Planes:      1,
 		BitCount:    32,
 		Compression: biRGB,

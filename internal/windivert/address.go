@@ -34,11 +34,11 @@ func (a *Address) SetLayer(l Layer) {
 func (a *Address) Event() uint8 { return uint8((a.flags >> 8) & 0xFF) }
 
 const (
-	bitSniffed     = 16
-	bitOutbound    = 17
-	bitLoopback    = 18
-	bitImpostor    = 19
-	bitIPv6        = 20
+	bitSniffed = 16
+	bitOutbound = 17
+	bitLoopback = 18
+	bitImpostor = 19
+	bitIPv6     = 20
 	bitIPChecksum  = 21
 	bitTCPChecksum = 22
 	bitUDPChecksum = 23
@@ -60,9 +60,9 @@ func (a *Address) Outbound() bool { return a.bit(bitOutbound) }
 func (a *Address) IPChecksumValid() bool  { return a.bit(bitIPChecksum) }
 func (a *Address) TCPChecksumValid() bool { return a.bit(bitTCPChecksum) }
 func (a *Address) UDPChecksumValid() bool { return a.bit(bitUDPChecksum) }
-func (a *Address) Loopback() bool         { return a.bit(bitLoopback) }
-func (a *Address) Impostor() bool         { return a.bit(bitImpostor) }
-func (a *Address) IPv6() bool             { return a.bit(bitIPv6) }
+func (a *Address) Loopback() bool { return a.bit(bitLoopback) }
+func (a *Address) Impostor() bool { return a.bit(bitImpostor) }
+func (a *Address) IPv6() bool     { return a.bit(bitIPv6) }
 
 func (a *Address) SetOutbound(v bool)    { a.setBit(bitOutbound, v) }
 func (a *Address) SetLoopback(v bool)    { a.setBit(bitLoopback, v) }

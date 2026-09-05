@@ -3,6 +3,8 @@ import { z } from 'zod';
 export const ROUTING_ROLES = ['direct', 'tunnel', 'egress', 'noEgress'] as const;
 export type RoutingRole = (typeof ROUTING_ROLES)[number];
 
+// A drifted role renders as `tunnel` rather than an empty picker: the value is
+// still wrong, but the row stays readable and removable.
 const RoleSchema = z.enum(ROUTING_ROLES).catch('tunnel');
 
 export const RoutingRuleSchema = z.object({
@@ -17,6 +19,8 @@ export const RoutingRuleSchema = z.object({
 
 export const RoutingStateSchema = z.object({
   defaultRole: RoleSchema,
+  // 'restart' is Android: VpnService fixes its per-app rules when the tunnel is
+  // built, so a rule change cannot land on a live tunnel there.
   applyMode: z.enum(['live', 'restart']).catch('live'),
   pendingRestart: z.boolean().optional(),
   rules: z.array(RoutingRuleSchema).nullable().transform((v) => v ?? []),

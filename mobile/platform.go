@@ -60,6 +60,7 @@ func (p platform) RulesChanged() {
 	if p.c.marks != nil {
 		p.c.marks.reload(p.c.db)
 	}
+	p.c.reroute()
 	p.c.restack()
 }
 
@@ -143,6 +144,13 @@ func (p platform) HoldAutostart(on bool) error { return nil }
 
 func (p platform) AutostartHeld() bool { return false }
 
+// Wire — управляющий канал мобильного клиента. Пока он живёт на старом
+// транспорте: перевод Android идёт отдельным шагом, а сейчас узел ему не
+// отвечает через этот путь и запросы просто не проходят.
+
+// hold просит систему поднять устройство под уже полученный адрес. Порядок здесь
+// важен: адрес выдаёт узел, и настроить интерфейс раньше дозвона значит взять
+// адрес наугад — тогда узел отбрасывает датаграммы как пришедшие не с того адреса.
 func (c *Client) hold(assigned netip.Prefix, mtu int) (int, error) {
 	direct, allowed, carveOut := c.appLists()
 

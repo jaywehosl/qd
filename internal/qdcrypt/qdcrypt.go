@@ -1,3 +1,8 @@
+// Package qdcrypt держит сетевой ключ и то, что из него считается.
+//
+// Своего шифрования здесь больше нет: кадры на chacha20 нужны были, пока
+// управление и трафик ехали UDP-датаграммами. Поверх QUIC всё уже зашифровано
+// TLS, а границы сообщений даёт сам транспорт.
 package qdcrypt
 
 import (
@@ -7,6 +12,7 @@ import (
 
 const KeySize = 32
 
+// Key — сетевой ключ: им клиент открывает дверь управления на узле.
 type Key [KeySize]byte
 
 func RandomKey() (Key, error) {
@@ -15,6 +21,7 @@ func RandomKey() (Key, error) {
 	return k, err
 }
 
+// Exit — куда клиент просит выпустить трафик.
 type Exit byte
 
 const (
@@ -23,6 +30,8 @@ const (
 	ExitEgress  Exit = 2
 )
 
+// SessionID — номер сессии клиента, посчитанный из ключа подписки. Считается
+// так же, как считался на XDP, поэтому панель и присутствие видят те же числа.
 func SessionID(key string) uint32 {
 	h := fnv.New32a()
 	h.Write([]byte(key))

@@ -13,12 +13,14 @@ export default function TerminalBootLoader({ onComplete }: TerminalBootLoaderPro
   }, [onComplete]);
 
   useEffect(() => {
+    // Session check to skip loader if already shown in this session
     const isLoaded = sessionStorage.getItem('antigravity_boot_loaded');
     if (isLoaded === 'true') {
       onCompleteRef.current();
       return;
     }
 
+    // Canvas particle system (Google Antigravity theme)
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -34,6 +36,7 @@ export default function TerminalBootLoader({ onComplete }: TerminalBootLoaderPro
     };
     window.addEventListener('resize', handleResize);
 
+    // Particles config
     const particlesCount = Math.min(60, Math.floor((width * height) / 20000));
     const particles: Array<{
       x: number;
@@ -53,11 +56,13 @@ export default function TerminalBootLoader({ onComplete }: TerminalBootLoaderPro
       });
     }
 
+    // Draw frame loop
     const animate = () => {
       ctx.clearRect(0, 0, width, height);
       ctx.fillStyle = '#f8f9fc';
       ctx.fillRect(0, 0, width, height);
 
+      // Draw grid points (Google Antigravity Dot Grid)
       ctx.fillStyle = 'rgba(50, 121, 249, 0.05)';
       const gridSize = 40;
       for (let x = 0; x < width; x += gridSize) {
@@ -68,11 +73,13 @@ export default function TerminalBootLoader({ onComplete }: TerminalBootLoaderPro
         }
       }
 
+      // Draw particles & links
       for (let i = 0; i < particlesCount; i++) {
         const p1 = particles[i];
         p1.x += p1.vx;
         p1.y += p1.vy;
 
+        // Boundaries check
         if (p1.x < 0 || p1.x > width) p1.vx *= -1;
         if (p1.y < 0 || p1.y > height) p1.vy *= -1;
 
@@ -81,6 +88,7 @@ export default function TerminalBootLoader({ onComplete }: TerminalBootLoaderPro
         ctx.fillStyle = 'rgba(50, 121, 249, 0.4)';
         ctx.fill();
 
+        // Connect particles if close
         for (let j = i + 1; j < particlesCount; j++) {
           const p2 = particles[j];
           const dist = Math.hypot(p1.x - p2.x, p1.y - p2.y);
@@ -100,6 +108,7 @@ export default function TerminalBootLoader({ onComplete }: TerminalBootLoaderPro
 
     animate();
 
+    // Fade and complete timeouts
     const fadeTimeout = setTimeout(() => {
       setFadeClass('fade-out');
     }, 2200);
@@ -117,6 +126,7 @@ export default function TerminalBootLoader({ onComplete }: TerminalBootLoaderPro
     };
   }, []);
 
+  // If already shown in session, render nothing
   const isLoaded = sessionStorage.getItem('antigravity_boot_loaded');
   if (isLoaded === 'true') return null;
 

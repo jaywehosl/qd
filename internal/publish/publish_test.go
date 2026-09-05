@@ -10,13 +10,18 @@ import (
 	"github.com/jaywehosl/quic-diver/internal/netstate"
 )
 
+// fakeTransport records everything it is asked to do and can be told to fail a
+// given node — which is the only way to test a torn rollout without tearing a
+// real network.
 type fakeTransport struct {
 	mu sync.Mutex
 
 	unreachable map[int]bool
 	pushErr     map[int]error
 	applyErr    map[int]error
-	pushFlaky   map[int]int
+	// Fail the first N attempts for a node, then succeed. Models a transfer
+	// that breaks and is retried.
+	pushFlaky map[int]int
 
 	pushed  []call
 	applied []call
@@ -76,6 +81,9 @@ func (f *fakeTransport) Apply(_ context.Context, id, rev int, sum string) error 
 	if err := f.applyErr[id]; err != nil {
 		return err
 	}
+	// A node activates only what it actually holds. Asking it to apply a
+	// revision it never staged is the failure the three phases exist to make
+	// impossible, so the fake refuses it loudly rather than pretending.
 	if f.staged[id] != sum {
 		return errors.New("nothing staged with that checksum")
 	}
@@ -127,6 +135,8 @@ func fixture() *netstate.State {
 	}
 }
 
+// Tests run with no backoff; the retry COUNT is what matters and waiting three
+// seconds nine times to observe it would be a slow way to learn nothing.
 func fast() Options { return Options{Attempts: 3, Backoff: 1} }
 
 func mustPlan(t *testing.T, s *netstate.State, tr Transport) *Job {
@@ -184,6 +194,9 @@ func TestHappyPathStagesThenApplies(t *testing.T) {
 	}
 }
 
+// A disabled node is not part of the network. It is not a target and it is not
+// "skipped" either — skipped means a node that should have got this and could
+// not be reached.
 func TestDisabledNodeIsNotATarget(t *testing.T) {
 	tr := newFake()
 	j := mustPlan(t, fixture(), tr)
@@ -196,6 +209,7 @@ func TestDisabledNodeIsNotATarget(t *testing.T) {
 	}
 }
 
+// The invariant the whole three-phase split exists for.
 func TestApplyNeverTouchesANodeThatDidNotStage(t *testing.T) {
 	tr := newFake()
 	tr.pushErr[2] = errors.New("control channel reset")
@@ -237,6 +251,8 @@ func TestUnreachableIsSkippedNotFailed(t *testing.T) {
 	}
 }
 
+// A channel that closes between plan and push has to be caught by the push, not
+// by the picture drawn a moment earlier.
 func TestChannelLostAfterPlanIsStillSkipped(t *testing.T) {
 	tr := newFake()
 	j := mustPlan(t, fixture(), tr)
@@ -250,6 +266,7 @@ func TestChannelLostAfterPlanIsStillSkipped(t *testing.T) {
 	if n := stateOf(j.Status(), 2); n.State != StateSkipped {
 		t.Fatalf("node 2 is %s, want skipped", n.State)
 	}
+	// Skipping must not burn the retries: the node is not there.
 	if got := tr.pushCount(2); got != 1 {
 		t.Fatalf("an absent node was retried %d times", got)
 	}
@@ -277,6 +294,9 @@ func TestFailedPushIsRetriedThenReported(t *testing.T) {
 	}
 }
 
+// A transfer that breaks and then succeeds is the ordinary case the doc
+// describes: the incomplete file simply never becomes complete, and sending it
+// again finishes the job.
 func TestFlakyPushSucceedsOnRetry(t *testing.T) {
 	tr := newFake()
 	tr.pushFlaky[2] = 2
@@ -302,6 +322,7 @@ func TestFlakyPushSucceedsOnRetry(t *testing.T) {
 	}
 }
 
+// "Retry N failed" must not re-ship to nodes already holding the revision.
 func TestRetryTouchesOnlyTheFailures(t *testing.T) {
 	tr := newFake()
 	tr.pushErr[2] = errors.New("reset")
@@ -330,6 +351,8 @@ func TestRetryTouchesOnlyTheFailures(t *testing.T) {
 	}
 }
 
+// A blanket push must not spend retries on nodes known to be absent, but naming
+// one explicitly is the operator saying "try it anyway".
 func TestSkippedNodeIsRetriedOnlyWhenNamed(t *testing.T) {
 	tr := newFake()
 	tr.unreachable[3] = true
@@ -367,6 +390,8 @@ func TestApplyFailureLeavesTheNodeFailedNotApplied(t *testing.T) {
 	}
 }
 
+// The checksum that travels with apply must be the one taken of the exact bytes
+// pushed, or the node's guard against a partial transfer guards nothing.
 func TestApplyCarriesTheChecksumOfWhatWasPushed(t *testing.T) {
 	tr := newFake()
 	j := mustPlan(t, fixture(), tr)
@@ -390,6 +415,8 @@ func TestApplyCarriesTheChecksumOfWhatWasPushed(t *testing.T) {
 	}
 }
 
+// Every node gets a different configuration, so a checksum shared between two of
+// them would mean the projection collapsed them into one.
 func TestEachNodeGetsItsOwnChecksum(t *testing.T) {
 	j := mustPlan(t, fixture(), newFake())
 	seen := map[string]int{}
@@ -401,6 +428,8 @@ func TestEachNodeGetsItsOwnChecksum(t *testing.T) {
 	}
 }
 
+// Status is polled while the rollout runs; it must never hand out the live
+// structs or the caller can read a node mid-write.
 func TestStatusIsASnapshot(t *testing.T) {
 	tr := newFake()
 	j := mustPlan(t, fixture(), tr)
@@ -421,6 +450,9 @@ func TestStatusIsASnapshot(t *testing.T) {
 	}
 }
 
+// The status endpoint is polled while the rollout is in flight, which is the
+// one moment the job is being written to from several goroutines at once. Under
+// -race this is what proves the lock covers the whole of it.
 func TestStatusCanBePolledDuringARollout(t *testing.T) {
 	tr := newFake()
 	tr.pushFlaky[1] = 1
@@ -499,6 +531,8 @@ func TestCancelledContextStopsRetrying(t *testing.T) {
 	if n := stateOf(j.Status(), 2); n.State != StateFailed {
 		t.Fatalf("node 2 is %s after a cancelled push", n.State)
 	}
+	// One attempt, then the cancelled context cuts the wait short instead of
+	// sitting on an hour-long backoff.
 	if got := tr.pushCount(2); got != 1 {
 		t.Fatalf("a cancelled push made %d attempts", got)
 	}

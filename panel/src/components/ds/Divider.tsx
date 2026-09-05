@@ -5,6 +5,7 @@ export interface DividerProps {
   className?: string;
 }
 
+/** Horizontal rule, optionally with a centered label. */
 export function Divider({ children, className = '' }: DividerProps) {
   const cls = ['ds-divider', children != null && 'ds-divider--labelled', className].filter(Boolean).join(' ');
   return (

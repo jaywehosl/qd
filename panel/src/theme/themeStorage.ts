@@ -1,3 +1,11 @@
+/**
+ * Theme persistence — server-canonical with a localStorage fallback.
+ *
+ * Canonical store is the server (`GET /theme.json`, `POST /panel/setting/theme`).
+ * localStorage is kept as a fast cache (no-flash on boot) AND as a graceful
+ * fallback when the backend doesn't expose the endpoints yet (e.g. dev proxying
+ * to an older panel) — so the Appearance page stays usable everywhere.
+ */
 import { applyTheme, applyThemeMode, DEFAULT_THEME, type PanelTheme } from './themeApply';
 import { HttpUtil } from '@/utils';
 
@@ -18,6 +26,7 @@ function cacheLocal(theme: PanelTheme): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(theme));
   } catch {
+    /* ignore quota / disabled storage */
   }
 }
 
@@ -25,9 +34,11 @@ export function clearTheme(): void {
   try {
     localStorage.removeItem(STORAGE_KEY);
   } catch {
+    /* ignore */
   }
 }
 
+/** Read the server theme. Returns null when unreachable / not a theme object. */
 export async function fetchServerTheme(): Promise<PanelTheme | null> {
   try {
     const res = await fetch(basePath() + 'theme.json', { cache: 'no-cache' });
@@ -39,12 +50,23 @@ export async function fetchServerTheme(): Promise<PanelTheme | null> {
   }
 }
 
+/** Persist a theme: cache locally immediately, then push to the server. Returns
+ *  true when the server accepted it (false → kept locally only). */
 export async function saveTheme(theme: PanelTheme): Promise<boolean> {
   cacheLocal(theme);
   try {
+    // MUST send as JSON: the axios interceptor qs.stringify()s any non-JSON
+    // body into form-urlencoded, but the server reads this endpoint as raw JSON
+    // (ShouldBindBodyWith(binding.JSON)). Without this header the nested theme
+    // object arrived as `mode=…&radius=…`, failed JSON validation, and the save
+    // silently fell back to localStorage-only (panelTheme stayed "{}").
     const msg = await HttpUtil.post('/panel/setting/theme', theme, {
       silent: true,
       headers: { 'Content-Type': 'application/json' },
+      // On the login screen the user isn't authenticated yet, so this 401s —
+      // that must NOT trigger the global session-expired page reload (it caused
+      // the login "flash/reload on theme switch"). The theme still applies +
+      // caches locally; it persists to the server once they're logged in.
       skipAuthRedirect: true,
     });
     return Boolean(msg && (msg as { success?: boolean }).success);
@@ -53,6 +75,8 @@ export async function saveTheme(theme: PanelTheme): Promise<boolean> {
   }
 }
 
+/** Upload a custom background image / font; returns its asset id (referenced
+ *  from the theme and served via /theme/asset/<id>), or null on failure. */
 export async function uploadThemeAsset(kind: 'image' | 'font', file: File): Promise<string | null> {
   const fd = new FormData();
   fd.append('kind', kind);
@@ -69,12 +93,17 @@ export async function uploadThemeAsset(kind: 'image' | 'font', file: File): Prom
   }
 }
 
+/** Apply the theme at boot with no flash. Prefers window.X_UI_THEME — the
+ *  server copy the Go handler inlines into the HTML before any JS runs — then
+ *  the local cache, then (only if neither) a server fetch. */
 export function bootstrapTheme(): void {
   const injected = typeof window !== 'undefined' ? window.X_UI_THEME : undefined;
   const hasInjected = injected && Object.keys(injected).length > 0;
   const local = loadTheme();
   const hasLocal = Object.keys(local).length > 0;
 
+  // Fresh install (no server-injected and no cached theme) → Community Panel
+  // factory defaults instead of the bare token baseline.
   const theme = hasInjected ? { ...injected } : (hasLocal ? { ...local } : { ...DEFAULT_THEME });
   if (local.mode) {
     theme.mode = local.mode;
@@ -87,7 +116,7 @@ export function bootstrapTheme(): void {
 
   if (hasInjected) {
     cacheLocal(theme);
-    return;
+    return; // the inlined theme IS the server copy — no fetch needed
   }
 
   void fetchServerTheme().then((srv) => {

@@ -1,3 +1,9 @@
+// Package decoy — «under construction» сайт на :443.
+//
+// Отдаётся всем, кто пришёл на узел без валидного токена (см. auth): снаружи узел
+// выглядит как обычный HTTPS-сайт-заглушка. Тот же HTTP-слой переиспользуется
+// клиентской частью для локальной веб-панели настроек и (по admin-токену)
+// панели управления узлом.
 package decoy
 
 import "net/http"
@@ -17,6 +23,7 @@ const page = `<!doctype html>
  <p>This site is being set up. Please check back later.</p>
 </main></body></html>`
 
+// Handler возвращает http.Handler decoy-страницы.
 func Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

@@ -1,5 +1,10 @@
 //go:build linux || android
 
+// Package tun — источник сырых IP-пакетов поверх TUN-устройства.
+//
+// На телефоне дескриптор приходит готовым: его открывает VpnService.Builder и
+// передаёт внутрь. Пакеты те же, что отдаёт WinDivert на Windows, поэтому
+// контракт packet.Source общий — движок не знает, откуда они пришли.
 package tun
 
 import (
@@ -15,6 +20,7 @@ import (
 	"github.com/jaywehosl/quic-diver/internal/qcli/packet"
 )
 
+// Source читает и пишет сырые IP через дескриптор TUN.
 type Source struct {
 	fd  int
 	mtu int
@@ -25,15 +31,22 @@ type Source struct {
 	closed bool
 	busy   sync.WaitGroup
 
+	// Батч живёт до следующего Recv, как того требует контракт: буфер
+	// переиспользуется, копирует тот, кому данные нужны дольше.
 	buf   []byte
 	batch []packet.Packet
 }
 
 const (
+	// Пачка амортизирует переходы в ядро. Больше держать нет смысла: на телефоне
+	// в очереди TUN редко стоит больше десятка пакетов сразу.
 	maxBatch = 32
 	slot     = 65600
 )
 
+// Open берёт дескриптор, уже открытый системой, и переводит его в неблокирующий
+// режим: иначе добрать второй пакет из очереди нельзя — чтение повисло бы до
+// следующего, и батч всегда был бы из одного.
 func Open(fd int, mtu int) (*Source, error) {
 	if fd < 0 {
 		return nil, errors.New("tun: no descriptor")
@@ -98,6 +111,8 @@ func (s *Source) Recv(ctx context.Context) ([]packet.Packet, error) {
 	}
 }
 
+// wait ждёт, пока в устройстве появятся пакеты. Ждём короткими шагами, чтобы
+// закрытый контекст замечался сразу, а не висел до первого пакета.
 func (s *Source) wait(ctx context.Context) error {
 	fds := []unix.PollFd{{Fd: int32(s.fd), Events: unix.POLLIN}}
 	for {
@@ -144,6 +159,8 @@ func (s *Source) Send(pkts []packet.Packet) error {
 				continue
 			}
 			if errors.Is(err, unix.EAGAIN) || errors.Is(err, unix.EWOULDBLOCK) {
+				// Очередь устройства полна: пакет теряем, как теряет его сеть.
+				// Ждать здесь значит держать весь путь из-за одного пакета.
 				s.dropped.Add(1)
 				break
 			}

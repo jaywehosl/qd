@@ -55,6 +55,7 @@ export class WebSocketClient {
     }
     this.isConnected = false;
 
+    // Clear throttled timers
     for (const state of this.throttledEmits.values()) {
       if (state.timer) clearTimeout(state.timer);
     }
@@ -167,6 +168,7 @@ export class WebSocketClient {
       }
       state.lastArgs = args;
       if (!state.timer) {
+        // Dispatch immediately on the first message
         this.#dispatch(event, ...args);
         state.timer = setTimeout(() => {
           if (state && state.lastArgs.length > 0) {
@@ -174,7 +176,7 @@ export class WebSocketClient {
             state.lastArgs = [];
           }
           if (state) state.timer = null;
-        }, 100);
+        }, 100); // 100ms throttle limit (~10 FPS max update rate)
       }
       return;
     }

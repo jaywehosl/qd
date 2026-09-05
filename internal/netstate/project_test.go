@@ -7,6 +7,9 @@ import (
 	"testing"
 )
 
+// A network with both roles, two groups that differ on exit rights, and a
+// client on each — small enough to reason about, wide enough that a projection
+// bug has somewhere to show.
 func fixture() *State {
 	return &State{
 		Revision: 42,
@@ -46,6 +49,9 @@ func mustProject(t *testing.T, id int, s *State) *NodeConfig {
 	return cfg
 }
 
+// The invariant the whole split exists for. Checked against the ENCODED form,
+// not the struct: what reaches a node is bytes, and a uuid that leaked through
+// some field added later would still be caught here.
 func TestEgressNeverLearnsAnyClient(t *testing.T) {
 	s := fixture()
 	for _, n := range s.Nodes {
@@ -67,6 +73,8 @@ func TestEgressNeverLearnsAnyClient(t *testing.T) {
 	}
 }
 
+// "No projection contains another node's key" means: only itself and the peers
+// its role is allowed to dial or admit.
 func TestNoProjectionCarriesAStrangerKey(t *testing.T) {
 	s := fixture()
 	for _, n := range s.Nodes {
@@ -77,6 +85,8 @@ func TestNoProjectionCarriesAStrangerKey(t *testing.T) {
 
 		allowed := map[string]bool{}
 		for _, p := range s.Nodes {
+			// A node is told about the opposite role only, and never about a
+			// disabled one.
 			if p.Enable && p.Role != n.Role {
 				allowed[p.Address] = true
 			}
@@ -107,6 +117,9 @@ func TestDisabledNodeIsNotProjectable(t *testing.T) {
 	}
 }
 
+// A client whose group holds no entrypoint on this node cannot dial it, so it
+// must not appear in its config — one seized ingress should not be worth the
+// whole roster.
 func TestIngressOnlyLearnsClientsThatCanReachIt(t *testing.T) {
 	s := fixture()
 
@@ -154,6 +167,8 @@ func TestDisabledEntrypointsAreNotServed(t *testing.T) {
 	}
 }
 
+// An ingress that can chain to an exit encapsulates twice; one that cannot,
+// once. Clamping by a single hop on a chaining node black-holes large packets.
 func TestEncapOverheadCountsTheHopsActuallyPossible(t *testing.T) {
 	s := fixture()
 	if got := mustProject(t, 1, s).Self.EncapOverhead; got != 2*EncapLen {
@@ -163,6 +178,7 @@ func TestEncapOverheadCountsTheHopsActuallyPossible(t *testing.T) {
 		t.Fatalf("egress overhead = %d, want %d", got, EncapLen)
 	}
 
+	// With every exit disabled the same ingress only ever encapsulates once.
 	for i := range s.Nodes {
 		if s.Nodes[i].Role == RoleEgress {
 			s.Nodes[i].Enable = false
@@ -188,6 +204,8 @@ func TestPeersCarryAddressOnlyWhereItIsDialled(t *testing.T) {
 		if p.Role != RoleIngress {
 			t.Fatalf("egress was given a %s peer", p.Role)
 		}
+		// An egress never dials out, so an address it cannot use is an address
+		// it should not hold.
 		if p.Address != "" || p.Port != 0 {
 			t.Fatalf("egress was given a dialable address for node %d", p.NodeID)
 		}
@@ -202,6 +220,8 @@ func TestDisabledPeerIsNotOffered(t *testing.T) {
 	}
 }
 
+// `apply` only activates a revision whose checksum matches, so the same state
+// has to encode to the same bytes every time.
 func TestProjectionIsByteStable(t *testing.T) {
 	for _, id := range []int{1, 2, 3} {
 		var first []byte
@@ -221,6 +241,8 @@ func TestProjectionIsByteStable(t *testing.T) {
 	}
 }
 
+// Order in the panel's tables is an accident of insertion; it must not reach
+// the wire, or a re-publish of unchanged config would look like a change.
 func TestInputOrderDoesNotChangeOutput(t *testing.T) {
 	a, err := json.Marshal(mustProject(t, 1, fixture()))
 	if err != nil {

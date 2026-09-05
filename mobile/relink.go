@@ -35,9 +35,14 @@ func (c *Client) NetworkChanged(tag string) {
 		return
 	}
 
+	// Сеть сменилась — переезжаем, а не пересобираем: сессия на узле остаётся
+	// той же, живые соединения в приложениях не рвутся.
 	go c.migrate(context.Background())
 }
 
+// relink пересобирает туннель целиком. Нужен там, где переезд не поможет: набор
+// приложений в VpnService задаётся при создании, поэтому смена правил требует
+// нового устройства, а не нового пути.
 func (c *Client) relink() {
 	if !relinking.CompareAndSwap(false, true) {
 		again.Store(true)

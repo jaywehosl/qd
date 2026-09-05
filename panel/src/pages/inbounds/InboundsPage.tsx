@@ -86,6 +86,7 @@ export default function InboundsPage() {
   } = useInbounds();
 
   interface ConfirmConfig {
+    // The reset confirm carries the node as a pill, so the title is markup.
     title: ReactNode;
     content: string;
     okText?: string;
@@ -128,6 +129,8 @@ export default function InboundsPage() {
   }, [dbInbounds, nodesById, t]);
 
   const [role, setRole] = useState('ingress');
+  // A role can empty out while it is the one on screen, so fall back rather
+  // than render a switch pointing at nothing.
   const shownRole = byRole.find((g) => g.role === role) ?? byRole[0];
 
   const hasActiveNode = useMemo(
@@ -354,6 +357,8 @@ export default function InboundsPage() {
   }), [refresh, t]);
 
   const confirmResetTraffic = useCallback((dbInbound: DBInbound) => {
+    // Name the node and the port rather than the stored remark: that label is a
+    // leftover nobody edits any more, so it can still name a renamed node.
     const owner = nodesById.get((dbInbound as unknown as { nodeId?: number }).nodeId ?? 0);
     const where = owner?.name || owner?.address || '—';
     setConfirm({
@@ -436,6 +441,9 @@ export default function InboundsPage() {
 
 
   const onRowAction = useCallback(async ({ key, dbInbound }: { key: RowAction; dbInbound: DBInbound }) => {
+    // Actions that touch per-client secrets (uuid, password, flow, ...) need
+    // the full payload that the slim list view does not ship. Hydrate first
+    // and then operate on the rehydrated record.
     const hydratingKeys: RowAction[] = ['edit', 'showInfo', 'qrcode', 'export', 'subs', 'clipboard', 'clone', 'attachClients', 'addToGroup'];
     let target = dbInbound;
     if (hydratingKeys.includes(key)) {

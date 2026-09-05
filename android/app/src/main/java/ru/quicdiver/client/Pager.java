@@ -95,6 +95,8 @@ public class Pager extends HorizontalScrollView {
         settle(velocity);
     }
 
+    // A page can hold a vertical scroller, and that child grabs the gesture
+    // first. Claim anything that moves sideways before it gets the chance.
     @Override
     public boolean onInterceptTouchEvent(MotionEvent event) {
         switch (event.getActionMasked()) {

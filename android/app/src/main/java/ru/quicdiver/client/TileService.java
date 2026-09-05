@@ -71,7 +71,7 @@ public class TileService extends android.service.quicksettings.TileService {
         boolean on = Core.up();
         tile.setState(on ? Tile.STATE_ACTIVE : Tile.STATE_INACTIVE);
         tile.setIcon(Icon.createWithResource(this, R.drawable.ic_tile));
-        tile.setLabel("QUIC Diver");
+        tile.setLabel("qd");
         tile.setSubtitle(on ? "вкл" : "выкл");
         tile.updateTile();
     }

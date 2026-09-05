@@ -142,9 +142,12 @@ func (a *API) draft(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) settings(w http.ResponseWriter, r *http.Request) {
 	current := map[string]any{
-		"pageSize":        50,
-		"timeLocation":    time.Local.String(),
-		"datepicker":      "gregorian",
+		"pageSize":     50,
+		"timeLocation": time.Local.String(),
+		"datepicker":   "gregorian",
+		// The same window the summary warns by, in days. Reporting 0 here left
+		// the panel recomputing the counts with no warning window at all, so a
+		// client about to expire never showed up as depleting.
 		"expireDiff":      float64(a.expiryWarning()) / (24 * 60 * 60 * 1000),
 		"trafficDiff":     0,
 		"remarkModel":     "-ieo",
@@ -200,6 +203,9 @@ func (a *API) settings(w http.ResponseWriter, r *http.Request) {
 				sendFail(w, err)
 				return
 			}
+			// Правку узел мог принять, но применить лишь после перезапуска. Тогда
+			// дожидаемся, пока он поднимется с ней, и отвечаем по факту: вступило
+			// или нет. Иначе «сохранено» значило бы всего лишь «записано в базу».
 			for _, one := range written {
 				if !one.Restarting {
 					continue
@@ -372,6 +378,9 @@ type entryView struct {
 	err  error
 }
 
+// An entrypoint lives on one node, so its traffic is what that node carried for
+// the clients reachable through it — not the fleet-wide figure the client rows
+// show. Pass node 0 to fall back to the whole network.
 func (a *API) throughEntry(entry int, node int) ([]map[string]any, float64, float64) {
 	clients, _, err := a.readClients()
 	if err != nil {
@@ -518,6 +527,8 @@ func (a *API) themeWrite(w http.ResponseWriter, r *http.Request) {
 	sendOK(w, theme)
 }
 
+// settleWait — сколько ждать возвращения узла с новой настройкой. Перезапуск
+// занимает около секунды, остальное — запас на медленную машину.
 const settleWait = 15 * time.Second
 
 func (a *API) carrying() map[int]int {

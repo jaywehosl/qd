@@ -49,6 +49,7 @@ export interface ClientQueryParams {
   page: number;
   pageSize: number;
   search?: string;
+  // CSV strings — frontend joins arrays on ',', backend splits the same way.
   filter?: string;
   protocol?: string;
   inbound?: string;
@@ -71,6 +72,10 @@ const DEFAULT_SUMMARY: ClientsSummary = {
 
 type ClientStatRow = ClientTraffic & { email?: string };
 
+// Mirror of the server's buildClientsSummary (web/service/client.go). The
+// client_stats WS event already carries every client's traffic, so the
+// summary card can be recomputed live from it instead of waiting for a list
+// refetch — keep the two in lockstep.
 export function computeClientsSummary(
   stats: ClientStatRow[],
   onlineSet: Set<string>,
@@ -85,11 +90,14 @@ export function computeClientsSummary(
   for (const c of stats) {
     const email = c.email;
     if (!email) continue;
+    // `total` here is what the client has used, not a quota — the model carries
+    // no traffic limit at all. Reading it as one marked every client depleted.
     const expired = (c.expiryTime || 0) > 0 && (c.expiryTime || 0) <= now;
     if (c.enable && onlineSet.has(email)) online.push(email);
     if (expired) { depleted.push(email); continue; }
     if (!c.enable) { deactive.push(email); continue; }
 
+    // Still carrying traffic: running out soon is a warning, not an exit.
     active += 1;
     const nearExpiry = (c.expiryTime || 0) > 0 && (c.expiryTime || 0) - now < expireDiffMs;
     if (nearExpiry) expiring.push(email);
@@ -145,6 +153,9 @@ export function useClients() {
   const queryClient = useQueryClient();
 
   const [query, setQueryState] = useState<ClientQueryParams>(DEFAULT_QUERY);
+  // setQuery shallow-compares so callers can pass a fresh object every render
+  // (the common React pattern) without triggering a re-fetch when nothing
+  // actually changed.
   const setQuery = useCallback((next: ClientQueryParams) => {
     setQueryState((prev) => {
       if (
@@ -205,6 +216,9 @@ export function useClients() {
   const allGroups = listQuery.data?.groups ?? [];
   const fetched = listQuery.data !== undefined || listQuery.isError;
   const fetchError = listQuery.error ? (listQuery.error as Error).message : '';
+  // `placeholderData: keepPreviousData` keeps the previous page on screen while
+  // a new query runs, so only a pending first load means "nothing to render".
+  // Blurring on every background refetch makes header-click sorting flicker.
   const loading = listQuery.isPending;
   const refreshing = listQuery.isFetching;
 
@@ -234,6 +248,10 @@ export function useClients() {
   const trafficDiff = ((defaults.trafficDiff as number) ?? 0) * 1073741824;
   const pageSize = (defaults.pageSize as number) ?? 0;
 
+  // Live summary: the client_stats WS event refreshes allClientStats every few
+  // seconds, so the top counters track reality without a page refresh. Falls
+  // back to the server-computed summary until the first event lands, and keeps
+  // the server's authoritative total for the headline count.
   const [allClientStats, setAllClientStats] = useState<ClientStatRow[]>([]);
   const summary = useMemo<ClientsSummary>(() => {
     const serverSummary = listQuery.data?.summary ?? DEFAULT_SUMMARY;
@@ -242,6 +260,12 @@ export function useClients() {
     return { ...live, total: serverSummary.total || live.total };
   }, [allClientStats, onlines, expireDiff, trafficDiff, listQuery.data?.summary]);
 
+  // Client mutations (add/update/remove/attach/detach/resetTraffic/…) all
+  // mutate inbound rows server-side too — adding a client appends to
+  // settings.clients on each attached inbound, the slim list's per-inbound
+  // client count is derived from that. Invalidate both buckets so the
+  // Inbounds page and any open edit modal pick up the new shape without
+  // a manual reload.
   const invalidateAll = useCallback(
     () => {
       markLocalInvalidate();
@@ -453,6 +477,8 @@ export function useClients() {
     return update(client.email, payload);
   }, [hydrate, update]);
 
+  // WS-driven in-place merges. Page wires these via useWebSocket; the bridge
+  // covers coarse 'invalidate' and 'inbounds' events centrally.
   const queryRef = useRef(query);
   queryRef.current = query;
 

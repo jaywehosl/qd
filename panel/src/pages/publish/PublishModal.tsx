@@ -31,6 +31,7 @@ interface PublishModalProps {
 
 const PHASES: Phase[] = ['plan', 'push', 'apply'];
 
+// A node is done with the current phase once it reaches one of these.
 const SETTLED: Record<Phase, string[]> = {
   plan: ['planned'],
   push: ['staged', 'failed'],
@@ -56,6 +57,8 @@ export default function PublishModal({ open, draft, onClose }: PublishModalProps
   const [skipped, setSkipped] = useState<Skipped[]>([]);
   const [running, setRunning] = useState(false);
 
+  // Reopening mid-run must land on the phase the rollout is actually in, not
+  // restart it — the operator is allowed to close this dialog and come back.
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
@@ -138,8 +141,10 @@ export default function PublishModal({ open, draft, onClose }: PublishModalProps
     if (phase === 'apply') { setPhase('done'); onClose(); }
   }, [phase, runPush, runApply, onClose]);
 
+  // Phase 1 fires as soon as the dialog opens on a fresh run.
   useEffect(() => {
     if (open && phase === 'plan' && revision === 0 && !running) void runPlan();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, phase, revision]);
 
   const stepIndex = PHASES.indexOf(phase === 'done' ? 'apply' : phase);

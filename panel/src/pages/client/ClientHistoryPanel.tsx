@@ -30,6 +30,10 @@ interface MetricDef {
   series: { field: string; name: string; stroke: string }[];
 }
 
+// One tab per line the tunnel already prints, split by where the answer lies:
+// 'link' is the network between here and the node, 'sending' is this machine
+// failing to push. Reading them the other way round sends you fixing the
+// wrong end.
 const METRICS: MetricDef[] = [
   {
     key: 'throughput', label: 'client.history.tab.throughput', icon: <GlobalOutlined />, unit: 'bits',

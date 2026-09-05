@@ -16,13 +16,13 @@ BEGIN
   BEGIN
     BLOCK "040904B0"
     BEGIN
-      VALUE "CompanyName", "QuicDiver"
-      VALUE "FileDescription", "QuicDiver"
+      VALUE "CompanyName", "qd"
+      VALUE "FileDescription", "qd"
       VALUE "FileVersion", "1.0.0.0"
       VALUE "InternalName", "qd-tun"
-      VALUE "LegalCopyright", "QuicDiver"
+      VALUE "LegalCopyright", "qd"
       VALUE "OriginalFilename", "qd-tun.exe"
-      VALUE "ProductName", "QuicDiver"
+      VALUE "ProductName", "qd"
       VALUE "ProductVersion", "1.0.0.0"
     END
   END

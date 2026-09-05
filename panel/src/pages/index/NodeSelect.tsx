@@ -9,6 +9,7 @@ interface NodeSelectProps {
   empty?: string;
 }
 
+/** Row of node pills, one active. Drives which node a modal reads from. */
 export default function NodeSelect({ nodes, value, onChange, empty }: NodeSelectProps) {
   if (nodes.length === 0) return <div className="node-select__empty">{empty}</div>;
   return (

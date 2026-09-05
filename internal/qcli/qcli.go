@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -27,6 +28,7 @@ import (
 type Options struct {
 	Endpoints []string
 	Token     string
+	Device    string
 	Route     string
 	MTU       int
 	Brutal    int
@@ -49,9 +51,14 @@ type Tunnel struct {
 
 	meter hybrid.Meter
 
-	route atomic.Pointer[string]
+	route    atomic.Pointer[string]
+	stackNow atomic.Pointer[netstack.Stack]
+	taken    sync.Map
 }
 
+// Dial поднимает туннель гонкой: запросы уходят ко ВСЕМ точкам входа сразу,
+// побеждает та, что первой отдала адрес, остальные закрываются немедленно —
+// чтобы узел не держал соединение, по которому не пойдёт трафик.
 func Dial(ctx context.Context, opts Options) (*Tunnel, error) {
 	if opts.MTU <= 0 {
 		opts.MTU = 1500
@@ -100,14 +107,14 @@ func Dial(ctx context.Context, opts Options) (*Tunnel, error) {
 		}(endpoint)
 	}
 
-	var last error
+	refused := []string{}
 	for range opts.Endpoints {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case got := <-line:
 			if got.err != nil {
-				last = got.err
+				refused = append(refused, got.err.Error())
 				continue
 			}
 			fmt.Printf("race     %s answered first of %d in %d ms\n",
@@ -116,12 +123,13 @@ func Dial(ctx context.Context, opts Options) (*Tunnel, error) {
 		}
 	}
 
-	if last == nil {
-		last = fmt.Errorf("no entrypoint answered")
+	if len(refused) == 0 {
+		return nil, fmt.Errorf("no entrypoint answered")
 	}
-	return nil, last
+	return nil, fmt.Errorf("no entrypoint answered: %s", strings.Join(refused, "; "))
 }
 
+// reach — один забег: полный дозвон до готового туннеля с назначенным адресом.
 func reach(ctx context.Context, opts Options, endpoint string) (*Tunnel, error) {
 	host, _, err := net.SplitHostPort(endpoint)
 	if err != nil {
@@ -132,7 +140,7 @@ func reach(ctx context.Context, opts Options, endpoint string) (*Tunnel, error) 
 	tlsConf := &tls.Config{ServerName: host}
 	authURL := "https://" + endpoint + qsrv.AuthPath
 
-	client, _, err := cip.DialAuth(ctx, endpoint, tmpl, tlsConf, opts.Token, opts.Route, authURL, opts.Keep)
+	client, _, err := cip.DialAuth(ctx, endpoint, tmpl, tlsConf, opts.Token, opts.Device, opts.Route, authURL, opts.Keep)
 	if err != nil {
 		return nil, err
 	}
@@ -175,10 +183,16 @@ func (t *Tunnel) Peers() []netip.Addr { return t.peers }
 
 func (t *Tunnel) Close() error { return t.client.Close() }
 
+// Alive — жива ли сессия туннеля.
 func (t *Tunnel) Alive() bool { return t.client.Alive() }
 
+// DatagramLimit — сколько байт полезной нагрузки помещается в датаграмму на
+// этом пути. Спрашиваем у QUIC заведомо большой датаграммой: в сеть она не
+// уходит, зато ошибка называет точный предел.
 func (t *Tunnel) DatagramLimit() int { return t.client.DatagramLimit() }
 
+// Ask спрашивает узел, жив ли путь и помнит ли он эту сессию. Маршрут посылается
+// текущий, поэтому вопрос ничего не меняет.
 func (t *Tunnel) Ask(ctx context.Context) error {
 	tag := ""
 	if held := t.route.Load(); held != nil {
@@ -207,18 +221,22 @@ func (t *Tunnel) SetRoute(tag string) {
 	fmt.Printf("route    exit is now %q\n", tag)
 }
 
+// Run несёт трафик, пока жив контекст. Источник пакетов даёт вызывающий: на
+// Windows это WinDivert, на телефоне — дескриптор от VpnService. Движку разницы
+// нет, оба отдают сырые IP-пакеты.
 func (t *Tunnel) Run(ctx context.Context, src packet.Source) error {
-	locals := localAddresses()
 	assigned := make([]netip.Addr, 0, len(t.assigned))
 	for _, p := range t.assigned {
 		assigned = append(assigned, p.Addr())
 	}
-	rewriter := nat.New(locals, assigned)
+	rewriter := nat.New(assigned)
 
 	ns, err := t.stack()
 	if err != nil {
 		return err
 	}
+	t.stackNow.Store(ns)
+	defer t.stackNow.Store(nil)
 
 	keepOut := append([]netip.Addr{}, t.peers...)
 	for _, p := range t.opts.Bypass {
@@ -239,6 +257,64 @@ func (t *Tunnel) Run(ctx context.Context, src packet.Source) error {
 	return eng.Run(ctx, src, t.client)
 }
 
+// Reroute обрывает флоу, чей выход изменился. Дорога выбирается один раз, при
+// дозвоне: смена правила без этого действовала только на новые соединения, а
+// открытые продолжали идти прежним выходом, пока приложение само их не закроет.
+func (t *Tunnel) Reroute() int {
+	ns := t.stackNow.Load()
+	if ns == nil {
+		return 0
+	}
+
+	alive := map[flowMark]struct{}{}
+	shut := ns.ShutFlows(func(f netstack.Flow) bool {
+		mark := flowMark{src: f.Src, dst: f.Dst, udp: f.UDP}
+		alive[mark] = struct{}{}
+		went, known := t.taken.Load(mark)
+		if !known {
+			return false
+		}
+		return t.exitOf(f) != went.(string)
+	})
+
+	t.taken.Range(func(key, _ any) bool {
+		if _, held := alive[key.(flowMark)]; !held {
+			t.taken.Delete(key)
+		}
+		return true
+	})
+
+	if shut > 0 {
+		fmt.Printf("route    %d flows dropped so the new rule takes hold now\n", shut)
+	}
+	return shut
+}
+
+// exitOf — каким выходом флоу поехал бы сейчас. Ровно то же решение, что
+// принимает дозвон, иначе сравнивать было бы не с чем.
+func (t *Tunnel) exitOf(f netstack.Flow) string {
+	tag := ""
+	if held := t.route.Load(); held != nil {
+		tag = *held
+	}
+	if t.opts.Exit != nil {
+		tag = t.opts.Exit(f.Src, f.Dst, f.UDP)
+	}
+	if tag == "" {
+		tag = qsrv.HereExit
+	}
+	return tag
+}
+
+func (t *Tunnel) tookFlow(f netstack.Flow, tag string) {
+	t.taken.Store(flowMark{src: f.Src, dst: f.Dst, udp: f.UDP}, tag)
+}
+
+type flowMark struct {
+	src, dst netip.AddrPort
+	udp      bool
+}
+
 func (t *Tunnel) stack() (*netstack.Stack, error) {
 	return netstack.NewWithMTU(t.dialer(), t.opts.MTU)
 }
@@ -249,6 +325,7 @@ func (t *Tunnel) dialer() routed {
 		route:    &t.route,
 		resolver: t.opts.Resolver,
 		exit:     t.opts.Exit,
+		took:     t.tookFlow,
 	}
 }
 
@@ -257,6 +334,7 @@ type routed struct {
 	route    *atomic.Pointer[string]
 	resolver string
 	exit     func(src, dst netip.AddrPort, udp bool) string
+	took     func(f netstack.Flow, tag string)
 }
 
 func (r routed) with(ctx context.Context) connectdial.Dialer {
@@ -273,6 +351,9 @@ func (r routed) with(ctx context.Context) connectdial.Dialer {
 	if tag == "" {
 		tag = qsrv.HereExit
 	}
+	if flow, ok := netstack.FlowOf(ctx); ok && r.took != nil {
+		r.took(flow, tag)
+	}
 	out.Header = http.Header{qsrv.HeaderRoute: []string{tag}}
 	return out
 }
@@ -286,39 +367,6 @@ func (r routed) DialUDP(ctx context.Context, dst netip.AddrPort) (net.Conn, erro
 		return net.Dial("udp", r.resolver)
 	}
 	return r.with(ctx).DialUDP(ctx, dst)
-}
-
-func localAddresses() []netip.Addr {
-	out := []netip.Addr{}
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		return out
-	}
-	for _, ifi := range ifaces {
-		if ifi.Flags&net.FlagUp == 0 || ifi.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-		addrs, err := ifi.Addrs()
-		if err != nil {
-			continue
-		}
-		for _, a := range addrs {
-			pfx, ok := a.(*net.IPNet)
-			if !ok {
-				continue
-			}
-			addr, ok := netip.AddrFromSlice(pfx.IP)
-			if !ok {
-				continue
-			}
-			addr = addr.Unmap()
-			if addr.IsLinkLocalUnicast() {
-				continue
-			}
-			out = append(out, addr)
-		}
-	}
-	return out
 }
 
 const resetDrain = 300 * time.Millisecond
@@ -380,4 +428,5 @@ func flowOf(pkt []byte) (src, dst netip.AddrPort, udp bool, ok bool) {
 		netip.AddrPortFrom(to, binary.BigEndian.Uint16(rest[2:4])), proto == 17, true
 }
 
+// Endpoint — точка входа, выигравшая гонку.
 func (t *Tunnel) Endpoint() string { return t.endpoint }

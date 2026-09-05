@@ -78,6 +78,9 @@ func (r *resolver) keepWarm(stop <-chan struct{}) {
 	}
 }
 
+// Rebind — след эпохи UDP: там резолвер держал свой сокет к узлу и его надо
+// было пересоздавать при смене сети. Теперь запрос уезжает общим QUIC-каналом,
+// и пересоздавать нечего.
 func (r *resolver) Rebind() {}
 
 func (r *resolver) Close() { r.conn.Close() }

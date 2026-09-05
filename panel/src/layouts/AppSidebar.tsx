@@ -47,14 +47,23 @@ export default function AppSidebar() {
   const { open: metricsOpen, toggle: toggleMetrics, notifyOpen, toggleNotify } = useMetricsPanel();
   const headerActions = useHeaderActions();
 
+  // Real unread count, shared with the NotificationsBar strip: live-condition
+  // alerts + active event notifications (sensors / log).
   const notifyActive = useSyncExternalStore(notifSubscribe, notifSnapshot, notifSnapshot).active;
   const notifyCount = useNotifications().length + notifyActive.length;
 
+  // Active nav highlight. Hash-section clicks (/#clients …) use history.pushState
+  // (so the page can smooth-scroll without a router nav) which does NOT update
+  // react-router's `hash` — so we track the clicked key explicitly and fall back
+  // to a route-derived key for cross-page navigation. clickedKey resets whenever
+  // the actual route (pathname) changes.
   const [clickedKey, setClickedKey] = useState<string | null>(null);
   useEffect(() => { setClickedKey(null); }, [pathname]);
   const routeKey = useMemo(() => (pathname === '/panel' ? '/panel/inbounds' : pathname), [pathname]);
   const activeKey = clickedKey ?? routeKey;
 
+  // The brand logo is the (slightly hidden) metrics status-bar toggle — it only
+  // opens/closes the bar and never navigates.
   const onLogoClick = useCallback(() => {
     toggleMetrics();
   }, [toggleMetrics]);
@@ -65,6 +74,8 @@ export default function AppSidebar() {
     { key: '/panel/groups', icon: 'groups', title: t('menu.groups') },
     { key: '/panel/nodes', icon: 'cluster', title: t('menu.nodes') },
     { key: '/panel/settings', icon: 'setting', title: t('menu.settings') },
+    // API Docs temporarily hidden from the header (the row was getting
+    // crowded); the /api-docs route still works.
   ], [t]);
 
   const navItems = tabs;

@@ -5,12 +5,14 @@ package windivert
 import (
 	"encoding/binary"
 	"fmt"
+	"net/netip"
 	"sync"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
 
+// Layer — слой перехвата WinDivert.
 type Layer uint8
 
 const (
@@ -21,6 +23,7 @@ const (
 	LayerReflect        Layer = 4
 )
 
+// Флаги WinDivertOpen.
 const (
 	FlagSniff     uint64 = 0x0001
 	FlagDrop      uint64 = 0x0002
@@ -30,28 +33,33 @@ const (
 	FlagFragments uint64 = 0x0020
 )
 
+// Параметры WinDivertSetParam.
 const (
 	ParamQueueLength uint32 = 0
 	ParamQueueTime   uint32 = 1
 	ParamQueueSize   uint32 = 2
 )
 
+// Shutdown-режимы.
 const (
 	ShutdownRecv uint32 = 0x1
 	ShutdownSend uint32 = 0x2
 	ShutdownBoth uint32 = 0x3
 )
 
+// Константы драйвера.
 const (
-	BatchMax = 0xFF
-	MTUMax   = 40 + 0xFFFF
-	addrSize = 80
+	BatchMax = 0xFF        // макс. пакетов за один RecvEx/SendEx (arch6)
+	MTUMax   = 40 + 0xFFFF // макс. размер одного пакета
+	addrSize = 80          // sizeof(WINDIVERT_ADDRESS)
 )
 
+// Address — Go-зеркало WINDIVERT_ADDRESS (80 байт). Битовые поля в word разбираем
+// вручную; union держим сырыми байтами и читаем по слою.
 type Address struct {
 	Timestamp int64
-	word      uint32
-	_         uint32
+	word      uint32 // Layer:8 | Event:8 | Sniffed..UDPChecksum:8 | Reserved1:8
+	_         uint32 // Reserved2
 	data      [64]byte
 }
 
@@ -69,10 +77,13 @@ func (a *Address) Loopback() bool { return a.word&(1<<18) != 0 }
 func (a *Address) Impostor() bool { return a.word&(1<<19) != 0 }
 func (a *Address) IPv6() bool     { return a.word&(1<<20) != 0 }
 
+// *ChecksumValid — досчитана ли соответствующая контрольная сумма. Если нет
+// (NIC offload на исходящих), её надо пересчитать перед туннелированием.
 func (a *Address) IPChecksumValid() bool  { return a.word&(1<<21) != 0 }
 func (a *Address) TCPChecksumValid() bool { return a.word&(1<<22) != 0 }
 func (a *Address) UDPChecksumValid() bool { return a.word&(1<<23) != 0 }
 
+// SetOutbound управляет флагом направления (нужно при инжекте ответных пакетов).
 func (a *Address) SetOutbound(v bool) {
 	if v {
 		a.word |= 1 << 17
@@ -81,11 +92,61 @@ func (a *Address) SetOutbound(v bool) {
 	}
 }
 
+// SetLayer/SetEvent — для сборки адреса при инжекте.
 func (a *Address) SetLayer(l Layer) { a.word = (a.word &^ 0xFF) | uint32(l) }
 
+// IfIdx — индекс интерфейса (NETWORK/NETWORK_FORWARD слой).
 func (a *Address) IfIdx() uint32 { return binary.LittleEndian.Uint32(a.data[0:4]) }
 
+// SetIfIdx задаёт интерфейс (при инжекте inbound-пакетов).
 func (a *Address) SetIfIdx(idx uint32) { binary.LittleEndian.PutUint32(a.data[0:4], idx) }
+
+// События SOCKET-слоя.
+const (
+	EventSocketBind    uint8 = 4
+	EventSocketConnect uint8 = 5
+	EventSocketListen  uint8 = 6
+	EventSocketAccept  uint8 = 7
+	EventSocketClose   uint8 = 8
+)
+
+// SocketData — union WINDIVERT_DATA_SOCKET: кто открывает флоу и какой.
+type SocketData struct {
+	ProcessID  uint32
+	LocalAddr  netip.Addr
+	RemoteAddr netip.Addr
+	LocalPort  uint16
+	RemotePort uint16
+	Protocol   uint8
+}
+
+// Socket разбирает union адреса как данные SOCKET-слоя. Адреса лежат в порядке
+// WinDivert (младшее слово первым), порты — в порядке хоста.
+func (a *Address) Socket() SocketData {
+	return SocketData{
+		ProcessID:  binary.LittleEndian.Uint32(a.data[16:20]),
+		LocalAddr:  addrOf(a.data[20:36], a.IPv6()),
+		RemoteAddr: addrOf(a.data[36:52], a.IPv6()),
+		LocalPort:  binary.LittleEndian.Uint16(a.data[52:54]),
+		RemotePort: binary.LittleEndian.Uint16(a.data[54:56]),
+		Protocol:   a.data[56],
+	}
+}
+
+func addrOf(raw []byte, v6 bool) netip.Addr {
+	if !v6 {
+		var v4 [4]byte
+		binary.BigEndian.PutUint32(v4[:], binary.LittleEndian.Uint32(raw[0:4]))
+		return netip.AddrFrom4(v4)
+	}
+	var v16 [16]byte
+	for word := 0; word < 4; word++ {
+		binary.BigEndian.PutUint32(v16[12-word*4:16-word*4], binary.LittleEndian.Uint32(raw[word*4:word*4+4]))
+	}
+	return netip.AddrFrom16(v16)
+}
+
+// --- динамическая загрузка WinDivert.dll ---
 
 var (
 	loadOnce sync.Once
@@ -102,6 +163,8 @@ var (
 	procCalcChecks  *windows.Proc
 )
 
+// Load загружает WinDivert.dll по абсолютному пути (в релизе — распакованная в
+// %APPDATA%\QUICDiver рядом с WinDivert64.sys). Идемпотентна.
 func Load(dllPath string) error {
 	loadOnce.Do(func() {
 		d, err := windows.LoadDLL(dllPath)
@@ -131,6 +194,7 @@ func Load(dllPath string) error {
 	return loadErr
 }
 
+// open открывает WinDivert-хэндл. Требует прав администратора (грузит драйвер).
 func open(filter string, layer Layer, priority int16, flags uint64) (windows.Handle, error) {
 	fb, err := windows.BytePtrFromString(filter)
 	if err != nil {
@@ -149,6 +213,8 @@ func open(filter string, layer Layer, priority int16, flags uint64) (windows.Han
 	return h, nil
 }
 
+// recvEx читает батч пакетов. packet — приёмный буфер, addrs — массив адресов
+// (по одному на пакет). Возвращает число байт пакетов и число адресов.
 func recvEx(h windows.Handle, packet []byte, addrs []Address) (packetLen, addrCount uint, err error) {
 	var rl uint32
 	al := uint32(len(addrs)) * addrSize
@@ -157,10 +223,10 @@ func recvEx(h windows.Handle, packet []byte, addrs []Address) (packetLen, addrCo
 		uintptr(unsafe.Pointer(&packet[0])),
 		uintptr(len(packet)),
 		uintptr(unsafe.Pointer(&rl)),
-		0,
+		0, // flags
 		uintptr(unsafe.Pointer(&addrs[0])),
 		uintptr(unsafe.Pointer(&al)),
-		0,
+		0, // lpOverlapped (блокирующий вызов)
 	)
 	if r == 0 {
 		return 0, 0, fmt.Errorf("WinDivertRecvEx: %w", e)
@@ -168,9 +234,10 @@ func recvEx(h windows.Handle, packet []byte, addrs []Address) (packetLen, addrCo
 	return uint(rl), uint(al) / addrSize, nil
 }
 
+// sendEx инжектит батч пакетов с соответствующими адресами.
 func sendEx(h windows.Handle, packet []byte, addrs []Address) (sentLen uint, err error) {
 	if len(packet) == 0 || len(addrs) == 0 {
-		return 0, nil
+		return 0, nil // нечего слать; иначе &packet[0] паникует
 	}
 	var sl uint32
 	r, _, e := procSendEx.Call(
@@ -178,10 +245,10 @@ func sendEx(h windows.Handle, packet []byte, addrs []Address) (sentLen uint, err
 		uintptr(unsafe.Pointer(&packet[0])),
 		uintptr(len(packet)),
 		uintptr(unsafe.Pointer(&sl)),
-		0,
+		0, // flags
 		uintptr(unsafe.Pointer(&addrs[0])),
 		uintptr(uint32(len(addrs))*addrSize),
-		0,
+		0, // lpOverlapped
 	)
 	if r == 0 {
 		return 0, fmt.Errorf("WinDivertSendEx: %w", e)
@@ -213,6 +280,9 @@ func closeHandle(h windows.Handle) error {
 	return nil
 }
 
+// calcChecksums пересчитывает контрольные суммы пакета на месте (все: IP/TCP/UDP/
+// ICMP). Нужно для перехваченных исходящих пакетов: их L4-суммы часто не досчитаны
+// из-за NIC checksum offload, и удалённый стек их отбросит.
 func calcChecksums(pkt []byte) {
 	if len(pkt) == 0 || procCalcChecks == nil {
 		return
@@ -220,22 +290,25 @@ func calcChecksums(pkt []byte) {
 	procCalcChecks.Call(
 		uintptr(unsafe.Pointer(&pkt[0])),
 		uintptr(len(pkt)),
-		0,
-		0,
+		0, // pAddr не нужен
+		0, // flags = 0 → пересчитать все суммы
 	)
 }
 
+// CompileFilter проверяет корректность filter-выражения без открытия драйвера
+// (helper-функция, не требует прав администратора). Возвращает ok=true, если
+// фильтр валиден; иначе текст и позицию ошибки. Требует предварительного Load.
 func CompileFilter(filter string, layer Layer) (errText string, errPos int, ok bool) {
 	fb, err := windows.BytePtrFromString(filter)
 	if err != nil {
 		return err.Error(), 0, false
 	}
-	var errStr *byte
+	var errStr *byte // const char*, заполняется драйвером
 	var pos uint32
 	r, _, _ := procCompileFilt.Call(
 		uintptr(unsafe.Pointer(fb)),
 		uintptr(layer),
-		0, 0,
+		0, 0, // object, objLen — не нужны
 		uintptr(unsafe.Pointer(&errStr)),
 		uintptr(unsafe.Pointer(&pos)),
 	)

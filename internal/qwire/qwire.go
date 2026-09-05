@@ -31,6 +31,8 @@ type controlLink struct {
 
 func New() *Dialer { return NewKept(nil) }
 
+// NewKept — диалер, чьи сокеты помечаются как исключённые из туннеля. Нужен на
+// Android: там управляющий разговор с узлом иначе уходит в туннель сам к себе.
 func NewKept(keep func(fd uintptr)) *Dialer {
 	return &Dialer{
 		keep:    keep,
@@ -59,6 +61,9 @@ func (s stopper) Close() error {
 	return nil
 }
 
+// controlConfig — живучесть управляющего соединения. Данных оно не несёт, зато
+// должно быстро замечать перезапуск узла: пингуем часто и сдаёмся рано, иначе
+// панель висит на мёртвом соединении.
 func controlConfig() *quic.Config {
 	return &quic.Config{
 		EnableDatagrams: true,
@@ -166,3 +171,4 @@ func (c bothClosers) Close() error {
 	}
 	return last
 }
+

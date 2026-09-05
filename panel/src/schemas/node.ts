@@ -42,6 +42,7 @@ export const ProbeResultSchema = z.object({
   error: z.string().optional(),
 }).loose();
 
+// Everything an operator can change once the node is deployed and reporting.
 export const NodeEditSchema = z.object({
   id: z.number().optional(),
   name: z.string().trim().min(1, 'pages.nodes.toasts.fillRequired'),

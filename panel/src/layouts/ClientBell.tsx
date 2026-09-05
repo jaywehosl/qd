@@ -10,6 +10,9 @@ export default function ClientBell() {
   const { notifyOpen, toggleNotify } = useMetricsPanel();
   const { unread, markRead } = useClientNotifications();
 
+  // Acknowledged on CLOSE, not on open: marking them read the moment the strip
+  // appears wipes the "new" highlight before it has been read, which is the one
+  // thing the highlight exists for.
   const flip = useCallback(() => {
     if (notifyOpen && unread > 0) markRead.mutate();
     toggleNotify();

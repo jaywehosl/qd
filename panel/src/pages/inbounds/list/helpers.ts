@@ -12,6 +12,10 @@ export function readStreamHints(streamSettings: unknown): StreamHints {
   };
 }
 
+// Display label for a network value. All known transports render in
+// upper-case for visual consistency with the TCP/UDP/TLS/Reality tags
+// already shown alongside; compound names (`httpupgrade`, `splithttp`,
+// `xhttp`) get a tiny touch of casing so they don't read as one word.
 export function networkLabel(network: string): string {
   const n = (network || '').toLowerCase();
   if (!n) return 'TCP';
@@ -23,12 +27,20 @@ export function networkLabel(network: string): string {
   return n.toUpperCase();
 }
 
+// Returns the underlying L4 protocol for transports whose name isn't
+// already TCP/UDP. `kcp` and `quic` both ride on UDP; everything else
+// (`ws`, `grpc`, `http`, `httpupgrade`, `xhttp`) is TCP-based and gets
+// no extra tag (the transport name implies TCP).
 export function networkL4(network: string): 'UDP' | '' {
   const n = (network || '').toLowerCase();
   if (n === 'kcp' || n === 'quic') return 'UDP';
   return '';
 }
 
+// Shadowsocks settings.network ("tcp" / "udp" / "tcp,udp") and Tunnel
+// settings.allowedNetwork (same shape, different field name) both carry
+// the L4 transport list independent of streamSettings. Returns a
+// comma-separated label.
 export function commaNetworkLabel(raw: string): string {
   const parts = (raw || 'tcp').toLowerCase().split(',').map((p) => p.trim()).filter(Boolean);
   if (parts.length === 0) return 'TCP';
@@ -43,6 +55,8 @@ export function tunnelNetworkLabel(settings: unknown): string {
   return commaNetworkLabel(readSettings(settings).allowedNetwork || '');
 }
 
+// Mixed (socks+http combo) is always TCP at L4; settings.udp=true adds
+// UDP-associate support on the same port (SOCKS5 UDP).
 export function mixedNetworkLabel(settings: unknown): string {
   const st = coerceInboundJsonField(settings) as { udp?: boolean };
   return st.udp ? 'TCP,UDP' : 'TCP';

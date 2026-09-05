@@ -13,6 +13,7 @@ import (
 	"time"
 )
 
+// dbChunk — кусок базы за один запрос.
 const dbChunk = 1 << 20
 
 func (a *API) opsRoutes(mux *http.ServeMux) {
@@ -24,13 +25,42 @@ func (a *API) opsRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/panel/api/server/sync", a.syncNetwork)
 }
 
+// restartAll просит узлы перезапуститься. Оборванный ответ здесь — не отказ:
+// узел закрывает соединение ровно потому, что делает то, о чём попросили.
 func (a *API) restartAll(w http.ResponseWriter, r *http.Request) {
 	results, err := a.write("restart", nil)
-	if err != nil {
-		sendFailWith(w, err, results)
+	if len(results) == 0 {
+		sendFail(w, err)
 		return
 	}
+	for i := range results {
+		if !results[i].OK && brokeOffRestarting(results[i].Error) {
+			results[i].OK = true
+			results[i].Error = ""
+			results[i].Restarting = true
+		}
+	}
+	for _, one := range results {
+		if !one.OK {
+			sendFailWith(w, fmt.Errorf("%s did not take the restart: %s", one.Tag, one.Error), results)
+			return
+		}
+	}
 	sendOK(w, map[string]any{"nodes": results})
+}
+
+// brokeOffRestarting — обрыв соединения посреди ответа. Узел уже подменил свой
+// образ, договорить ему нечем, и жаловаться тут не на что.
+func brokeOffRestarting(text string) bool {
+	for _, mark := range []string{
+		"H3_NO_ERROR", "H3x0", "close", "closed", "EOF",
+		"connection reset", "no recent network activity", "server closed",
+	} {
+		if strings.Contains(strings.ToLower(text), strings.ToLower(mark)) {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *API) nodeScoped(w http.ResponseWriter, r *http.Request) {

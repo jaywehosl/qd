@@ -21,6 +21,9 @@ export default function PanelLayout() {
   const { isDark, isUltra } = useTheme();
   const { pathname } = useLocation();
 
+  // Global scroll reset on page navigation. Pages own a #content-layout scroll
+  // container (settings/xray/…); also reset the window. A second pass on the
+  // next frame catches pages whose scroll container mounts a tick late.
   useEffect(() => {
     const reset = () => {
       document.getElementById('content-layout')?.scrollTo({ top: 0 });

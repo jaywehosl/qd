@@ -75,6 +75,22 @@ func Open(path string) (*DB, error) {
 	return &DB{sql: h}, nil
 }
 
+// OpenRead открывает базу, не трогая схему. Живой узел держит её открытой, и
+// миграция из читающей команды упирается в SQLITE_BUSY: -status тогда молчал
+// про личность узла и печатал прочерки на исправной машине.
+func OpenRead(path string) (*DB, error) {
+	h, err := sql.Open("sqlite", path+
+		"?_pragma=foreign_keys(1)&_pragma=busy_timeout(2000)&mode=ro")
+	if err != nil {
+		return nil, err
+	}
+	if err := h.Ping(); err != nil {
+		h.Close()
+		return nil, err
+	}
+	return &DB{sql: h}, nil
+}
+
 func (d *DB) Close() error { return d.sql.Close() }
 
 func (d *DB) SQL() *sql.DB { return d.sql }

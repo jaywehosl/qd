@@ -59,6 +59,8 @@ export default function ClientSettingsPage() {
 
   const doReset = useCallback(async (withSubscription: boolean) => {
     await reset(withSubscription);
+    // A reset moves the stored preferences, so the draft has to be re-forked
+    // from what the daemon now holds.
     await queryClient.invalidateQueries({ queryKey: ['client', 'settings'] });
     setConfirm(null);
     if (withSubscription) navigate('/client');

@@ -18,6 +18,9 @@ export interface SubSettings {
   subURI: string;
   subJsonURI: string;
   subJsonEnable: boolean;
+  // Configured public host (Sub Domain, else Web Domain) used as the share/QR
+  // link host when the panel is reached on a loopback address. Empty if neither
+  // is set.
   publicHost: string;
 }
 
@@ -33,6 +36,9 @@ interface ClientRollup {
   comments: Map<string, string>;
 }
 
+// Entrypoints are served over 'qd'. The rest of this list is inherited and
+// harmless; without 'qd' the client rollup skipped every row we actually have,
+// which is why the online count stayed at zero.
 const TRACKED_PROTOCOLS: readonly string[] = [
   'qd',
   Protocols.VMESS,
@@ -56,6 +62,9 @@ async function fetchOnlineClients(): Promise<string[]> {
   return Array.isArray(validated.obj) ? validated.obj : [];
 }
 
+// Online emails grouped by node id (local panel = key 0), used to scope the
+// per-inbound online rollup so a client online on one node is not shown
+// online on every node's inbounds.
 async function fetchOnlineClientsByNode(): Promise<Record<string, string[]>> {
   const msg = await HttpUtil.post('/panel/api/clients/onlinesByNode', undefined, { silent: true });
   if (!msg?.success) throw new Error(msg?.msg || 'Failed to fetch onlinesByNode');
@@ -63,6 +72,10 @@ async function fetchOnlineClientsByNode(): Promise<Record<string, string[]>> {
   return (validated.obj && typeof validated.obj === 'object') ? (validated.obj as Record<string, string[]>) : {};
 }
 
+// Inbound tags that carried traffic recently, grouped by node (local = key 0).
+// Pairs with the per-node online map so a client attached to several inbounds
+// is only marked online on the ones that actually moved bytes — Xray's
+// user-level stat can't attribute traffic to a single inbound on its own.
 async function fetchActiveInboundsByNode(): Promise<Record<string, string[]>> {
   const msg = await HttpUtil.post('/panel/api/clients/activeInbounds', undefined, { silent: true });
   if (!msg?.success) throw new Error(msg?.msg || 'Failed to fetch activeInbounds');
@@ -159,6 +172,9 @@ export function useInbounds() {
   const trafficDiffRef = useRef(trafficDiff);
   trafficDiffRef.current = trafficDiff;
 
+  // dbInbounds mirrors the slim query data wrapped as DBInbound instances, but
+  // stays mutable so the WS-driven applyClientStatsEvent / applyTrafficEvent
+  // can merge per-row updates without invalidating the entire query.
   const [dbInbounds, setDbInbounds] = useState<DBInboundInstance[]>([]);
   const dbInboundsRef = useRef<DBInboundInstance[]>([]);
   dbInboundsRef.current = dbInbounds;
@@ -170,8 +186,15 @@ export function useInbounds() {
   const onlineClientsRef = useRef<string[]>([]);
   onlineClientsRef.current = onlineClients;
 
+  // Online emails keyed by node id (local inbounds = key 0). The rollup
+  // reads this so each inbound only counts clients online on its own node.
   const onlineByNodeRef = useRef<Map<number, Set<string>>>(new Map());
 
+  // Recently-active inbound tags keyed by node id. A node missing from this
+  // map means "no per-inbound activity reported" (e.g. remote nodes), so the
+  // rollup leaves that node's inbounds ungated and falls back to the email
+  // signal. A present node gates: a client only counts online on an inbound
+  // whose tag carried traffic this window.
   const activeByNodeRef = useRef<Map<number, Set<string>>>(new Map());
 
   const [lastOnlineMap, setLastOnlineMap] = useState<Record<string, number>>({});
@@ -181,6 +204,9 @@ export function useInbounds() {
       const clientStats = Array.isArray((dbInbound as { clientStats?: unknown }).clientStats)
         ? (dbInbound as unknown as { clientStats: { email: string; total: number; up: number; down: number; expiryTime: number }[] }).clientStats
         : [];
+      // An entrypoint carries no client list of its own — reachability comes
+      // from the group — so fall back to the per-client stats the panel already
+      // attaches. Without this the online count was always zero.
       const clients = (inbound?.clients?.length ? inbound.clients : clientStats.map((s) => ({
         email: s.email,
         enable: (s as unknown as { enable?: boolean }).enable ?? true,
@@ -196,6 +222,10 @@ export function useInbounds() {
 
       const nodeId = dbInbound.nodeId ?? 0;
       const nodeOnline = onlineByNodeRef.current.get(nodeId);
+      // A node absent from the active map reports no per-inbound activity, so
+      // leave its inbounds ungated. When present, only mark a client online on
+      // this inbound if its tag actually carried traffic — that's what stops a
+      // multi-inbound client lighting up every inbound it's attached to.
       const activeForNode = activeByNodeRef.current.get(nodeId);
       const inboundActive = activeForNode === undefined || !dbInbound.tag || activeForNode.has(dbInbound.tag);
 
@@ -255,6 +285,8 @@ export function useInbounds() {
     setClientCount(counts);
   }, [rollupClients]);
 
+  // Seed dbInbounds + clientCount from the slim query. Runs on first fetch and
+  // again every time the query refetches (e.g. invalidate from WS bridge).
   useEffect(() => {
     if (!slimQuery.data) return;
     const next: DBInboundInstance[] = [];
@@ -306,6 +338,12 @@ export function useInbounds() {
   const fetchError = fetchErrorSource ? (fetchErrorSource as Error).message : '';
 
   const refresh = useCallback(async () => {
+    // Invalidate at the inbounds root so both `slim` (this page's list)
+    // and `options` (the Clients page's inbound picker) refetch. Without
+    // the options bucket, a freshly-created inbound stays invisible in
+    // the client add/edit modal until a full page reload. The xray config
+    // response carries inboundTags for the routing-rule tag picker, so it
+    // needs invalidating too or that list stays stale until a hard refresh.
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: keys.inbounds.root() }),
       queryClient.invalidateQueries({ queryKey: keys.clients.onlines() }),
@@ -316,6 +354,10 @@ export function useInbounds() {
     ]);
   }, [queryClient]);
 
+  // hydrateInbound fetches the full inbound (including settings.clients with
+  // uuid/password/flow/etc.) and swaps it into the cached list. Use this
+  // before opening edit / info / qr / export / clone flows — refresh() loads
+  // the slim list which doesn't carry per-client secrets.
   const hydrateInbound = useCallback(async (id: number) => {
     const msg = await HttpUtil.get(`/panel/api/inbounds/get/${id}`);
     if (!msg?.success || !msg.obj) return null;
@@ -393,6 +435,9 @@ export function useInbounds() {
             const stat = stats[i];
             const upd = byEmail.get(stat.email);
             if (!upd) continue;
+            // The live figures are network-wide, while these rows hold what the
+            // entrypoint's own node carried — writing one into the other counts
+            // the same bytes once per node. Traffic refreshes on the next poll.
             if (typeof upd.expiryTime === 'number') stat.expiryTime = upd.expiryTime;
             if (typeof upd.enable === 'boolean') stat.enable = upd.enable;
             touched = true;
@@ -413,6 +458,10 @@ export function useInbounds() {
     [rebuildClientCount],
   );
 
+  // Each entrypoint now reports only what its own node carried, so the network
+  // total is their sum — except where one node holds several entrypoints, which
+  // would each report that node's whole share. Counting a client once per node
+  // covers both shapes.
   const totals = useMemo(() => {
     const seen = new Map<string, { up: number; down: number }>();
     let up = 0;
@@ -428,6 +477,7 @@ export function useInbounds() {
       const stats = Array.isArray(rec.clientStats) ? rec.clientStats : [];
 
       if (stats.length === 0) {
+        // An exit node carries no clients of its own; its counters stand alone.
         up += rec.up || 0;
         down += rec.down || 0;
         continue;

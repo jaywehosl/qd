@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { ArrowUpOutlined } from '@ant-design/icons';
 interface BackToTopProps {
+  /** Returns the scroll container; defaults to the window. */
   target?: () => HTMLElement | Window | null;
   visibilityHeight?: number;
 }
 
+/** Floating "scroll to top" pill (DS-styled). Replaces the CustomUI FloatButton. */
 export default function BackToTop({ target, visibilityHeight = 200 }: BackToTopProps) {
   const [visible, setVisible] = useState(false);
 

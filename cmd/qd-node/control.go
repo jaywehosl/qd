@@ -310,6 +310,10 @@ func handleControl(state *controlState, req request) response {
 			return response{OK: false, Error: err.Error()}
 		}
 
+		// Запись, которая ничего не меняет, ревизию не двигает. Панель пишет на
+		// все узлы и повторяет попытку, если один не ответил (например, он в этот
+		// момент перезапускался), — каждый такой повтор плодил новый номер, и
+		// счётчик прыгал десятками на одну правку.
 		if body == was {
 			return reply(req, was)
 		}
@@ -327,6 +331,10 @@ func handleControl(state *controlState, req request) response {
 			state.node.Retune(tunablesFrom(settings))
 		}
 
+		// Узел отвечает не только «принял», но и «когда это начнёт действовать»:
+		// часть настроек живёт в слушателе и вступает в силу лишь после
+		// перезапуска. Без такого признака панель считает дело сделанным, пока
+		// узел ещё поднимается, — и её следующий запрос выглядит обрывом.
 		restarting := false
 		if state.restart != nil && datapathMoved(was, settings) {
 			restarting = true
@@ -405,6 +413,9 @@ func handleControl(state *controlState, req request) response {
 		if err != nil {
 			return response{OK: false, Error: err.Error()}
 		}
+		// "traffic" is the whole replica's view, kept for older panels; "mine"
+		// is this node's own share, which a panel can add up across the fleet
+		// without counting the same bytes twice.
 		mine, err := state.db.TrafficFrom(state.id)
 		if err != nil {
 			return response{OK: false, Error: err.Error()}
@@ -488,6 +499,8 @@ func handleControl(state *controlState, req request) response {
 	}
 }
 
+// datapathMoved — правки, которые узел не умеет подхватить на месте: всё, что
+// уезжает в quic.Config, читается один раз при подъёме слушателя.
 func datapathMoved(was, now store.NetworkSettings) bool {
 	return was.StatsSeconds != now.StatsSeconds ||
 		was.Pool != now.Pool || was.BrutalMbit != now.BrutalMbit ||
@@ -784,6 +797,10 @@ func merged[T any](state *controlState, req request, list func() ([]T, error),
 		}
 		for _, existing := range rows {
 			if idOf(existing) == head.ID {
+				// Снимок делаем до разбора тела: копия структуры делит слайсы с
+				// исходной, а декодер пишет в тот же массив, если длина совпала.
+				// Сравнение «до и после» тогда всегда показывало равенство — и
+				// замена одного входа группы на другой не сохранялась вовсе.
 				before, _ = json.Marshal(existing)
 				row, found = existing, true
 				break
@@ -794,6 +811,8 @@ func merged[T any](state *controlState, req request, list func() ([]T, error),
 		return response{OK: false, Error: err.Error()}
 	}
 
+	// Повтор той же записи ревизию не двигает: панель пишет на все узлы и
+	// переспрашивает того, кто не ответил, а счётчик от этого прыгал десятками.
 	after, _ := json.Marshal(row)
 	if found && bytes.Equal(before, after) {
 		revision, _ := state.db.Version()
@@ -859,6 +878,8 @@ func (state *controlState) fixedRate() int {
 	return settings.BrutalMbit
 }
 
+// mySession — номер, которым этот узел известен соседям: он же номер сессии,
+// под которым узел ходит к ним как клиент.
 func (state *controlState) mySession() uint32 {
 	if state.uuid == "" {
 		return 0
@@ -866,6 +887,8 @@ func (state *controlState) mySession() uint32 {
 	return qdcrypt.SessionID(state.uuid)
 }
 
+// writeOps — операции, которые меняют базу. По ним ведём след: что пришло, что
+// стало с ревизией и сколько это заняло.
 var writeOps = map[string]bool{
 	"nodes.save": true, "nodes.delete": true,
 	"entrypoints.save": true, "entrypoints.delete": true,
@@ -877,6 +900,9 @@ var writeOps = map[string]bool{
 	"sessions.reset": true, "db.put": true,
 }
 
+// traceWrite печатает одну строку на запись: от кого, что, ревизия до и после,
+// сколько времени ушло. Нужен, чтобы видеть, кто в действительности двигает
+// счётчик ревизий и почему их становится много за один приём.
 func (state *controlState) traceWrite(req request) func() {
 	was, _ := state.db.Version()
 	began := time.Now()
@@ -895,6 +921,9 @@ func (state *controlState) traceWrite(req request) func() {
 	}
 }
 
+// movedWhat перечисляет настройки, из-за которых узел уходит в перезапуск.
+// Иначе в журнале видно только «restarting», и остаётся гадать, какое поле его
+// вызвало — а перезапуск стоит клиентам разрыва.
 func movedWhat(was, now store.NetworkSettings) string {
 	moved := []string{}
 	for _, item := range []struct {
@@ -923,6 +952,8 @@ func movedWhat(was, now store.NetworkSettings) string {
 	return strings.Join(moved, ", ")
 }
 
+// askNode — одна управляющая операция поверх QUIC. Обработчики остались теми же:
+// изменился только способ, которым запрос сюда приезжает.
 func askNode(state *controlState, op string, body []byte, auth string) (any, error) {
 	answer := handleControl(state, request{Op: op, Body: body, Auth: auth})
 	if !answer.OK {

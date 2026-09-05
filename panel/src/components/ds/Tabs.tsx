@@ -10,7 +10,9 @@ export interface TabItem {
 
 export interface TabsProps {
   items: TabItem[];
+  /** Uncontrolled initial tab. */
   defaultActiveKey?: string;
+  /** Controlled active tab. */
   activeKey?: string;
   onChange?: (key: string) => void;
   className?: string;

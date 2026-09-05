@@ -149,6 +149,9 @@ type Totals struct {
 	At   int64  `json:"at"`
 }
 
+// Only the rows this node wrote itself. Every node holds a replica carrying
+// the other nodes' rows too, so a panel that wants a network-wide figure must
+// add up each node's own share rather than read one node's whole table.
 func (d *DB) TrafficFrom(nodeID int) (map[int]Totals, error) {
 	out := map[int]Totals{}
 	err := scan(d.sql, `SELECT client_id, up, down, at FROM client_traffic WHERE node_id = ?`,

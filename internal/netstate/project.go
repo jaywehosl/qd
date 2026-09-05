@@ -6,6 +6,14 @@ import (
 	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
 )
 
+// Project builds the configuration for one node.
+//
+// The two roles are built by separate constructors that each ENUMERATE what
+// they include. There is deliberately no shared base that one of them then
+// strips: forgetting to add something makes a node miss a feature, forgetting
+// to remove something hands an egress the list of every client's key. Only one
+// of those two mistakes is recoverable, so the code is shaped to make the other
+// one impossible rather than merely unlikely.
 func Project(nodeID int, s *State) (*NodeConfig, error) {
 	n := s.Node(nodeID)
 	if n == nil {
@@ -30,8 +38,11 @@ func projectIngress(n *Node, s *State) *NodeConfig {
 	return &NodeConfig{
 		Revision: s.Revision,
 		Self: Self{
-			NodeID:        n.ID,
-			Role:          RoleIngress,
+			NodeID: n.ID,
+			Role:   RoleIngress,
+			// An ingress that can hand traffic to an egress encapsulates twice
+			// on that path. MSS has to be clamped for the longer of the two
+			// paths, not the one that happens to be in use.
 			EncapOverhead: EncapLen * hops(len(peers) > 0),
 		},
 		Ents:    s.entrypointsOf(n.ID),
@@ -52,6 +63,8 @@ func projectEgress(n *Node, s *State) *NodeConfig {
 		Ents:   s.entrypointsOf(n.ID),
 		Peers:  s.peersFor(RoleIngress, false),
 		Admins: s.adminKeys(),
+		// Clients omitted on purpose — an egress authorises nobody, so it is
+		// never told who anybody is.
 	}
 }
 
@@ -91,6 +104,10 @@ func (s *State) entrypointsOf(nodeID int) []CfgEnt {
 	return out
 }
 
+// clientsReaching returns only the clients whose group actually contains an
+// entrypoint on this node. A client that cannot dial this node has no reason to
+// be known to it, and shipping the whole roster to every ingress would make one
+// seized node worth the entire client list.
 func (s *State) clientsReaching(nodeID int) []CfgClient {
 	local := map[int]bool{}
 	for _, e := range s.Entrypoints {
@@ -119,7 +136,11 @@ func (s *State) clientsReaching(nodeID int) []CfgClient {
 			continue
 		}
 		out = append(out, CfgClient{
-			UUID:      c.UUID,
+			UUID: c.UUID,
+			// Expiry travels rather than being applied here: a client whose
+			// time runs out while this revision is still the live one has to be
+			// evicted by the node, so the node needs the date either way. That
+			// makes filtering at projection time a saving of nothing.
 			ExpiryAt:  c.ExpiryAt,
 			AllowExit: c.MayExit(g),
 		})
@@ -128,6 +149,9 @@ func (s *State) clientsReaching(nodeID int) []CfgClient {
 	return out
 }
 
+// peersFor lists every enabled node of the given role. Node selection is a race
+// in both directions — a client races the entrypoints, an ingress races the
+// exits — so every node of the opposite role is a legitimate peer.
 func (s *State) peersFor(role Role, withAddress bool) []CfgPeer {
 	out := []CfgPeer{}
 	for _, n := range s.Nodes {

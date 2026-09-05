@@ -27,7 +27,9 @@ type Rule struct {
 	Role    string `json:"role"`
 	Matched int    `json:"matched"`
 	Running bool   `json:"running"`
-	Icon    string `json:"icon,omitempty"`
+	// Read from the executable, so a rule shows its icon whether or not the
+	// program happens to be running. Filled in by the API, never stored.
+	Icon string `json:"icon,omitempty"`
 }
 
 func (d *DB) Rules() ([]Rule, error) {

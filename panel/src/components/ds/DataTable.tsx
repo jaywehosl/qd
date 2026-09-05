@@ -17,8 +17,10 @@ import { EmptyState } from './EmptyState';
 export type { ColumnDef, SortingState } from '@tanstack/react-table';
 
 export interface DataTableRowSelection<T> {
+  /** Selected row ids (as produced by getRowId). */
   selectedIds: string[];
   onChange: (ids: string[]) => void;
+  /** Rows for which the checkbox is enabled. Defaults to all. */
   isSelectable?: (row: T) => boolean;
 }
 
@@ -30,17 +32,28 @@ export interface DataTableExpandable<T> {
 export interface DataTableProps<T> {
   data: T[];
   columns: ColumnDef<T, unknown>[];
+  /** Stable row id. Required when using rowSelection/expandable. */
   getRowId?: (row: T, index: number) => string;
   empty?: ReactNode;
   sortable?: boolean;
+  /** Controlled sorting. Providing it means the parent orders `data` itself
+   *  (server-side sort), so the table only reports header clicks. */
   sorting?: SortingState;
   onSortingChange?: (sorting: SortingState) => void;
+  /** Slice `data` to the current `pagination` page instead of expecting the
+   *  parent to have sliced it. Keeps sorting consistent across pages. */
   paginateRows?: boolean;
   rowSelection?: DataTableRowSelection<T>;
   expandable?: DataTableExpandable<T>;
+  /** Server-mode pagination: pass current page state; rows are supplied by the
+   *  parent (DataTable does not slice). Omit for no pagination. */
   pagination?: PaginationProps;
 }
 
+/**
+ * Headless data table (TanStack) with token styling. Supports client-side
+ * sorting, controlled row selection, and expandable detail rows.
+ */
 export function DataTable<T>({
   data,
   columns,

@@ -11,6 +11,7 @@ export interface ButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement
   block?: boolean;
   loading?: boolean;
   icon?: ReactNode;
+  /** Native button type. Defaults to "button" to avoid accidental form submits. */
   htmlType?: 'button' | 'submit' | 'reset';
 }
 

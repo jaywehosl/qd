@@ -9,6 +9,9 @@ interface State {
   error: Error | null;
 }
 
+// One failing section must not take the page with it. The panel puts four
+// independent screens on one route, and without this a bad row in any of them
+// leaves the operator with nothing at all — including the parts that still work.
 export default class SectionBoundary extends Component<Props, State> {
   state: State = { error: null };
 

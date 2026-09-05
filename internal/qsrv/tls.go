@@ -12,6 +12,8 @@ import (
 	"time"
 )
 
+// DevTLS генерирует self-signed сертификат для локального прогона (SAN localhost
+// + переданные IP). В бою заменяется реальным сертом по домену (LoadX509KeyPair).
 func DevTLS(names ...string) (*tls.Config, error) {
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {

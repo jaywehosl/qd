@@ -122,6 +122,9 @@ func chromeProc(handle uintptr, message uint32, wParam, lParam uintptr) uintptr 
 		if wParam == 0 {
 			break
 		}
+		// Client area takes the whole window, so the system caption is gone —
+		// but a maximised window still has to keep the border out, or it spills
+		// past the screen edges by the frame thickness.
 		if zoomed, _, _ := isZoomedCall.Call(handle); zoomed != 0 {
 			edge := metric(smCXFrame) + metric(smCXPaddedBorder)
 			top := metric(smCYFrame) + metric(smCXPaddedBorder)

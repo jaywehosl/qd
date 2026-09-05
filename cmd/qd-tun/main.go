@@ -15,6 +15,8 @@ type stats struct {
 	procMiss atomic.Uint64
 }
 
+const appName = "qd"
+
 var st stats
 
 var routeByProcess atomic.Pointer[procRouter]

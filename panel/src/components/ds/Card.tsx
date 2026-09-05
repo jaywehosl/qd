@@ -3,6 +3,7 @@ import type { HTMLAttributes, ReactNode } from 'react';
 export interface CardProps extends Omit<HTMLAttributes<HTMLDivElement>, 'title'> {
   title?: ReactNode;
   extra?: ReactNode;
+  /** Remove body padding (e.g. when embedding a table). */
   flush?: boolean;
 }
 

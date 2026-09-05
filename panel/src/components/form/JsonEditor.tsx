@@ -80,6 +80,9 @@ function themeExtension(isDark: boolean, isUltra: boolean) {
 }
 
 const JsonEditor = forwardRef<JsonEditorHandle, JsonEditorProps>(function JsonEditor(
+  // `maxHeight` is accepted for back-compat but no longer caps the editor: the
+  // editor grows to its content so the surrounding modal-body / page is the
+  // single scroll region (no double scrollbar).
   { value, onChange, minHeight = '320px', readOnly = false },
   ref,
 ) {
@@ -130,6 +133,7 @@ const JsonEditor = forwardRef<JsonEditorHandle, JsonEditorProps>(function JsonEd
               fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
               fontSize: '12px',
               minHeight,
+              /* no maxHeight: grow to content → single outer scrollbar */
             },
           }),
         ],
@@ -142,6 +146,7 @@ const JsonEditor = forwardRef<JsonEditorHandle, JsonEditorProps>(function JsonEd
       view.destroy();
       viewRef.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {

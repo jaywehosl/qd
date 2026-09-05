@@ -183,6 +183,7 @@ func main() {
 	if host == "" {
 		host = self.Address
 	}
+	// Порт живёт в карточке узла: в имени он был бы вторым источником правды.
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h
 	}
@@ -336,8 +337,8 @@ func printStats(node *qsrv.Node) {
 		if s.PktUp == 0 && s.PktDown == 0 {
 			continue
 		}
-		fmt.Printf("  session %d  %s  out %d pkt / %s  in %d pkt / %s\n",
-			s.Session, s.Address, s.PktUp, human(s.Up), s.PktDown, human(s.Down))
+		fmt.Printf("  session %d seat %d  %s  out %d pkt / %s  in %d pkt / %s\n",
+			s.Session, s.Seat, s.Address, s.PktUp, human(s.Up), s.PktDown, human(s.Down))
 	}
 }
 
@@ -406,15 +407,17 @@ func sampleSessions(node *qsrv.Node) (map[uint32]seen, error) {
 			where = s.Address.Addr().String()
 		}
 
-		out[s.Session] = seen{
-			Client:   where,
-			Transit:  s.Transit,
-			LastSeen: s.LastSeen * 1000,
-			Up:       s.Up,
-			Down:     s.Down,
-			PktUp:    s.PktUp,
-			PktDown:  s.PktDown,
+		total := out[s.Session]
+		total.Transit = s.Transit
+		total.Up += s.Up
+		total.Down += s.Down
+		total.PktUp += s.PktUp
+		total.PktDown += s.PktDown
+		if last := s.LastSeen * 1000; last >= total.LastSeen {
+			total.LastSeen = last
+			total.Client = where
 		}
+		out[s.Session] = total
 	}
 	return out, nil
 }

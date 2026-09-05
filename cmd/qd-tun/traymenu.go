@@ -18,7 +18,7 @@ import (
 func startTray(db *clientstate.DB, tun *tunnel, ui *localapi.Server, key *qdcrypt.Key, quit chan struct{}) (*tray.Icon, error) {
 	var once sync.Once
 
-	return tray.Run("QuicDiver", tray.Menu{
+	return tray.Run(appName, tray.Menu{
 		Open: func() { openPage(ui.URL()) },
 
 		Connect: func() {
@@ -83,15 +83,15 @@ func trayTip(db *clientstate.DB, tun *tunnel, status tray.Status) string {
 		if nodes, err := db.Nodes(); err == nil {
 			for _, n := range nodes {
 				if n.Selected {
-					return "QuicDiver — " + n.Name
+					return appName + " — " + n.Name
 				}
 			}
 		}
-		return "QuicDiver — подключён"
+		return appName + " — подключён"
 	case tray.StatusError:
-		return "QuicDiver — не удалось подключиться"
+		return appName + " — не удалось подключиться"
 	default:
-		return "QuicDiver — отключён"
+		return appName + " — отключён"
 	}
 }
 

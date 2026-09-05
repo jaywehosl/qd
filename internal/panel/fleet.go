@@ -44,6 +44,8 @@ type NodeHealth struct {
 }
 
 type Fleet struct {
+	// key — ключ сети как значение для ссылок подписки: транспорт им больше
+	// ничего не шифрует, кадры управления несёт TLS.
 	key   qdcrypt.Key
 	token string
 	tag   string
@@ -54,6 +56,8 @@ type Fleet struct {
 	seen  map[int]NodeHealth
 }
 
+// NewFleet: wire — общий QUIC-диалер до узлов. Ключ сети больше не нужен:
+// кадры управления не шифруются отдельно, их несёт TLS.
 func NewFleet(key qdcrypt.Key, wire *qwire.Dialer) *Fleet {
 	return &Fleet{
 		key:   key,
@@ -108,6 +112,8 @@ func (f *Fleet) Nodes() []NodeAddress {
 	return out
 }
 
+// ask — одна операция на узле. Никаких долгоживущих клиентов с таблицей
+// ожидающих ответов: каждый запрос уезжает своим потоком QUIC.
 func (f *Fleet) ask(addr NodeAddress, op string, body any) (json.RawMessage, error) {
 	if f.wire == nil {
 		return nil, fmt.Errorf("no way to reach %s", addr.Tag)
@@ -115,6 +121,10 @@ func (f *Fleet) ask(addr NodeAddress, op string, body any) (json.RawMessage, err
 	return f.wire.Raw(fmt.Sprintf("%s:%d", addr.Address, addr.Port), op, f.Token(), body)
 }
 
+// Discover: адреса узлов берутся из сетевой базы и только оттуда. Затравка — это
+// вход из подписки, её номер принадлежит клиентскому списку входов и с номерами
+// узлов сети не совпадает: подменяя адрес «по совпадению номера», панель
+// приписывала одному узлу адрес другого.
 func (f *Fleet) Discover(seed NodeAddress) error {
 	body, err := f.ask(seed, "nodes.list", nil)
 	if err != nil {
@@ -229,11 +239,14 @@ func (f *Fleet) Ask(id int, op string, body any) (json.RawMessage, error) {
 }
 
 type WriteResult struct {
-	NodeID     int    `json:"nodeId"`
-	Tag        string `json:"tag"`
-	OK         bool   `json:"ok"`
-	Skipped    bool   `json:"skipped,omitempty"`
-	Error      string `json:"error,omitempty"`
+	NodeID  int    `json:"nodeId"`
+	Tag     string `json:"tag"`
+	OK      bool   `json:"ok"`
+	Skipped bool   `json:"skipped,omitempty"`
+	Error   string `json:"error,omitempty"`
+	// Restarting — узел принял правку, но она вступит в силу, когда он поднимется
+	// заново. Пока панель этого не знала, она считала дело законченным и
+	// принимала следующий свой запрос, попавший в перезапуск, за обрыв.
 	Restarting bool   `json:"restarting,omitempty"`
 	Moved      string `json:"moved,omitempty"`
 }
@@ -267,6 +280,9 @@ func (f *Fleet) WriteExcept(op string, body any, skip int) ([]WriteResult, error
 		go func(i int, n NodeAddress) {
 			defer wg.Done()
 			results[i] = WriteResult{NodeID: n.ID, Tag: n.Tag, OK: true}
+			// Пишем всем и судим по ответу. Раньше узел, о котором панель ещё не
+			// слышала в этом запуске, объявлялся «не развёрнутым» — хотя он мог
+			// просто перезапускаться, а панель — только что открыться.
 			said, err := f.ask(n, op, body)
 			if err != nil {
 				results[i].OK = false
@@ -357,6 +373,9 @@ func (f *Fleet) Refresh() {
 	}
 }
 
+// Health опрашивает узлы разом и не ждёт отставших дольше healthWait. Узел за
+// белым списком мобильной сети не ответит никогда, а панель из-за него открывалась
+// только после его таймаута.
 func (f *Fleet) Health() []NodeHealth {
 	f.Refresh()
 	nodes := f.Nodes()
@@ -444,6 +463,13 @@ func (f *Fleet) Health() []NodeHealth {
 	return out
 }
 
+// Settled ждёт, пока правка действительно вступит в силу на узлах, и говорит,
+// чем дело кончилось.
+//
+// Половина договора — узнать, что узел правку принял; вторая — что он с ней
+// поднялся. Настройки слушателя применяются только после перезапуска, и без
+// этой проверки «сохранено» означало лишь «записано в базу»: узел мог не
+// подняться вовсе, а панель считала бы дело сделанным.
 func (f *Fleet) Settled(want map[string]any, wait time.Duration) (bool, string) {
 	if len(want) == 0 {
 		return true, ""
@@ -479,6 +505,7 @@ func (f *Fleet) Settled(want map[string]any, wait time.Duration) (bool, string) 
 	return false, last
 }
 
+// disagreeing называет первое поле, которое узел не принял.
 func disagreeing(want, now map[string]any) string {
 	for key, wanted := range want {
 		got, carried := now[key]

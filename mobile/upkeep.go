@@ -9,6 +9,9 @@ func (c *Client) upkeep() {
 	go c.api.Greet()
 }
 
+// meter пишет расход в базу по фактическому времени между тиками: телефон будит
+// процесс когда сочтёт нужным, и делить прибавку на «секунду» значит занижать
+// скорость ровно на опоздание.
 func (c *Client) meter() {
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()

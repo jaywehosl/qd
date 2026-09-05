@@ -12,6 +12,7 @@ export interface SegmentedProps {
   className?: string;
 }
 
+/** Button-style single-select (replaces antd Radio.Group buttonStyle="solid"). */
 export function Segmented({ value, onChange, options, className = '' }: SegmentedProps) {
   return (
     <div className={['ds-segmented', className].filter(Boolean).join(' ')} role="radiogroup">

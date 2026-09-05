@@ -1,5 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
 
+/**
+ * ParticleField — a GPU-rendered, CPU-simulated cloud of free-gliding pucks.
+ *
+ * The simulation runs in REAL pixels and every particle's collision radius is
+ * tied to its rendered size (mass ∝ area), so the dots you see are the dots that
+ * collide — a big puck shoves a small one, they bounce, momentum cascades. They
+ * glide on near-zero friction (air hockey), bounce off the screen walls and each
+ * other, and never spring "home". The pointer is a paddle that only acts while
+ * MOVING (speed-gated): a still cursor does nothing. Renders nothing without
+ * WebGL2 (the CSS aurora is the fallback).
+ */
 export interface ParticleFieldProps {
   className?: string;
   density?: number;
@@ -22,10 +33,10 @@ function hexToRgb(hex: string): [number, number, number] {
 
 const VERT = `#version 300 es
 precision highp float;
-in vec2 a_pos;
-in float a_size;
-in float a_hue;
-in float a_speed;
+in vec2 a_pos;     // position in CSS pixels
+in float a_size;   // diameter in CSS pixels
+in float a_hue;    // 0..1 palette position
+in float a_speed;  // px/frame
 uniform vec2 u_res;
 uniform float u_dpr;
 out float v_glow;
@@ -64,7 +75,7 @@ void main() {
 
 const LINE_VERT = `#version 300 es
 precision highp float;
-in vec3 a_line_data;
+in vec3 a_line_data; // x, y, alpha
 uniform vec2 u_res;
 out float v_alpha;
 void main() {
@@ -117,6 +128,11 @@ export default function ParticleField({
       const rs = window.getComputedStyle(document.documentElement);
       const g = (k: string) => rs.getPropertyValue(k).trim();
 
+      // STRUCTURAL params force a full particle rebuild (re-randomize positions
+      // & buffers). Keep this list MINIMAL — only things that change the particle
+      // SET, not their appearance. Colour/primary/speed are NOT here: they used
+      // to be, so every Primary slider tick teleported every particle ("freak
+      // out"). They're now applied live below without a rebuild.
       const isOff = g('--fx-particles') === 'off';
       const structSig = [
         isOff,
@@ -124,6 +140,11 @@ export default function ParticleField({
         g('--fx-particles-preset') || preset || 'pucks',
       ].join('|');
 
+      // COSMETIC params are read every frame from live.current — update in place
+      // so Primary recolours the cloud smoothly instead of resetting it. Default
+      // colour mode is 'palette' so --color-primary drives particles even on the
+      // empty/default theme (previously they used a hardcoded blue and ignored
+      // Primary until the colour mode was toggled).
       const fxColor = g('--fx-particles-color');
       const fxSpeed = g('--fx-particles-speed');
       const fxInteractive = g('--fx-particles-interactive');
@@ -184,6 +205,8 @@ export default function ParticleField({
     const activeMonochrome = fxColor === 'monochrome' ? true : monochrome;
     const activePreset = fxPreset || preset || 'pucks';
 
+    // Default colour mode is 'palette' so --color-primary drives the particles
+    // even on the empty/default theme (kept in sync with handleThemeChange).
     const primaryHex = rootStyle?.getPropertyValue('--color-primary')?.trim() || '#3279F9';
     const effColor = fxColor || 'palette';
     let activePalette = palette;
@@ -218,6 +241,7 @@ export default function ParticleField({
       return;
     }
 
+    // Compile line shaders (for neural web)
     const lineVs = compile(gl, gl.VERTEX_SHADER, LINE_VERT);
     const lineFs = compile(gl, gl.FRAGMENT_SHADER, LINE_FRAG);
     let lineProg: WebGLProgram | null = null;
@@ -245,18 +269,19 @@ export default function ParticleField({
     let W = 1;
     let H = 1;
 
-    const SIZE_MIN = 4;
-    const SIZE_RANGE = 18;
-    const COL_SCALE = 0.46;
-    const FRICTION = 0.985;
-    const JITTER = 0.02;
-    const CUR_R = 120;
+    // ---- tunables (all in CSS pixels / px-per-frame) ----
+    const SIZE_MIN = 4;     // smallest puck diameter (px)
+    const SIZE_RANGE = 18;  // extra diameter for the biggest (rand² weighted)
+    const COL_SCALE = 0.46; // collision radius as a fraction of visual diameter
+    const FRICTION = 0.985; // glide friction
+    const JITTER = 0.02;    // faint air (px/frame)
+    const CUR_R = 120;      // paddle radius (px)
     const CUR_R2 = CUR_R * CUR_R;
-    const PUSH = 6.0;
-    const DRAG = 0.55;
-    const REST = 0.9;
-    const WALL = 0.86;
-    const MAXV = 11;
+    const PUSH = 6.0;       // paddle radial shove (px/frame at the tip)
+    const DRAG = 0.55;      // fraction of cursor motion imparted (trail)
+    const REST = 0.9;       // restitution between pucks
+    const WALL = 0.86;      // wall restitution
+    const MAXV = 11;        // speed cap (px/frame)
 
     const isNeural = activePreset === 'neural';
     const isNebula = activePreset === 'nebula';
@@ -268,10 +293,10 @@ export default function ParticleField({
     let py = new Float32Array(0);
     let vx = new Float32Array(0);
     let vy = new Float32Array(0);
-    let rad = new Float32Array(0);
-    let invM = new Float32Array(0);
-    let resp = new Float32Array(0);
-    let size = new Float32Array(0);
+    let rad = new Float32Array(0);   // collision radius (px)
+    let invM = new Float32Array(0);  // 1 / mass (mass ∝ area)
+    let resp = new Float32Array(0);  // cursor responsiveness (individuality)
+    let size = new Float32Array(0);  // visual diameter (px)
     let hue = new Float32Array(0);
     let next = new Int32Array(0);
     let posArr = new Float32Array(0);
@@ -308,10 +333,10 @@ export default function ParticleField({
       spdArr = new Float32Array(count);
       for (let i = 0; i < count; i++) {
         const r = Math.random();
-        const d = SIZE_MIN + SIZE_RANGE * r * r;
+        const d = SIZE_MIN + SIZE_RANGE * r * r; // rand² -> many small, few large
         size[i] = d;
         rad[i] = d * COL_SCALE;
-        invM[i] = 1 / (d * d);
+        invM[i] = 1 / (d * d); // mass ∝ area
         px[i] = Math.random() * W;
         py[i] = Math.random() * H;
         
@@ -408,6 +433,7 @@ export default function ParticleField({
     const ro = new ResizeObserver(resize);
     ro.observe(canvas);
 
+    // ---- pointer (CSS px) ----
     const m = { x: -1e3, y: -1e3, lx: -1e3, ly: -1e3, inside: false };
     function onMove(e: PointerEvent) {
       const rect = canvas!.getBoundingClientRect();
@@ -445,6 +471,7 @@ export default function ParticleField({
       const targetX = m.inside ? m.x : W / 2;
       const targetY = m.inside ? m.y : H / 2;
 
+      // 1) Air jitter + paddle OR Gravity Vortex Swarm forces
       for (let i = 0; i < count; i++) {
         if (isNebula) {
           const dx = targetX - px[i];
@@ -487,6 +514,7 @@ export default function ParticleField({
 
       let lineNumPoints = 0;
 
+      // 2) Elastic puck-vs-puck collisions via spatial grid (skipped in nebula mode)
       if (!isNebula) {
         cellHead.fill(-1);
         for (let i = 0; i < count; i++) {
@@ -539,6 +567,7 @@ export default function ParticleField({
                     }
                   }
 
+                  // Gather neural constellation lines (closer than 75px)
                   if (isNeural && d2 < 75 * 75 && lineNumPoints < 24000 - 6) {
                     const d = Math.sqrt(d2);
                     const alpha = 1.0 - d / 75.0;
@@ -560,6 +589,7 @@ export default function ParticleField({
         }
       }
 
+      // 3) Integrate positions, friction, bounds check
       for (let i = 0; i < count; i++) {
         if (!isNebula) {
           vx[i] *= FRICTION;
@@ -596,18 +626,20 @@ export default function ParticleField({
       const b = hexToRgb(p.palette[1]);
       const c = hexToRgb(p.palette[2]);
 
+      // Draw constellation web lines
       if (isNeural && lineProg && lineU && lineNumPoints > 0) {
         gl!.useProgram(lineProg);
         gl!.bindVertexArray(lineVao);
         gl!.bindBuffer(gl!.ARRAY_BUFFER, lineBuf);
         gl!.bufferData(gl!.ARRAY_BUFFER, lineDataArr.subarray(0, lineNumPoints * 3), gl!.DYNAMIC_DRAW);
 
-        gl!.blendFunc(gl!.SRC_ALPHA, gl!.ONE);
+        gl!.blendFunc(gl!.SRC_ALPHA, gl!.ONE); // Additive blending for glow threads
         gl!.uniform3f(lineU.color, a[0], a[1], a[2]);
         gl!.uniform1f(lineU.intensity, p.intensity);
         gl!.drawArrays(gl!.LINES, 0, lineNumPoints);
       }
 
+      // Draw standard particles
       gl!.useProgram(prog);
       gl!.bindVertexArray(vao);
       gl!.blendFunc(gl!.SRC_ALPHA, p.additive ? gl!.ONE : gl!.ONE_MINUS_SRC_ALPHA);
@@ -655,12 +687,19 @@ export default function ParticleField({
         if (lineVao) gl.deleteVertexArray(lineVao);
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [density, themeTick, monochrome, interactive, palette]);
 
+  // additive / intensity are per-frame uniforms read from live.current — update
+  // them in place instead of re-running the heavy effect. The login screen flips
+  // these on every theme switch (additive={isDark}, intensity={isDark?…}); if
+  // they were effect deps the WebGL context tore down + rebuilt mid-switch,
+  // blanking the full-screen canvas for a frame = the login "white flash".
   useEffect(() => {
     live.current = { ...live.current, additive, intensity };
   }, [additive, intensity]);
 
+  // Lose WebGL context only when the canvas element actually unmounts
   useEffect(() => {
     return () => {
       const canvas = canvasRef.current;

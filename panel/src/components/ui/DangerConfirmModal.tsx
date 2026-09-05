@@ -3,10 +3,13 @@ import { Button, Dialog } from '@/components/ds';
 import { DownloadOutlined, WarningOutlined } from '@ant-design/icons';
 interface DangerConfirmModalProps {
   open: boolean;
+  /** Human-readable labels of the access-critical fields being changed. */
   fields: string[];
+  /** Seconds the user must wait (read the warning) before confirm arms. */
   countdownSecs?: number;
   onConfirm: () => void;
   onCancel: () => void;
+  /** Trigger the existing DB export (snapshot before risking lock-out). */
   onBackup: () => void;
 }
 

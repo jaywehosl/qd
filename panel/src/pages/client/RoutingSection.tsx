@@ -24,6 +24,9 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
   const [busy, setBusy] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
 
+  // The daemon clears the pending flag when the tunnel is rebuilt, so the banner
+  // has to re-read it — waiting for the poll would leave it claiming a restart
+  // is still owed for up to fifteen seconds after the person did it.
   const doReconnect = useCallback(async () => {
     setReconnecting(true);
     try {
@@ -46,6 +49,8 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
 
   const onPick = useCallback((pick: { process: string; path?: string }) => {
     if (!state) return;
+    // A rule is an exception to what everything else already does, so it lands
+    // as the opposite of the default and gets adjusted in the row if wrong.
     const role: RoutingRole = state.defaultRole === 'direct' ? 'tunnel' : 'direct';
     void add({ ...pick, role });
   }, [state, add]);

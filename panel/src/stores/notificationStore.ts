@@ -1,11 +1,31 @@
+/**
+ * Notification subsystem store (framework-agnostic module store, same pattern as
+ * the DS Toast store). It is the single home for:
+ *
+ *   • history  — every notification ever recorded (toasts + dismissed live
+ *                alerts), newest first, capped, persisted to localStorage.
+ *   • dismissed — keys of LIVE alerts the user has X-ed away; a dismissed live
+ *                alert never reappears in the header strip (it lives in history).
+ *   • prefs    — per-category enable flags for the live alerts (the Notifications
+ *                tab in Appearance toggles these).
+ *
+ * Live alerts (port/path/xray/restart) are derived state computed in
+ * useNotifications; this store only tracks which the user has silenced + logs
+ * them into history when dismissed. Transient toasts are mirrored here via
+ * recordToast() so the user has a scrollback log (the header only shows ACTIVE
+ * live alerts; the full log lives in Appearance → Notifications).
+ */
 
 export type Severity = 'danger' | 'warning' | 'info';
 export type NotifSource = 'toast' | 'alert' | 'event';
 
+/** Live-alert categories that can be toggled on/off in the Notifications tab. */
 export type AlertCategory = 'security' | 'xray' | 'restart';
 
 export interface NotifRecord {
   id: string;
+  /** the live-alert key (only for source==='alert') — ties a history row back
+   *  to the dismissed set so it can be restored. */
   key?: string;
   severity: Severity;
   text: string;
@@ -19,23 +39,34 @@ export interface AlertPrefs {
   restart: boolean;
 }
 
+/** Threshold sensors evaluated against the polled server `status` (Phase 2).
+ *  Edge-triggered: each fires once on the false→true crossing and re-arms when
+ *  the value drops back below the threshold. */
 export type SensorKey = 'cpu' | 'mem' | 'disk' | 'sockets' | 'udpSockets' | 'uptimeDays' | 'clientOffline';
 export interface SensorConfig { enabled: boolean; threshold: number }
 export type SensorPrefs = Record<SensorKey, SensorConfig>;
 
+/** System log watcher: surface NEW panel log lines at/above `level` as
+ *  notifications. Separate from numeric sensors because its "threshold" is a log
+ *  level string. Levels match the log viewer: debug|info|notice|warning|err. */
 export interface LogWatchPrefs { enabled: boolean; level: string }
 
+/** Periodic maintenance reminders (checked by MaintenanceWatcher). */
 export interface MaintenancePrefs {
-  updateCheck: boolean;
-  backupReminder: boolean;
+  updateCheck: boolean;        // poll GitHub Releases for a newer panel build
+  backupReminder: boolean;     // remind when no DB backup in `backupIntervalDays`
   backupIntervalDays: number;
-  lastBackupAt: number;
+  lastBackupAt: number;        // epoch ms of the last DB export (0 = clock unset)
 }
 
 interface NotifState {
   history: NotifRecord[];
+  /** Event notifications currently shown in the status-bar strip + bell badge
+   *  (sensors / log). Persisted so they survive a reload until dismissed. */
   active: NotifRecord[];
   dismissed: string[];
+  /** Status-sensor keys the user has dismissed for the CURRENT over-threshold
+   *  episode; auto-cleared when the value drops back (re-arms the live row). */
   sensorAcked: string[];
   prefs: AlertPrefs;
   sensors: SensorPrefs;
@@ -64,14 +95,15 @@ const DEFAULT_MAINTENANCE: MaintenancePrefs = {
 
 const DEFAULT_PREFS: AlertPrefs = { security: true, xray: true, restart: true };
 
+// Community Panel default sensor profile (all live-condition sensors on).
 const DEFAULT_SENSORS: SensorPrefs = {
-  cpu: { enabled: true, threshold: 55 },
-  mem: { enabled: true, threshold: 60 },
-  disk: { enabled: true, threshold: 30 },
-  sockets: { enabled: true, threshold: 1000 },
+  cpu: { enabled: true, threshold: 55 },         // % busy
+  mem: { enabled: true, threshold: 60 },         // % used
+  disk: { enabled: true, threshold: 30 },        // % used
+  sockets: { enabled: true, threshold: 1000 },   // open TCP sockets
   udpSockets: { enabled: true, threshold: 1000 },// open UDP sockets
-  uptimeDays: { enabled: true, threshold: 7 },
-  clientOffline: { enabled: true, threshold: 12 },
+  uptimeDays: { enabled: true, threshold: 7 },   // system uptime in days
+  clientOffline: { enabled: true, threshold: 12 }, // client silent for N hours
 };
 
 function loadHistory(): NotifRecord[] {
@@ -124,6 +156,7 @@ function loadSensors(): SensorPrefs {
     const raw = localStorage.getItem(SENSORS_KEY);
     const obj = raw ? (JSON.parse(raw) as Partial<SensorPrefs>) : null;
     if (!obj) return structuredClone(DEFAULT_SENSORS);
+    // Merge per-key so a new sensor added in a later build still gets a default.
     const merged = structuredClone(DEFAULT_SENSORS);
     (Object.keys(merged) as SensorKey[]).forEach((k) => {
       if (obj[k]) merged[k] = { ...merged[k], ...obj[k] };
@@ -180,6 +213,7 @@ function persist() {
     localStorage.setItem(LOGWATCH_KEY, JSON.stringify(state.logWatch));
     localStorage.setItem(MAINTENANCE_KEY, JSON.stringify(state.maintenance));
   } catch {
+    /* ignore quota / disabled storage */
   }
 }
 function commit(next: NotifState) {
@@ -206,11 +240,18 @@ function pushHistory(rec: Omit<NotifRecord, 'id' | 'ts'> & { ts?: number }): voi
   commit({ ...state, history });
 }
 
+/** Mirror a transient toast into the history log. Only string content is logged
+ *  (rich ReactNode toasts are skipped — they can't be replayed in a log). */
 export function recordToast(severity: Severity, text: string): void {
   if (!text) return;
   pushHistory({ severity, text, source: 'toast' });
 }
 
+/** Emit an event notification (sensor / log): show it in the status-bar strip +
+ *  bell badge (state.active) AND log it to history. `dedupKey` prevents a still-
+ *  showing event from being added again on a re-fire (e.g. a sensor that stays
+ *  over threshold across reloads) — a new one only appears after it's dismissed.
+ *  Returns the record id (or '' if deduped). */
 export function pushEvent(severity: Severity, text: string, dedupKey?: string): string {
   if (!text) return '';
   if (dedupKey && state.active.some((r) => r.key === dedupKey)) return '';
@@ -221,20 +262,26 @@ export function pushEvent(severity: Severity, text: string, dedupKey?: string): 
   return full.id;
 }
 
+/** X an active event: remove it from the strip/bell (it stays in history). */
 export function dismissEvent(id: string): void {
   if (!state.active.some((r) => r.id === id)) return;
   commit({ ...state, active: state.active.filter((r) => r.id !== id) });
 }
 
+/** Dismiss a LIVE status-sensor row for the current episode (hides it until the
+ *  value drops back below the threshold, then it re-arms). Status sensors are
+ *  live conditions, not logged events — so this never touches history. */
 export function ackSensor(key: string): void {
   if (state.sensorAcked.includes(key)) return;
   commit({ ...state, sensorAcked: [...state.sensorAcked, key] });
 }
+/** Re-arm a dismissed sensor once its condition clears (called by SensorWatcher). */
 export function clearAckSensor(key: string): void {
   if (!state.sensorAcked.includes(key)) return;
   commit({ ...state, sensorAcked: state.sensorAcked.filter((k) => k !== key) });
 }
 
+/** X a live alert: silence it forever (per key) and drop it into history. */
 export function dismissAlert(key: string, severity: Severity, text: string): void {
   const dismissed = state.dismissed.includes(key) ? state.dismissed : [...state.dismissed, key];
   const full: NotifRecord = { id: newId(), ts: Date.now(), key, severity, text, source: 'alert' };
@@ -242,6 +289,7 @@ export function dismissAlert(key: string, severity: Severity, text: string): voi
   commit({ ...state, dismissed, history });
 }
 
+/** Un-silence a previously dismissed live alert (it will reappear if still live). */
 export function restoreAlert(key: string): void {
   if (!state.dismissed.includes(key)) return;
   commit({ ...state, dismissed: state.dismissed.filter((k) => k !== key) });
@@ -251,6 +299,10 @@ export function isDismissed(key: string): boolean {
   return state.dismissed.includes(key);
 }
 
+/** Clear the log, but KEEP the entries that are the only handle for restoring a
+ *  currently-dismissed live alert (source==='alert' whose key is still silenced)
+ *  — otherwise clearing history would strand a dismissed alert with no way to
+ *  bring it back to the status bar. Toasts and already-restored entries go. */
 export function clearHistory(): void {
   const history = state.history.filter(
     (r) => r.source === 'alert' && !!r.key && state.dismissed.includes(r.key),
@@ -287,11 +339,14 @@ export function setBackupReminderInterval(days: number): void {
   if (!Number.isFinite(days) || days < 1) return;
   commit({ ...state, maintenance: { ...state.maintenance, backupIntervalDays: Math.round(days) } });
 }
+/** Record that a DB export just happened: resets the backup clock and clears any
+ *  standing "backup overdue" reminder. Also used to start the clock on first run. */
 export function markBackupDone(): void {
   const active = state.active.filter((r) => r.key !== 'backup-overdue');
   commit({ ...state, active, maintenance: { ...state.maintenance, lastBackupAt: Date.now() } });
 }
 
+/** Remove an active event by its dedupKey (used to clear a resolved condition). */
 export function dismissEventByKey(key: string): void {
   if (!state.active.some((r) => r.key === key)) return;
   commit({ ...state, active: state.active.filter((r) => r.key !== key) });

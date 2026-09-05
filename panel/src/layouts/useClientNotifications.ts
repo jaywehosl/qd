@@ -19,6 +19,11 @@ interface NotifPayload {
 const KEY = ['client', 'notifications'];
 const JSON_HEADERS = { headers: { 'Content-Type': 'application/json' } } as const;
 
+/**
+ * Reads the daemon's log, not a store in this tab: the tunnel keeps running
+ * with no page open, so an automatic refresh or a re-race that happened
+ * overnight still has to be here in the morning.
+ */
 export function useClientNotifications() {
   const queryClient = useQueryClient();
 

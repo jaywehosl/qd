@@ -169,6 +169,7 @@ func (t *tunnel) Start(servers []string, sessionID uint32) error {
 	live, err := qcli.Dial(dialCtx, qcli.Options{
 		Endpoints: servers,
 		Token:     t.token(),
+		Device:    deviceOf().ID,
 		Route:     routeTag(),
 		MTU:       t.cfg.MTU,
 		Brutal:    rateNow(),
@@ -215,6 +216,10 @@ func (t *tunnel) Start(servers []string, sessionID uint32) error {
 		live.Close()
 		cancel()
 		return fmt.Errorf("windivert: %w (run as administrator)", err)
+	}
+
+	if r := routeByProcess.Load(); r != nil {
+		go r.watchSockets(ctx, dll)
 	}
 
 	stop := make(chan struct{})
@@ -354,10 +359,15 @@ func (t *tunnel) Stop() error {
 	if dns != nil {
 		dns.Interrupt()
 	}
+	// Закрытие QUIC шлёт прощание и ждёт ядро: на мёртвой сети это может стоить
+	// десятков секунд, а кнопка «Отключиться» столько ждать не должна.
 	if live != nil {
 		go live.Close()
 	}
 
+	// Ждём остановку, но не бесконечно: кнопка «Отключиться» не должна зависеть
+	// ни от узла, ни от того, разгрёб ли очереди датапуть. Не уложились — отпускаем
+	// интерфейс, остатки дойдут сами.
 	done := make(chan struct{})
 	go func() {
 		t.wg.Wait()
@@ -402,6 +412,7 @@ func unpackDriver() (string, error) {
 	return dll, nil
 }
 
+// ServerName — точка входа, через которую туннель сейчас поднят.
 func (t *tunnel) ServerName() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()

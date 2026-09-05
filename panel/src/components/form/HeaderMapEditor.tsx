@@ -2,6 +2,22 @@ import { useEffect, useRef, useState } from 'react';
 import { MinusOutlined, PlusOutlined } from '@ant-design/icons';
 import { Button, Input } from '@/components/ds';
 
+// Reusable header-map editor. Handles the two wire shapes Xray uses for
+// HTTP-style header maps:
+//
+//   v1:   { 'Content-Type': 'application/json',  'X-Custom': 'value' }
+//         Used by WS / HTTPUpgrade / Hysteria masquerade. One value per
+//         name.
+//
+//   v2:   { 'Accept':       ['text/html', 'application/json'],
+//           'X-Forwarded':  ['1.2.3.4'] }
+//         Used by TCP HTTP camouflage request/response. Each header can
+//         repeat (RFC 7230 §3.2.2).
+//
+// Internal state is always the flat list-of-rows shape regardless of
+// mode. Conversion to/from the wire shape happens at the value/onChange
+// boundary so consumers can bind straight to a Form.Item without any
+// extra transforms on their side.
 
 export type HeaderMapMode = 'v1' | 'v2';
 
@@ -56,9 +72,17 @@ function rowsToMap(rows: HeaderRow[], mode: HeaderMapMode): Record<string, strin
 }
 
 export default function HeaderMapEditor({ mode, value, onChange }: HeaderMapEditorProps) {
+  // Local state holds rows including blanks. Without it, addRow() would
+  // append a {name:'', value:''} that rowsToMap immediately filters out
+  // before reaching the form, so the new row would never reach UI. The
+  // form-bound map only sees rows with non-empty names; blank rows live
+  // here until the user fills them in.
   const [rows, setRows] = useState<HeaderRow[]>(() => mapToRows(value));
   const lastEmittedRef = useRef<string>(JSON.stringify(rowsToMap(rows, mode)));
 
+  // Re-sync local rows when the form value changes from outside (modal
+  // re-open with edit data, JSON tab edits, etc.) but not when it's our
+  // own emission echoing back.
   useEffect(() => {
     const incoming = JSON.stringify(value ?? {});
     if (incoming === lastEmittedRef.current) return;

@@ -106,6 +106,7 @@ export default function ClientFormModal({
       });
       setGroupDraft('');
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, isEdit]);
 
   const flowCapableIds = useMemo(() => { const s = new Set<number>(); for (const r of inbounds || []) if (r?.tlsFlowCapable) s.add(r.id); return s; }, [inbounds]);
@@ -172,6 +173,8 @@ export default function ClientFormModal({
       <Dialog
         open={open}
         onOpenChange={(o) => { if (!o && !submitting) onOpenChange(false); }}
+        // Admin is a property of the client as a whole, not one field among the
+        // others, so it rides in the header beside the name.
         title={(
           <div className="cf-title">
             <span className="ef-title">

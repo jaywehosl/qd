@@ -56,6 +56,9 @@ func snapshotProcesses() []processInfo {
 	for {
 		name := windows.UTF16ToString(entry.ExeFile[:])
 		if name != "" && !strings.EqualFold(name, "System") {
+			// The path is what a rule keys on and what the icon is read from,
+			// so it is worth the handle. System processes refuse it, and those
+			// simply carry no path and no icon.
 			path := lookupProcess(entry.ProcessID).path
 			out = append(out, processInfo{
 				Name: name, Path: path, Icon: processIcon(path), PID: int(entry.ProcessID),
