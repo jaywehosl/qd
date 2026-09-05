@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"log"
 	"net"
 	"net/netip"
 	"strings"
@@ -132,6 +133,7 @@ func peersFrom(db *store.DB, selfID int) func() []qsrv.Peer {
 	return func() []qsrv.Peer {
 		network, err := db.LoadState()
 		if err != nil {
+			log.Printf("peers      the network database will not read: %v", err)
 			return nil
 		}
 

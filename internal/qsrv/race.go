@@ -10,9 +10,10 @@ import (
 )
 
 func (n *Node) raceExit(ctx context.Context, route string, seat uint32) (*http3.ClientConn, string, error) {
+	known := n.peers()
 	runners := n.exitsFor(route)
 	if len(runners) == 0 {
-		return nil, "", fmt.Errorf("no exit answers to %q", route)
+		return nil, "", fmt.Errorf("no exit answers to %q, this node knows %d exits", route, len(known))
 	}
 
 	round, stop := context.WithTimeout(ctx, exitRace)

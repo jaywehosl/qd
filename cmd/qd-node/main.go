@@ -274,12 +274,11 @@ func main() {
 			},
 		},
 		restart: func() {
-			db.Close()
 			binary, err := os.Executable()
 			if err != nil {
 				binary = os.Args[0]
 			}
-			syscall.Exec(binary, os.Args, os.Environ())
+			fatal("restart: %v", syscall.Exec(binary, os.Args, os.Environ()))
 		},
 	}
 
