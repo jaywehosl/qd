@@ -1,0 +1,795 @@
+.panel-main,
+.section-content-wrapper {
+  --size-body: 14px;
+  --size-note: 12px;
+  --pad-card: var(--step-3);
+  --gap-card: var(--step-3);
+  --row-height: 36px;
+}
+
+.section-content-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-card);
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--step-3);
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--step-2);
+  flex-wrap: wrap;
+}
+
+.ds-stats-grid {
+  display: flex;
+  gap: var(--step-4);
+  padding-inline: 50px;
+}
+
+.ds-stats-grid > * {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.ds-stats-grid > *:last-child,
+.ds-stats-grid > *:last-child > .ds-stat { align-items: flex-end; }
+
+.stat-trigger {
+  display: block;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ds-stats-grid > *:last-child { flex: 0 0 auto; }
+
+.ds-stats-grid > * { min-width: 0; }
+
+.ds-stats-grid .ds-stat__value { min-width: 3ch; }
+
+.stat-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--step-3);
+  min-height: 28px;
+}
+
+.stat-label { color: var(--text); }
+
+.online-dot,
+.state-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: var(--radius-round);
+}
+
+.online-dot { background: var(--good); }
+
+/* Takes the pill's own colour, so it stays visible on a filled pill instead of
+   disappearing into it. */
+.state-dot { background: currentColor; opacity: 0.75; }
+
+.status-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px var(--step-2);
+  border-radius: var(--radius-chip);
+  background: var(--card);
+  font-size: 12px;
+}
+
+.name-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.name-cell .name {
+  color: var(--bold);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.name-cell .remark {
+  font-size: 11px;
+  color: var(--text);
+}
+
+.address-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ip-toggle-icon,
+.reload-icon {
+  cursor: pointer;
+  color: var(--text);
+}
+
+.ip-toggle-icon:hover,
+.reload-icon:hover { color: var(--bold); }
+
+.address-visible { font-family: var(--mono); font-size: 12px; }
+.address-hidden {
+  font-family: var(--mono);
+  font-size: 12px;
+  filter: blur(4px);
+  user-select: none;
+}
+
+.row-action-trigger {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.row-action-trigger:hover { background: var(--card); color: var(--bold); }
+
+.ds-muted,
+.hint,
+.sub { color: var(--text); font-size: var(--size-note); }
+
+.node-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--step-3);
+}
+
+.node-form .ds-select {
+  width: 100%;
+  justify-content: space-between;
+  padding: 9px var(--step-3);
+  border: 1px solid var(--edge);
+  box-sizing: border-box;
+}
+
+.node-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--step-3);
+}
+
+.deploy-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--step-2);
+  padding-top: var(--step-2);
+}
+
+.deploy-script {
+  display: flex;
+  align-items: center;
+  gap: var(--step-2);
+  width: 100%;
+  padding: var(--step-2) var(--step-3);
+  border-radius: var(--radius-control);
+  background: var(--card);
+}
+
+.deploy-script__text {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.group-edit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--step-3);
+}
+
+.group-edit .ge-head {
+  display: grid;
+  grid-template-columns: 1fr 200px;
+  gap: var(--step-3);
+}
+
+.ge-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--step-3);
+  min-height: 40px;
+}
+
+.ge-toggle__label { color: var(--bold); }
+
+.ge-pick { cursor: pointer; }
+
+.group-edit .ge-picks { justify-content: center; }
+
+.group-edit .ds-divider {
+  height: auto;
+  margin: 0;
+  background: none;
+}
+
+.group-edit .ds-divider__label {
+  font-size: var(--size-note);
+  color: var(--text);
+}
+
+.setting-pair {
+  display: flex;
+  gap: var(--step-2);
+}
+
+.dns-tab {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-card);
+}
+
+.dns-head__actions { display: flex; gap: var(--step-2); }
+
+.dns-table { margin-top: var(--step-2); }
+
+.dns-stats {
+  display: flex;
+  flex-direction: column;
+  gap: var(--step-2);
+  margin-top: var(--step-4);
+}
+
+.dns-stats__row {
+  display: grid;
+  grid-template-columns: 120px repeat(6, 1fr);
+  align-items: center;
+  gap: var(--step-3);
+  font-size: var(--size-note);
+  color: var(--text);
+}
+
+.dns-stats__node {
+  justify-self: start;
+  min-width: 96px;
+  justify-content: center;
+}
+
+.dns-stats__cell {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dns-stats__cell b {
+  font-family: var(--mono);
+  font-weight: 600;
+  color: var(--bold);
+}
+
+.notif-tab {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-card);
+}
+
+.notif-tab__lead {
+  margin: 0 0 var(--step-3);
+  font-size: var(--size-note);
+  color: var(--text);
+}
+
+.notif-tab__source {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--step-4);
+  padding: var(--step-3) 0;
+}
+
+
+.notif-tab__source-label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--step-1);
+  min-width: 0;
+  color: var(--bold);
+  font-size: var(--size-body);
+  font-weight: 600;
+}
+
+.notif-tab__source-hint {
+  color: var(--text);
+  font-size: var(--size-note);
+  font-weight: 400;
+}
+
+.notif-tab__sensor-ctl {
+  flex: 0 0 220px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--step-2);
+}
+
+.notif-tab__sensor-thresh {
+  display: flex;
+  align-items: center;
+  gap: var(--step-2);
+}
+
+.notif-tab__sensor-thresh .ds-input { width: 96px; }
+
+.notif-tab__unit {
+  font-family: var(--mono);
+  font-size: var(--size-note);
+  color: var(--text);
+}
+
+.notif-tab__empty {
+  padding: var(--step-5) 0;
+  text-align: center;
+  color: var(--text);
+  font-size: var(--size-note);
+}
+
+.notif-tab__log {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.notif-tab__item {
+  display: flex;
+  align-items: center;
+  gap: var(--step-3);
+  min-height: var(--row-height);
+  padding: var(--step-2) 0;
+}
+
+
+.notif-tab__item-icon { flex: 0 0 auto; }
+
+.notif-tab__item-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--bold);
+  font-size: var(--size-note);
+}
+
+.notif-tab__item-meta {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--step-2);
+}
+
+.notif-tab__item-time {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text);
+}
+
+.ci-rows,
+.notif-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.ci-row,
+.notif-row {
+  display: flex;
+  align-items: center;
+  gap: var(--step-3);
+  min-height: var(--row-height);
+  padding: var(--step-2) 0;
+}
+
+.ci-row + .ci-row,
+.notif-row + .notif-row { border-top: 1px solid var(--edge); }
+
+.ci-row__mono { font-family: var(--mono); font-size: 12px; color: var(--text); }
+
+.notif-row__icon { flex: 0 0 auto; color: var(--text); }
+.notif-row__text { flex: 1; min-width: 0; }
+.notif-row__dismiss {
+  border: none;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.ci-empty,
+.ge-empty,
+.backup-description {
+  color: var(--text);
+  font-size: var(--size-note);
+}
+
+.backup-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--step-2);
+}
+
+.backup-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--step-3);
+  padding: var(--step-3);
+  background: var(--card);
+  border-radius: var(--radius-control);
+}
+
+.backup-title { color: var(--bold); font-weight: 500; }
+
+.series {
+  display: flex;
+  flex-direction: column;
+  gap: var(--step-2);
+}
+
+.series-title { color: var(--bold); font-weight: 500; }
+
+.panel-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-card);
+}
+
+.panel-page .section-header {
+  padding-bottom: var(--step-3);
+  border-bottom: 1px solid var(--edge);
+}
+
+.panel-page .section-header h2 {
+  font-size: var(--size-title);
+  font-weight: 700;
+  color: var(--bold);
+}
+
+/* The two roles share one full-width card now, so the switch stands where the
+   second column used to be. */
+.inb-roles {
+  display: flex;
+  justify-content: center;
+}
+
+.inb-roles .vertical-tabs-container { min-width: 260px; }
+
+/* Ingress and egress hold different rows, so an auto layout re-measures every
+   column on each switch and the headers jump. Fixed shares hold them still. */
+.inbound-table .ds-table { table-layout: fixed; }
+
+.inbound-table .ds-table th:nth-child(1),
+.inbound-table .ds-table td:nth-child(1) { width: 17%; }
+
+.inbound-table .ds-table th:nth-child(2),
+.inbound-table .ds-table td:nth-child(2) { width: 14%; }
+
+.inbound-table .ds-table th:nth-child(3),
+.inbound-table .ds-table td:nth-child(3) { width: 16%; }
+
+.inbound-table .ds-table th:nth-child(4),
+.inbound-table .ds-table td:nth-child(4) { width: 10%; }
+
+.inbound-table .ds-table th:nth-child(5),
+.inbound-table .ds-table td:nth-child(5) { width: 25%; }
+
+.inbound-table .ds-table th:nth-child(6),
+.inbound-table .ds-table td:nth-child(6) { width: 18%; }
+
+/* Clients ------------------------------------------------------------------ */
+
+/* The name leads, the comment sits under it — clipped rather than pushing the
+   row wide. The key itself belongs in the client's own card, not the list. */
+.email-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.email-cell .email {
+  font-weight: 500;
+  color: var(--bold);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.email-cell .sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
+/* Same reason as the entrypoint table: the set of rows changes under filters
+   and sorting, and an auto layout re-measures every column each time. */
+.client-table .ds-table { table-layout: fixed; }
+
+.client-table .ds-table th:nth-child(1),
+.client-table .ds-table td:nth-child(1) { width: 172px; }
+
+.client-table .ds-table th:nth-child(2),
+.client-table .ds-table td:nth-child(2) { width: 84px; }
+
+.client-table .ds-table th:nth-child(3),
+.client-table .ds-table td:nth-child(3) { width: 104px; }
+
+.client-table .ds-table th:nth-child(5),
+.client-table .ds-table td:nth-child(5) { width: 132px; }
+
+.client-table .ds-table th:nth-child(6),
+.client-table .ds-table td:nth-child(6) { width: 128px; }
+
+.client-table .ds-table th:nth-child(7),
+.client-table .ds-table td:nth-child(7) { width: 118px; }
+
+.row-delete { color: #e03a2f; }
+.row-delete:hover { background: #e03a2f; color: #fff; }
+
+
+/* Pills sized by their text come out ragged down a column — an "∞" against a
+   date, a dot against a bare word. Give each status column one width. */
+.client-table .ds-table td:nth-child(3) .ds-tag {
+  min-width: 84px;
+  justify-content: center;
+}
+
+.client-table .ds-table td:nth-child(7) .ds-tag {
+  min-width: 76px;
+  justify-content: center;
+}
+
+.group-table .ds-table td:nth-child(4) .ds-tag {
+  min-width: 76px;
+  justify-content: center;
+}
+
+.node-table .ds-table { table-layout: fixed; }
+
+.node-table .ds-table th:nth-child(1),
+.node-table .ds-table td:nth-child(1) { width: 100px; }
+
+.node-table .ds-table th:nth-child(2),
+.node-table .ds-table td:nth-child(2) { width: 76px; }
+
+.node-table .ds-table th:nth-child(3),
+.node-table .ds-table td:nth-child(3) { width: 108px; }
+
+.node-table .ds-table th:nth-child(4),
+.node-table .ds-table td:nth-child(4) { width: 244px; }
+
+.node-table .ds-table th:nth-child(5),
+.node-table .ds-table td:nth-child(5) { width: 78px; }
+
+.node-table .ds-table th:nth-child(6),
+.node-table .ds-table td:nth-child(6) { width: 84px; }
+
+.node-table .ds-table th:nth-child(7),
+.node-table .ds-table td:nth-child(7) { width: 78px; }
+
+.node-table .ds-table th:nth-child(8),
+.node-table .ds-table td:nth-child(8) { width: 84px; }
+
+.node-table .ds-table th:nth-child(9),
+.node-table .ds-table td:nth-child(9) { width: 92px; }
+
+.node-table .ds-table td:nth-child(7) .ds-tag {
+  min-width: 60px;
+  justify-content: center;
+}
+
+.node-table .ds-table td:nth-child(9) .ds-tag,
+.node-table .ds-table td:nth-child(10) .ds-tag {
+  min-width: 72px;
+  justify-content: center;
+}
+
+/* The filter row: search and sort on the left, the count and the reset pushed
+   to the far edge so they read as a summary rather than another control. */
+.filter-count {
+  color: var(--text);
+  font-size: var(--size-note);
+  white-space: nowrap;
+}
+
+.filter-chips {
+  display: flex;
+  align-items: center;
+  gap: var(--step-2);
+  flex-wrap: wrap;
+  padding: 0 var(--step-3) var(--step-3);
+}
+
+.filter-chip { padding-inline-end: 4px; }
+
+.filter-chip__x {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-inline-start: 2px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-round);
+  background: none;
+  color: inherit;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.filter-chip__x:hover {
+  background: rgba(0, 0, 0, 0.15);
+  opacity: 1;
+}
+
+.clients-add {
+  display: flex;
+  justify-content: center;
+}
+
+.clients-add .vertical-tabs-container { min-width: 260px; }
+
+.card-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--step-2);
+  padding: var(--step-3);
+  flex-wrap: wrap;
+}
+
+.card-toolbar.is-stacked { gap: var(--step-2); }
+
+.toolbar-search {
+  position: relative;
+  flex: 1;
+  min-width: 180px;
+  max-width: 320px;
+}
+
+.toolbar-search__icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.toolbar-search .ds-input { padding-inline-start: 32px; }
+
+.toolbar-sort { min-width: 190px; }
+
+/* Pushed to the far end so the row reads left to right: act, search, sort,
+   then where you are. */
+.toolbar-pages { margin-inline-start: auto; }
+
+/* Every control in the row lines up on one baseline: the input, the select and
+   the pager each brought their own height and the strip came out stepped. */
+.card-toolbar > *,
+.card-toolbar .ds-btn,
+.card-toolbar .ds-input,
+.card-toolbar .ds-select {
+  height: 36px;
+  box-sizing: border-box;
+}
+
+.card-toolbar .ds-btn,
+.card-toolbar .ds-select { padding-block: 0; }
+
+.card-toolbar .toolbar-search,
+.card-toolbar .toolbar-sort,
+.card-toolbar .toolbar-pages {
+  display: flex;
+  align-items: center;
+}
+
+.card-toolbar .ds-pagination { gap: var(--step-2); }
+
+/* The pager carries a top padding for its usual place under a table; in the
+   toolbar that padding is what pushes it off the line. */
+.card-toolbar .ds-pagination {
+  padding: 0;
+  gap: var(--step-2);
+}
+
+/* The action buttons carried their own light fill, which sat brighter than the
+   highlighted row. They go bare and share one travelling highlight instead —
+   the same behaviour as the header. */
+.row-actions {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* Both tables draw the same highlight, so their buttons carry the same box —
+   the clients table was a size larger. */
+.row-actions .ds-btn {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  flex: 0 0 30px;
+}
+
+.row-actions .ds-btn {
+  position: relative;
+  z-index: 1;
+  background: none;
+}
+
+.row-actions .ds-btn:hover { filter: none; }
+
+.row-actions .chp-glow { background: var(--press); }
+
+/* A neutral pill is filled with --card, which on a card of the same colour
+   leaves it barely there at rest and lighter than the row under the cursor.
+   A translucent tint reads as a pill either way, and deepens on hover. */
+.client-table .ds-table .ds-tag:not([class*='--']),
+.group-table .ds-table .ds-tag:not([class*='--']),
+.node-table .ds-table .ds-tag:not([class*='--']),
+.inbound-table .ds-table .ds-tag:not([class*='--']) {
+  background: var(--edge);
+}
+
+.client-table .ds-table tbody tr:hover .ds-tag:not([class*='--']),
+.group-table .ds-table tbody tr:hover .ds-tag:not([class*='--']),
+.node-table .ds-table tbody tr:hover .ds-tag:not([class*='--']),
+.inbound-table .ds-table tbody tr:hover .ds-tag:not([class*='--']) {
+  background: var(--press);
+}
+
+/* Figures about the network wear the network's colour; grey was reading as
+   "nothing here". */
+.inbound-table .ds-table td:nth-child(4) .ds-tag,
+.inbound-table .ds-table td:nth-child(5) .ds-tag,
+.inbound-table .ds-table td:nth-child(6) .ds-tag,
+.inbound-table .ds-table tbody tr:hover td:nth-child(4) .ds-tag,
+.inbound-table .ds-table tbody tr:hover td:nth-child(5) .ds-tag,
+.inbound-table .ds-table tbody tr:hover td:nth-child(6) .ds-tag {
+  background: var(--good);
+  color: #fff;
+}
+
+/* Room for three digits: the count is a live figure and must not resize the
+   column when it grows. */
+.inbound-table .ds-table td:nth-child(4) .ds-tag {
+  min-width: 54px;
+  justify-content: center;
+}
+
+/* Deleting still gets its own warning colour, above the shared highlight. */
+.row-actions .row-delete:hover {
+  background: #e03a2f;
+  color: #fff;
+}

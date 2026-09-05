@@ -1,0 +1,57 @@
+:root {
+  --ink: #ffffff;
+  --card: #f4f4f4;
+  --bold: #000000;
+  --text: #585858;
+  --good: #71d888;
+  --idle: #cfcfcf;
+  --edge: rgba(28, 28, 30, 0.10);
+  --press: rgba(28, 28, 30, 0.12);
+
+  --radius-card: 32px;
+  --radius-control: 14px;
+  --radius-chip: 12px;
+  --radius-round: 999px;
+
+  --font: 'Inter', system-ui, sans-serif;
+  --mono: ui-monospace, 'Cascadia Mono', 'Consolas', monospace;
+
+  --size-display: 48px;
+  --size-title: 28px;
+  --size-lead: 18px;
+  --size-section: 16px;
+  --size-body: 16px;
+  --size-note: 13px;
+
+  --step-1: 4px;
+  --step-2: 8px;
+  --step-3: 16px;
+  --step-4: 24px;
+  --step-5: 32px;
+  --step-6: 64px;
+
+  --page-width: 800px;
+  --pad-card: var(--step-4);
+  --gap-card: var(--step-4);
+  --row-height: 44px;
+  --bar-height: 64px;
+}
+
+.is-dense {
+  --size-body: 14px;
+  --size-note: 12px;
+  --pad-card: var(--step-3);
+  --gap-card: var(--step-3);
+  --row-height: 36px;
+}
+
+html.is-dark {
+  --ink: #000000;
+  --card: #131318;
+  --bold: #ffffff;
+  --text: #7c7c82;
+  --good: #1e9e4a;
+  --idle: #232327;
+  --edge: rgba(255, 255, 255, 0.12);
+  --press: rgba(255, 255, 255, 0.15);
+}

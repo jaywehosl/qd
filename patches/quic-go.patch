@@ -1,0 +1,359 @@
+diff -ruN '--exclude=.git' qg-orig/datagram_queue.go C:/Users/jaywehosl/Desktop/quic-diver/third_party/quic-go/datagram_queue.go
+--- a/datagram_queue.go	2026-09-03 18:08:01.662963200 +0300
++++ b/datagram_queue.go	2026-09-03 00:52:25.978313000 +0300
+@@ -3,15 +3,35 @@
+ import (
+ 	"context"
+ 	"sync"
++	"sync/atomic"
+ 
+ 	"github.com/quic-go/quic-go/internal/utils"
+ 	"github.com/quic-go/quic-go/internal/utils/ringbuffer"
+ 	"github.com/quic-go/quic-go/internal/wire"
+ )
+ 
++// QUIC Diver: диагностика потерь датаграмм. Дроп на приёме = потеря IP-пакета в
++// туннеле → TCP внутри видит потерю и рушит cwnd. Счётчики глобальные, читаются
++// из приложения (DatagramStats).
++var (
++	datagramsDropped atomic.Uint64
++	datagramsRcvd    atomic.Uint64
++)
++
++// DatagramStats возвращает число принятых и молча отброшенных (переполнение
++// очереди приёма) датаграмм.
++func DatagramStats() (received, dropped uint64) {
++	return datagramsRcvd.Load(), datagramsDropped.Load()
++}
++
+ const (
+-	maxDatagramSendQueueLen = 32
+-	maxDatagramRcvQueueLen  = 128
++	// QUIC Diver: очереди под bulk-трафик, но НАМЕРЕННО небольшие.
++	// Upstream (32/128) рассчитан на редкие сигнальные датаграммы: send блокировал
++	// отправителя (stop-and-go), rcv молча дропал при burst. Раздувать тоже нельзя:
++	// длинная очередь = bufferbloat (пакет ждёт дренажа → RTT под нагрузкой растёт).
++	// Ориентир — покрыть burst обработки, а не BDP (за in-flight отвечает congestion).
++	maxDatagramSendQueueLen = 256
++	maxDatagramRcvQueueLen  = 1024
+ )
+ 
+ type datagramQueue struct {
+@@ -104,8 +124,13 @@
+ 		}
+ 	}
+ 	h.rcvMx.Unlock()
+-	if !queued && h.logger.Debug() {
+-		h.logger.Debugf("Discarding received DATAGRAM frame (%d bytes payload)", len(f.Data))
++	if queued {
++		datagramsRcvd.Add(1)
++	} else {
++		datagramsDropped.Add(1) // QUIC Diver: потеря IP-пакета в туннеле
++		if h.logger.Debug() {
++			h.logger.Debugf("Discarding received DATAGRAM frame (%d bytes payload)", len(f.Data))
++		}
+ 	}
+ }
+ 
+diff -ruN '--exclude=.git' qg-orig/internal/ackhandler/sent_packet_handler.go C:/Users/jaywehosl/Desktop/quic-diver/third_party/quic-go/internal/ackhandler/sent_packet_handler.go
+--- a/internal/ackhandler/sent_packet_handler.go	2026-09-03 18:08:01.841916700 +0300
++++ b/internal/ackhandler/sent_packet_handler.go	2026-09-03 00:52:25.978313000 +0300
+@@ -3,6 +3,8 @@
+ import (
+ 	"errors"
+ 	"fmt"
++	"os"
++	"strconv"
+ 	"time"
+ 
+ 	"github.com/quic-go/quic-go/internal/congestion"
+@@ -129,14 +131,7 @@
+ 	qlogger qlogwriter.Recorder,
+ 	logger utils.Logger,
+ ) SentPacketHandler {
+-	congestion := congestion.NewCubicSender(
+-		congestion.DefaultClock{},
+-		rttStats,
+-		connStats,
+-		initialMaxDatagramSize,
+-		true, // use Reno
+-		qlogger,
+-	)
++	congestion := qdNewCongestion(rttStats, connStats, initialMaxDatagramSize, qlogger)
+ 
+ 	h := &sentPacketHandler{
+ 		peerCompletedAddressValidation: pers == protocol.PerspectiveServer,
+@@ -1131,13 +1126,41 @@
+ 	for pn := range h.appDataPackets.history.PathProbes() {
+ 		h.appDataPackets.history.RemovePathProbe(pn)
+ 	}
+-	h.congestion = congestion.NewCubicSender(
++	h.congestion = qdNewCongestion(h.rttStats, h.connStats, initialMaxDatagramSize, h.qlogger)
++	h.setLossDetectionTimer(now)
++}
++
++// qdNewCongestion — QUIC Diver: выбор congestion control.
++//
++// По умолчанию Cubic. Upstream хардкодил Reno («true, // use Reno»), а тот режет
++// окно вдвое на каждой потере и растёт линейно — на длинном плече не успевает
++// восстанавливаться между редкими потерями.
++//
++// QD_BRUTAL_MBPS=N включает brutal: слать ровно N Мбит/с, игнорируя потери.
++// Он нужен там, где канал свободен (RTT под нагрузкой не растёт), но сеть даёт
++// редкие случайные потери: измерено, что loss-based CC теряет на них четверть
++// полосы (458-561 Мбит против 756 у сырого UDP на том же пути). Значение ставить
++// НИЖЕ реальной пропускной способности, иначе получим очереди и рост RTT.
++func qdNewCongestion(
++	rttStats *utils.RTTStats,
++	connStats *utils.ConnectionStats,
++	initialMaxDatagramSize protocol.ByteCount,
++	qlogger qlogwriter.Recorder,
++) congestion.SendAlgorithmWithDebugInfos {
++	if mbps, _ := strconv.Atoi(os.Getenv("QD_BRUTAL_MBPS")); mbps > 0 {
++		return congestion.NewBrutalSender(
++			congestion.DefaultClock{},
++			rttStats,
++			congestion.Bandwidth(mbps)*1_000_000*congestion.BitsPerSecond,
++			initialMaxDatagramSize,
++		)
++	}
++	return congestion.NewCubicSender(
+ 		congestion.DefaultClock{},
+-		h.rttStats,
+-		h.connStats,
++		rttStats,
++		connStats,
+ 		initialMaxDatagramSize,
+-		true, // use Reno
+-		h.qlogger,
++		false, // Cubic, не Reno
++		qlogger,
+ 	)
+-	h.setLossDetectionTimer(now)
+ }
+diff -ruN '--exclude=.git' qg-orig/internal/congestion/brutal_sender.go C:/Users/jaywehosl/Desktop/quic-diver/third_party/quic-go/internal/congestion/brutal_sender.go
+--- a/internal/congestion/brutal_sender.go	1970-01-01 03:00:00.000000000 +0300
++++ b/internal/congestion/brutal_sender.go	2026-09-03 00:52:25.985199800 +0300
+@@ -0,0 +1,92 @@
++package congestion
++
++import (
++	"time"
++
++	"github.com/quic-go/quic-go/internal/monotime"
++	"github.com/quic-go/quic-go/internal/protocol"
++	"github.com/quic-go/quic-go/internal/utils"
++)
++
++// brutalSender — congestion control, который шлёт с ЗАДАННОЙ полосой и не считает
++// потери сигналом перегрузки (идея из Hysteria).
++//
++// Зачем (измерено на живом плече 850 км, RTT 17-25 мс):
++//
++//	сырой UDP (потери игнорирует)      — 756 Мбит
++//	QUIC с loss-based CC (Reno/Cubic)  — 458-561, плавает вслед за потерями
++//	потери сети                        — 0.016-0.27%, RTT при этом здоров
++//
++// То есть канал свободен (очередей нет, RTT не растёт), но редкие случайные
++// потери заставляют loss-based алгоритм резать окно и терять четверть полосы.
++// Brutal их игнорирует и держит заданный темп.
++//
++// Цена: полоса задаётся вручную. Задрать выше реальной — получить очереди и рост
++// RTT (bufferbloat), поэтому ставить надо НИЖЕ измеренной пропускной способности.
++type brutalSender struct {
++	clock           Clock
++	rttStats        *utils.RTTStats
++	bps             Bandwidth
++	maxDatagramSize protocol.ByteCount
++	pacer           *pacer
++}
++
++// NewBrutalSender создаёт sender с фиксированной полосой bps.
++func NewBrutalSender(clock Clock, rttStats *utils.RTTStats, bps Bandwidth, initialMaxDatagramSize protocol.ByteCount) SendAlgorithmWithDebugInfos {
++	b := &brutalSender{
++		clock:           clock,
++		rttStats:        rttStats,
++		bps:             bps,
++		maxDatagramSize: initialMaxDatagramSize,
++	}
++	b.pacer = newPacer(func() Bandwidth { return b.bps })
++	return b
++}
++
++func (b *brutalSender) TimeUntilSend(_ protocol.ByteCount) monotime.Time {
++	return b.pacer.TimeUntilSend()
++}
++
++func (b *brutalSender) HasPacingBudget(now monotime.Time) bool {
++	return b.pacer.Budget(now) >= b.maxDatagramSize
++}
++
++func (b *brutalSender) OnPacketSent(sentTime monotime.Time, _ protocol.ByteCount, _ protocol.PacketNumber, bytes protocol.ByteCount, _ bool) {
++	b.pacer.SentPacket(sentTime, bytes)
++}
++
++func (b *brutalSender) CanSend(bytesInFlight protocol.ByteCount) bool {
++	return bytesInFlight < b.GetCongestionWindow()
++}
++
++// GetCongestionWindow — окно по модели полосы: BDP с двойным запасом, чтобы
++// пейсер не простаивал в ожидании ACK.
++func (b *brutalSender) GetCongestionWindow() protocol.ByteCount {
++	rtt := b.rttStats.SmoothedRTT()
++	if rtt <= 0 {
++		rtt = 100 * time.Millisecond // до первых замеров
++	}
++	cwnd := protocol.ByteCount(uint64(b.bps) * uint64(rtt) / uint64(time.Second) / 8 * 2)
++	if min := 4 * b.maxDatagramSize; cwnd < min {
++		cwnd = min
++	}
++	return cwnd
++}
++
++// Потери и таймауты игнорируем намеренно — в этом весь смысл алгоритма.
++func (b *brutalSender) MaybeExitSlowStart()                                                     {}
++func (b *brutalSender) OnPacketAcked(protocol.PacketNumber, protocol.ByteCount, protocol.ByteCount, monotime.Time) {}
++func (b *brutalSender) OnCongestionEvent(protocol.PacketNumber, protocol.ByteCount, protocol.ByteCount) {}
++func (b *brutalSender) OnRetransmissionTimeout(bool)                                            {}
++
++func (b *brutalSender) SetMaxDatagramSize(s protocol.ByteCount) {
++	b.maxDatagramSize = s
++	b.pacer.SetMaxDatagramSize(s)
++}
++
++// --- SendAlgorithmWithDebugInfos ---
++
++func (b *brutalSender) InSlowStart() bool                   { return false }
++func (b *brutalSender) InRecovery() bool                    { return false }
++func (b *brutalSender) GetSlowStartThreshold() protocol.ByteCount { return 0 }
++func (b *brutalSender) BandwidthEstimate() Bandwidth        { return b.bps }
+diff -ruN '--exclude=.git' qg-orig/send_queue.go C:/Users/jaywehosl/Desktop/quic-diver/third_party/quic-go/send_queue.go
+--- a/send_queue.go	2026-09-03 18:08:02.009639400 +0300
++++ b/send_queue.go	2026-09-03 18:07:27.073180400 +0300
+@@ -87,12 +87,16 @@
+ 			// make sure that all queued packets are actually sent out
+ 			shouldClose = true
+ 		case e := <-h.queue:
+-			if err := h.conn.Write(e.buf.Data, e.gsoSize, e.ecn); err != nil {
++			send := func() error { return h.conn.Write(e.buf.Data, e.gsoSize, e.ecn) }
++			if err := send(); err != nil {
++				if isTransientSendErr(err) {
++					err = retrySend(send, err)
++				}
+ 				// This additional check enables:
+ 				// 1. Checking for "datagram too large" message from the kernel, as such,
+ 				// 2. Path MTU discovery,and
+ 				// 3. Eventual detection of loss PingFrame.
+-				if !isSendMsgSizeErr(err) {
++				if err != nil && !isSendMsgSizeErr(err) {
+ 					return err
+ 				}
+ 			}
+diff -ruN '--exclude=.git' qg-orig/send_transient_other.go C:/Users/jaywehosl/Desktop/quic-diver/third_party/quic-go/send_transient_other.go
+--- a/send_transient_other.go	1970-01-01 03:00:00.000000000 +0300
++++ b/send_transient_other.go	2026-09-03 18:07:17.723219900 +0300
+@@ -0,0 +1,9 @@
++//go:build !windows && !linux
++
++package quic
++
++// На не-Windows временных ошибок отправки не разбираем: ядро либо принимает
++// пакет, либо возвращает настоящий отказ пути.
++func isTransientSendErr(error) bool { return false }
++
++func retrySend(_ func() error, err error) error { return err }
+diff -ruN '--exclude=.git' qg-orig/send_transient_windows.go C:/Users/jaywehosl/Desktop/quic-diver/third_party/quic-go/send_transient_windows.go
+--- a/send_transient_windows.go	1970-01-01 03:00:00.000000000 +0300
++++ b/send_transient_windows.go	2026-09-03 18:07:17.684880700 +0300
+@@ -0,0 +1,38 @@
++//go:build windows
++
++package quic
++
++import (
++	"errors"
++	"time"
++
++	"golang.org/x/sys/windows"
++)
++
++// Ядро Windows отвечает WSAENOBUFS, когда очередь сокета переполнена: на отдаче
++// в сотни мегабит это «повтори позже», а не отказ пути. Upstream роняет по любой
++// ошибке записи всю сессию (sendQueue.Run), и туннель умирал на середине
++// аплоада — с ним и все живые соединения приложений.
++//
++// Ждём столько, сколько нужно ядру, чтобы разгрести очередь, и повторяем. Если
++// не помогло за transientTries — пакет теряется, но соединение остаётся: потерю
++// QUIC закроет своим ретрансмитом.
++const (
++	transientTries = 12
++	transientPause = 250 * time.Microsecond
++)
++
++func isTransientSendErr(err error) bool {
++	return errors.Is(err, windows.WSAENOBUFS) || errors.Is(err, windows.WSAEWOULDBLOCK)
++}
++
++func retrySend(send func() error, err error) error {
++	for i := 0; i < transientTries && isTransientSendErr(err); i++ {
++		time.Sleep(transientPause)
++		err = send()
++	}
++	if isTransientSendErr(err) {
++		return nil // сдались на этом пакете, но сессию не рвём
++	}
++	return err
++}
+diff -ruN '--exclude=.git' qg-orig/send_transient_unix.go C:/Users/jaywehosl/Desktop/quic-diver/third_party/quic-go/send_transient_unix.go
+--- a/send_transient_unix.go	1970-01-01 03:00:00.000000000 +0300
++++ b/send_transient_unix.go	2026-09-04 19:13:32.000000000 +0300
+@@ -0,0 +1,49 @@
++//go:build linux
++
++package quic
++
++import (
++	"errors"
++	"time"
++
++	"golang.org/x/sys/unix"
++)
++
++// Очередь сокета переполнена — это «повтори позже», а не отказ пути.
++const (
++	transientTries = 12
++	transientPause = 250 * time.Microsecond
++)
++
++func isBusySendErr(err error) bool {
++	return errors.Is(err, unix.ENOBUFS) || errors.Is(err, unix.EAGAIN)
++}
++
++// Путь пропал: телефон ушёл с Wi-Fi на соту, интерфейс исчез, маршрута нет.
++// Upstream роняет по такой ошибке всю сессию (sendQueue.Run), и туннель умирал
++// в момент смены сети — раньше, чем система успевала сообщить о новой сети и
++// раньше, чем QUIC успевал переехать миграцией.
++//
++// Повторять здесь нечего — маршрута нет, — но и рвать сессию нельзя: пакет
++// теряется, соединение живёт, миграция переносит его на новый путь.
++func isPathGoneErr(err error) bool {
++	return errors.Is(err, unix.ENETUNREACH) || errors.Is(err, unix.EHOSTUNREACH) ||
++		errors.Is(err, unix.ENETDOWN) || errors.Is(err, unix.EADDRNOTAVAIL) ||
++		errors.Is(err, unix.EPERM)
++}
++
++func isTransientSendErr(err error) bool { return isBusySendErr(err) || isPathGoneErr(err) }
++
++func retrySend(send func() error, err error) error {
++	if isPathGoneErr(err) {
++		return nil
++	}
++	for i := 0; i < transientTries && isBusySendErr(err); i++ {
++		time.Sleep(transientPause)
++		err = send()
++	}
++	if isTransientSendErr(err) {
++		return nil
++	}
++	return err
++}

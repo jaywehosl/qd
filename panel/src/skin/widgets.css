@@ -1,0 +1,189 @@
+.custom-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: var(--step-4);
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.custom-modal-container {
+  width: 100%;
+  max-width: 520px;
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--ink);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+html.is-dark .custom-modal-container,
+html.is-dark .busy-overlay__card,
+html.is-dark .custom-card { border: 1px solid var(--edge); }
+
+.custom-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--step-3);
+  padding: var(--step-4) var(--step-4) var(--step-3);
+}
+
+.custom-modal-title {
+  font-size: var(--size-title);
+  font-weight: 700;
+  color: var(--bold);
+}
+
+.custom-modal-close {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: var(--radius-round);
+  background: var(--card);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.custom-modal-body { padding: 0 var(--step-4) var(--step-4); overflow: auto; }
+
+.custom-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--step-2);
+  padding: var(--step-3) var(--step-4) var(--step-4);
+  border-top: 1px solid var(--edge);
+}
+
+.custom-card {
+  background: var(--card);
+  border-radius: var(--radius-card);
+  box-sizing: border-box;
+}
+
+.custom-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--step-3);
+  padding: var(--pad-card) var(--pad-card) var(--step-2);
+}
+
+.custom-card-title { font-weight: 700; color: var(--bold); }
+.custom-card-body { padding: 0 var(--pad-card) var(--pad-card); }
+
+.custom-card-actions {
+  display: flex;
+  gap: var(--step-2);
+  padding: var(--step-2) var(--pad-card) var(--pad-card);
+}
+
+.custom-card-action-item { flex: 1; }
+
+.custom-alert-title { color: var(--bold); font-weight: 500; }
+.custom-alert-desc { color: var(--text); font-size: var(--size-note); }
+
+.custom-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: var(--radius-round);
+  background: var(--good);
+  color: #fff;
+  font-size: 11px;
+}
+
+.custom-badge-text { line-height: 1; }
+
+.custom-back-top {
+  position: fixed;
+  right: var(--step-4);
+  bottom: var(--step-4);
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: var(--radius-round);
+  background: var(--card);
+  color: var(--bold);
+  cursor: pointer;
+  z-index: 50;
+}
+
+.busy-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.busy-overlay__card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--step-3);
+  padding: var(--step-5);
+  background: var(--ink);
+  border-radius: var(--radius-card);
+  text-align: center;
+}
+
+.busy-overlay__title { font-size: var(--size-section); font-weight: 700; color: var(--bold); }
+.busy-overlay__subtitle,
+.busy-overlay__text { font-size: var(--size-note); color: var(--text); }
+
+.busy-overlay__ring {
+  width: 44px;
+  height: 44px;
+  border: 3px solid var(--card);
+  border-top-color: var(--good);
+  border-radius: var(--radius-round);
+  animation: ds-spin 0.9s linear infinite;
+}
+
+.boot-loader-hud {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--step-3);
+  background: var(--ink);
+}
+
+.boot-loader-canvas { position: absolute; inset: 0; }
+.boot-loader-logo { font-weight: 700; color: var(--bold); }
+.boot-loader-sub { font-size: var(--size-note); color: var(--text); }
+
+.boot-progress-bar {
+  width: 200px;
+  height: 4px;
+  border-radius: var(--radius-round);
+  background: var(--card);
+  overflow: hidden;
+}
+
+.boot-progress-fill {
+  height: 100%;
+  background: var(--good);
+  transition: width 0.2s linear;
+}
+
+.btn-icon { display: inline-grid; place-items: center; }
+.btn-loading-indicator { display: inline-block; }
+
+.btn-execute-plan {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--step-2);
+}

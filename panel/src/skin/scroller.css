@@ -1,0 +1,109 @@
+html {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+/* Keep this list in step with AREAS in scroller.ts: every area that gets an
+   overlay rail must lose its native bar, or both show at once. */
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+.ds-dialog__body::-webkit-scrollbar,
+.notif-list::-webkit-scrollbar,
+.rt-picker__list::-webkit-scrollbar,
+.log-body::-webkit-scrollbar,
+.log-container::-webkit-scrollbar,
+.deploy-script__text::-webkit-scrollbar,
+.ds-table-wrap::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.ds-dialog__body,
+.notif-list,
+.rt-picker__list,
+.log-body,
+.log-container,
+.deploy-script__text,
+.ds-table-wrap {
+  scrollbar-width: none;
+}
+
+/* A clip pinned to the edge: whatever sits outside it is invisible, so the
+   track emerges from under the border instead of gliding in from open space. */
+.qd-scroll {
+  position: fixed;
+  width: 16px;
+  z-index: 400;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.qd-scroll__track {
+  position: absolute;
+  top: 8px;
+  right: 3px;
+  width: 10px;
+  border-radius: var(--radius-round);
+  background: var(--edge);
+  opacity: 0;
+  transform: translateX(16px) scaleY(0.4);
+  transform-origin: right center;
+  transition: transform 0.28s cubic-bezier(0.4, 0.12, 0.28, 1),
+              opacity 0.2s ease,
+              background 0.15s ease;
+}
+
+.qd-scroll.is-live {
+  pointer-events: auto;
+}
+
+/* Unfolds as it arrives and rolls back up into the edge as it leaves. */
+.qd-scroll.is-live .qd-scroll__track {
+  opacity: 1;
+  transform: translateX(0) scaleY(1);
+}
+
+.qd-scroll__thumb {
+  position: absolute;
+  left: 2px;
+  top: 0;
+  width: 6px;
+  border-radius: var(--radius-round);
+  background: var(--text);
+  opacity: 0.85;
+  cursor: grab;
+  transition: opacity 0.15s ease;
+}
+
+.qd-scroll--x {
+  width: auto;
+  height: 16px;
+}
+
+.qd-scroll--x .qd-scroll__track {
+  top: auto;
+  right: auto;
+  bottom: 3px;
+  left: 8px;
+  width: auto;
+  height: 10px;
+  transform: translateY(16px) scaleX(0.4);
+  transform-origin: center bottom;
+}
+
+.qd-scroll--x.is-live .qd-scroll__track {
+  transform: translateY(0) scaleX(1);
+}
+
+.qd-scroll--x .qd-scroll__thumb {
+  left: 0;
+  top: auto;
+  bottom: 2px;
+  width: auto;
+  height: 6px;
+}
+
+.qd-scroll:hover .qd-scroll__thumb,
+.qd-scroll.is-held .qd-scroll__thumb { opacity: 1; }
+
+.qd-scroll.is-held .qd-scroll__thumb { cursor: grabbing; }

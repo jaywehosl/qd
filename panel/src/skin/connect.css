@@ -1,0 +1,276 @@
+.cx {
+  width: 100%;
+  max-width: var(--page-width);
+  margin: 0 auto;
+  padding: var(--step-4);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-card);
+}
+
+.cx-card {
+  background: var(--card);
+  border-radius: var(--radius-card);
+  box-sizing: border-box;
+}
+
+html.is-dark .cx-card { border: 1px solid var(--edge); }
+
+.cx-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--step-3);
+  padding: var(--step-2) var(--step-2) var(--step-2) var(--step-4);
+}
+
+.cx-head .cx-tag { flex: 1; }
+
+.cx-tag {
+  font-size: var(--size-title);
+  font-weight: 700;
+  color: var(--bold);
+}
+
+/* Sits on the card's own middle, not on the middle of whatever room the
+   neighbours leave. The seam between words and digits is what is centred, so a
+   reading growing from 9:04 to 1:09:04 spills rightwards and the words hold. */
+.cx-refresh-line {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--size-note);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Room for the longest reading (1:09:04) is held even while it is short, so
+   the whole line keeps one width and the words never shift under it. */
+.cx-refresh-line__value {
+  min-width: 52px;
+  text-align: left;
+}
+
+.cx-again {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: var(--radius-round);
+  background: var(--good);
+  color: #fff;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  transition: filter 0.2s ease,
+              transform 0.24s cubic-bezier(0.4, 0.12, 0.28, 1);
+}
+
+.cx-again:hover { filter: brightness(1.06); transform: scale(1.08); }
+.cx-again:active { transform: scale(0.92); transition-duration: 0.14s; }
+.cx-again.is-busy { animation: cx-spin 0.9s linear infinite; }
+
+@keyframes cx-spin { to { transform: rotate(360deg); } }
+
+.cx-stage {
+  position: relative;
+  height: 336px;
+  overflow: hidden;
+}
+
+.cx-flow {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.cx-roster {
+  position: absolute;
+  left: var(--step-4);
+  bottom: 20%;
+  width: calc(50% - 40px);
+  max-height: 26%;
+  overflow: hidden;
+  transition: opacity 0.2s linear;
+}
+
+.cx-roster.is-wide {
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 34%;
+  max-height: 24%;
+}
+
+.cx-node {
+  display: flex;
+  align-items: center;
+  gap: var(--step-2);
+  padding: 3px 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+}
+
+.cx-node__name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* The dot is the anchor, not the reading: a two- or three-digit latency grows
+   to the right instead of shoving the dot around. */
+.cx-node__ping {
+  flex: 0 0 48px;
+  text-align: left;
+}
+
+.cx-dot {
+  flex: 0 0 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-round);
+  background: var(--idle);
+}
+
+.cx-dot.is-up { background: var(--good); }
+
+.cx-pair,
+.cx-single {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: var(--step-3);
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  transition: opacity 0.2s linear;
+}
+
+.cx-pair > .cx-pill { margin: 0 12%; }
+
+.cx-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 96px;
+  padding: 6px var(--step-3);
+  border-radius: var(--radius-chip);
+  background: var(--ink);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.cx-pill--wide {
+  min-width: 42%;
+  justify-content: space-between;
+  padding: 6px var(--step-4);
+}
+
+.cx-controls { padding: var(--step-2); }
+
+.cx-power {
+  display: flex;
+  align-items: center;
+  gap: var(--step-2);
+  padding: var(--step-2);
+  border-radius: 27px;
+  background: var(--ink);
+  transition: background 0.3s ease,
+              transform 0.24s cubic-bezier(0.4, 0.12, 0.28, 1);
+}
+
+/* The whole bar reads as one button, so it lifts and presses as one — the
+   inner button has no chrome of its own to animate. */
+.cx-power:has(.cx-power__main:hover:not(:disabled)) { transform: scale(1.012); }
+
+.cx-power:has(.cx-power__main:active:not(:disabled)) {
+  transform: scale(0.985);
+  transition-duration: 0.14s;
+}
+
+.cx-power.is-working { background: #e03a2f; }
+.cx-power.is-on { background: var(--good); }
+
+.cx-power__main {
+  flex: 1;
+  border: none;
+  background: none;
+  padding: var(--step-2) var(--step-3);
+  font-size: var(--size-title);
+  font-weight: 700;
+  color: var(--bold);
+  cursor: pointer;
+  transition: color 0.3s ease;
+}
+
+.cx-power.is-working .cx-power__main,
+.cx-power.is-on .cx-power__main { color: #fff; }
+
+.cx-power__main:disabled { cursor: default; }
+
+.cx-exit {
+  width: 60px;
+  height: 60px;
+  flex: 0 0 60px;
+  border: none;
+  border-radius: 18px;
+  background: var(--card);
+  cursor: pointer;
+  padding: 0;
+  overflow: hidden;
+  transition: transform 0.24s cubic-bezier(0.4, 0.12, 0.28, 1);
+}
+
+.cx-exit svg { width: 100%; height: 100%; fill: none; }
+
+.cx-exit svg path {
+  stroke: var(--good);
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.cx-exit__dash { stroke-dasharray: 2 2.4; opacity: 0.55; }
+.cx-exit__rail { stroke: var(--text) !important; stroke-width: 1 !important; }
+
+.cx-exit__face { transition: transform 0.26s linear; }
+.cx-exit__face--off { transform: translateX(0); }
+.cx-exit__face--on { transform: translateX(60px); }
+.cx-exit.is-on .cx-exit__face--off { transform: translateX(-60px); }
+.cx-exit.is-on .cx-exit__face--on { transform: translateX(0); }
+
+.cx-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--step-2);
+  font-size: var(--size-note);
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.cx-switch label { cursor: pointer; user-select: none; }
+.cx-switch:hover label { color: var(--bold); }
+
+.cx-exit:hover { transform: scale(1.06); }
+.cx-exit:active { transform: scale(0.94); transition-duration: 0.14s; }
+
+/* Scaling re-rasterises the glyphs at the end of the run, so the label lands a
+   fraction late and looks like it snaps. Keeping each button on its own layer
+   makes the browser scale the finished raster instead. */
+.cx-power,
+.cx-again,
+.cx-exit {
+  will-change: transform;
+  backface-visibility: hidden;
+  transform-origin: center;
+}
+
+.cx-power__main,
+.cx-again { -webkit-font-smoothing: antialiased; }
