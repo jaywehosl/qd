@@ -405,6 +405,9 @@ func (d *DB) DeleteGroup(id int) error {
 	return nil
 }
 
+// Everything a node needs to run that is a property of the network rather than
+// of the machine it sits on. A node reads this at startup instead of taking it
+// on the command line, so one database describes the whole fleet.
 type NetworkSettings struct {
 	RefreshMinutes   int    `json:"refreshMinutes"`
 	DNSPrimary       string `json:"dnsPrimary"`

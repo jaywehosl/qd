@@ -16,6 +16,10 @@ import (
 	"github.com/jaywehosl/quic-diver/internal/store"
 )
 
+// The transport is the only fake here: everything else — the database, the
+// projection, the rollout machine, the handlers — is the real thing. The point
+// of this file is that they compose, which no amount of unit testing each of
+// them separately can establish.
 type fakeTransport struct {
 	mu          sync.Mutex
 	unreachable map[int]bool
@@ -150,10 +154,12 @@ func into(t *testing.T, raw json.RawMessage, dst any) {
 	}
 }
 
+// The whole flow through real handlers and a real database.
 func TestPublishVerticalSlice(t *testing.T) {
 	r := newRig(t)
 	r.seed(t)
 
+	// The draft summary names what changed, in the operator's words.
 	var draft struct {
 		Revision          int `json:"revision"`
 		PublishedRevision int `json:"publishedRevision"`
@@ -173,6 +179,7 @@ func TestPublishVerticalSlice(t *testing.T) {
 		t.Fatal("a first draft reported nothing to publish")
 	}
 
+	// Plan freezes it and builds each node's configuration.
 	var plan struct {
 		Revision int `json:"revision"`
 		Targets  []struct {
@@ -213,6 +220,7 @@ func TestPublishVerticalSlice(t *testing.T) {
 		t.Fatalf("%d nodes ended up applied", applied)
 	}
 
+	// And once it is out, the draft is empty again — both header buttons go.
 	env = r.call(t, "GET", "/panel/api/publish/draft", "")
 	into(t, env.Obj, &draft)
 	if len(draft.Changes) != 0 {
@@ -223,6 +231,9 @@ func TestPublishVerticalSlice(t *testing.T) {
 	}
 }
 
+// The summary has to describe the draft against what the NODES hold, not
+// against an empty database — otherwise every publish reads as "everything
+// changed" and the operator stops reading it.
 func TestDraftIsMeasuredAgainstWhatWasPublished(t *testing.T) {
 	r := newRig(t)
 	r.seed(t)
@@ -257,6 +268,8 @@ func TestDraftIsMeasuredAgainstWhatWasPublished(t *testing.T) {
 	}
 }
 
+// The header hides both buttons on an empty list, so `changes` must always be a
+// list — a nil slice would arrive as JSON null and crash the reader.
 func TestChangesIsNeverNull(t *testing.T) {
 	r := newRig(t)
 	env := r.call(t, "GET", "/panel/api/publish/draft", "")
@@ -265,6 +278,8 @@ func TestChangesIsNeverNull(t *testing.T) {
 	}
 }
 
+// A discard is local. Nothing may reach a node, and the record of what nodes
+// are running must not move.
 func TestDiscardRewindsTheDraftAndTellsNobody(t *testing.T) {
 	r := newRig(t)
 	r.seed(t)
@@ -312,6 +327,8 @@ func TestDiscardRewindsTheDraftAndTellsNobody(t *testing.T) {
 	}
 }
 
+// What each node is actually running is recorded, so the nodes list can show
+// which ones still owe an apply.
 func TestProgressIsRecordedPerNode(t *testing.T) {
 	r := newRig(t)
 	r.seed(t)
@@ -333,6 +350,8 @@ func TestProgressIsRecordedPerNode(t *testing.T) {
 	}
 }
 
+// A node that was left behind must keep its recorded revision when a later
+// rollout succeeds elsewhere — the record only ever moves forward.
 func TestProgressNeverGoesBackwards(t *testing.T) {
 	r := newRig(t)
 	r.seed(t)
@@ -376,6 +395,8 @@ func TestUnreachableNodeIsPlannedAsSkipped(t *testing.T) {
 	}
 }
 
+// The dialog can be closed and reopened; reopening resumes the run rather than
+// starting a second one.
 func TestStatusResumesTheRunInFlight(t *testing.T) {
 	r := newRig(t)
 	r.seed(t)
@@ -409,6 +430,8 @@ func TestStatusResumesTheRunInFlight(t *testing.T) {
 	}
 }
 
+// A dialog reopened after a newer plan must not push one revision and apply
+// another.
 func TestARevisionThatIsNotInFlightIsRefused(t *testing.T) {
 	r := newRig(t)
 	r.seed(t)
@@ -450,6 +473,7 @@ func TestPlanWithNothingToPublishIsRefused(t *testing.T) {
 	}
 }
 
+// Retrying is what the dialog's "Retry N failed" does, and it must land.
 func TestRetryAfterAFailedPush(t *testing.T) {
 	r := newRig(t)
 	r.seed(t)
@@ -493,6 +517,9 @@ func TestRetryAfterAFailedPush(t *testing.T) {
 	}
 }
 
+// The revision must be recorded before any of it leaves the machine: a panel
+// that dies mid-rollout must not leave nodes running something it has no record
+// of.
 func TestRevisionIsRecordedBeforeAnythingIsSent(t *testing.T) {
 	r := newRig(t)
 	r.seed(t)
@@ -507,6 +534,7 @@ func TestRevisionIsRecordedBeforeAnythingIsSent(t *testing.T) {
 		t.Fatalf("plan did not record the revision: %+v", pub)
 	}
 
+	// And the snapshot is readable, which is what a discard and a rollback need.
 	state, err := r.db.RevisionState(1)
 	if err != nil {
 		t.Fatal(err)

@@ -1,9 +1,12 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
 
 interface MetricsPanelValue {
+  /** the telemetry status-bar (toggled by the brand logo) */
   open: boolean;
   setOpen: (v: boolean) => void;
   toggle: () => void;
+  /** the notifications strip (toggled by the header bell) — a separate row that
+      stacks BELOW the status-bar inside the shared .topbar-shell */
   notifyOpen: boolean;
   setNotifyOpen: (v: boolean) => void;
   toggleNotify: () => void;

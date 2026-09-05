@@ -13,6 +13,13 @@ import (
 	"github.com/jaywehosl/quic-diver/internal/qsrv"
 )
 
+// Ask выполняет одну управляющую операцию: POST /qd/rpc/<op>, тело и ответ JSON.
+//
+// Здесь нет ни своих кадров с длиной, ни своего шифрования, ни номеров запросов
+// с таблицей ожидающих, ни ретраев. Всё это было нужно, пока управление ехало
+// UDP-датаграммами: там не было ни границ сообщений, ни порядка, ни шифра.
+// Поверх QUIC каждый запрос — отдельный поток: он сам мультиплексируется, сам
+// доставляется по порядку и уже зашифрован TLS.
 func (d *Dialer) Ask(endpoint, op, auth string, body any, out any) error {
 	cc, token, err := d.conn(endpoint)
 	if err != nil {
@@ -74,6 +81,8 @@ func (d *Dialer) Ask(endpoint, op, auth string, body any, out any) error {
 	return json.Unmarshal(answer, out)
 }
 
+// Raw — та же операция, но ответ отдаётся как есть: панель передаёт его наружу
+// без разбора.
 func (d *Dialer) Raw(endpoint, op, auth string, body any) (json.RawMessage, error) {
 	var out json.RawMessage
 	if err := d.Ask(endpoint, op, auth, body, &out); err != nil {
@@ -82,19 +91,26 @@ func (d *Dialer) Raw(endpoint, op, auth string, body any) (json.RawMessage, erro
 	return out, nil
 }
 
+// waitFor — сколько ждать ответа. Разговор с узлом бывает трёх весов, и мерить
+// их одной меркой нельзя: пока таймаут был общим и долгим, неответивший узел
+// держал панель и клиент по двадцать секунд — а «задержка до узла» показывалась
+// как ровно этот потолок.
 func waitFor(op string) time.Duration {
 	switch {
 	case strings.HasPrefix(op, "db."):
-		return heavyWait
+		return heavyWait // перелив базы целиком
 	case op == "dns":
 		return dnsWait
 	case quickOps[op]:
-		return quickWait
+		return quickWait // живость и присутствие: не ответил быстро — считаем, что не ответил
 	default:
 		return askWait
 	}
 }
 
+// quickOps — вопросы, которые обязаны отвечать мгновенно: ими меряют живость
+// узла и отмечаются приход-уход клиента. Ждать их долго незачем — ответ, пришедший
+// через двадцать секунд, уже никому не нужен.
 var quickOps = map[string]bool{
 	"hello": true, "whoami": true, "join": true, "bye": true,
 }

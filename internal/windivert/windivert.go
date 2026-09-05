@@ -19,10 +19,10 @@ const (
 type Flag uint64
 
 const (
-	FlagSniff     Flag = 0x0001
-	FlagDrop      Flag = 0x0002
-	FlagRecvOnly  Flag = 0x0004
-	FlagSendOnly  Flag = 0x0008
+	FlagSniff    Flag = 0x0001
+	FlagDrop     Flag = 0x0002
+	FlagRecvOnly Flag = 0x0004
+	FlagSendOnly Flag = 0x0008
 	FlagNoInstall Flag = 0x0010
 	FlagFragments Flag = 0x0020
 )
@@ -53,15 +53,15 @@ const MaxPacketSize = 0xFFFF
 var (
 	dll = syscall.NewLazyDLL("WinDivert.dll")
 
-	procOpen          = dll.NewProc("WinDivertOpen")
-	procRecvEx        = dll.NewProc("WinDivertRecvEx")
-	procSend          = dll.NewProc("WinDivertSend")
-	procSendEx        = dll.NewProc("WinDivertSendEx")
-	procShutdown      = dll.NewProc("WinDivertShutdown")
-	procClose         = dll.NewProc("WinDivertClose")
-	procSetParam      = dll.NewProc("WinDivertSetParam")
-	procCalcChecksums = dll.NewProc("WinDivertHelperCalcChecksums")
-	procCompileFilter = dll.NewProc("WinDivertHelperCompileFilter")
+	procOpen           = dll.NewProc("WinDivertOpen")
+	procRecvEx         = dll.NewProc("WinDivertRecvEx")
+	procSend           = dll.NewProc("WinDivertSend")
+	procSendEx         = dll.NewProc("WinDivertSendEx")
+	procShutdown       = dll.NewProc("WinDivertShutdown")
+	procClose          = dll.NewProc("WinDivertClose")
+	procSetParam       = dll.NewProc("WinDivertSetParam")
+	procCalcChecksums  = dll.NewProc("WinDivertHelperCalcChecksums")
+	procCompileFilter  = dll.NewProc("WinDivertHelperCompileFilter")
 )
 
 type Handle struct {
@@ -96,8 +96,8 @@ func (h *Handle) SetParam(p Param, value uint64) error {
 
 func (h *Handle) RecvEx(packet []byte, addrs []Address) (int, int, error) {
 	var (
-		recvLen uint32
-		addrLen = uint32(len(addrs)) * uint32(addressSize)
+		recvLen  uint32
+		addrLen  = uint32(len(addrs)) * uint32(addressSize)
 	)
 
 	r, _, errno := procRecvEx.Call(

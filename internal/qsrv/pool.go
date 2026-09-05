@@ -13,7 +13,11 @@ type pool struct {
 	base  netip.Prefix
 	next  netip.Addr
 	taken map[netip.Addr]struct{}
-	mine  map[uint32]netip.Addr
+	// held — какой адрес у какой сессии был в прошлый раз. Клиент подключается
+	// заново десятки раз за вечер (переподключение, гонка входов, смена сети), и
+	// без этой памяти каждый раз выдавался бы новый адрес: журнал адресов пух бы
+	// на ровном месте, а один клиент выглядел бы двадцатью.
+	mine map[uint32]netip.Addr
 }
 
 func newPool(prefix netip.Prefix) *pool {
@@ -26,6 +30,7 @@ func newPool(prefix netip.Prefix) *pool {
 	}
 }
 
+// take выдаёт адрес сессии: тот же, что и раньше, если он свободен.
 func (p *pool) take(session uint32) (netip.Prefix, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

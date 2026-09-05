@@ -87,6 +87,21 @@ func cliDatabase(cfg nodeConfig, dbFlag string) (*store.DB, string, error) {
 	return db, path, nil
 }
 
+func cliDatabaseRead(cfg nodeConfig, dbFlag string) (*store.DB, string, error) {
+	path := dbFlag
+	if cfg.DB != "" && (path == "" || path == "node.db") {
+		path = cfg.DB
+	}
+	if path == "" {
+		return nil, "", fmt.Errorf("no database path: pass -db or fix %s", configPath)
+	}
+	db, err := store.OpenRead(path)
+	if err != nil {
+		return nil, path, err
+	}
+	return db, path, nil
+}
+
 func runAdmins(cfg nodeConfig, dbFlag string) error {
 	db, path, err := cliDatabase(cfg, dbFlag)
 	if err != nil {
@@ -435,7 +450,7 @@ func selfFromDatabase(cfg nodeConfig, db *store.DB) netstate.Node {
 
 func runStatus(cfg nodeConfig, dbFlag string) error {
 	self := netstate.Node{}
-	db, path, err := cliDatabase(cfg, dbFlag)
+	db, path, err := cliDatabaseRead(cfg, dbFlag)
 	if err == nil {
 		self = selfFromDatabase(cfg, db)
 		defer db.Close()

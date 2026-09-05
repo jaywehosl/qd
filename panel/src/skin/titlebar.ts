@@ -141,6 +141,8 @@ export function trayGlide() {
     const box = btn.getBoundingClientRect();
     const base = tray.getBoundingClientRect();
 
+    // Buttons in the tray run the full height of the bar, so their highlight is
+    // inset; everything else already has the shape we want and is matched exactly.
     const tight = btn.matches(TRAY);
     const padX = tight ? 3 : 0;
     const padY = tight ? 13 : 0;
@@ -185,6 +187,8 @@ export function tabsGlide() {
   glideRow('.chp-tabs .ds-tabs__list', '.ds-tabs__trigger');
   glideRow('.chp-window', '.chp-win');
   glideRow('.vertical-tabs-container', '.vtab-btn');
+  // A table has one of these per row, so every row gets its own travelling
+  // highlight rather than the first one taking it all.
   for (const row of document.querySelectorAll<HTMLElement>('.row-actions')) {
     glideIn(row, '.ds-btn');
   }

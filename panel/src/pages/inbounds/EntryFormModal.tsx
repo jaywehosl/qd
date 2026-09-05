@@ -122,6 +122,7 @@ export default function EntryFormModal({
     <Dialog
       open={open}
       onOpenChange={(v) => { if (!v) onClose(); }}
+      // Two fields do not need the width of a form: this is a narrow dialog.
       width={520}
       autoHeight
       title={

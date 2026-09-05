@@ -101,6 +101,10 @@ func (state *controlState) upstreamsSaid() string {
 	return me.DNSPrimary + " and " + me.DNSSecondary
 }
 
+// standIn достраивает ответ для имён, живущих только в IPv6. Клиент говорит по
+// IPv4 и такое имя открыть не может: спрашивает A, получает пустой ответ и
+// сдаётся. Узел спрашивает AAAA сам, выдаёт имени подставной IPv4 и запоминает
+// пару — а при дозвоне разворачивает её обратно в настоящий адрес.
 func (state *controlState) standIn(query, answer []byte) []byte {
 	if state.node == nil || len(answer) < 12 || !hasGlobalV6() {
 		return answer

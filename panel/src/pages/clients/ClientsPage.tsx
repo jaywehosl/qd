@@ -242,6 +242,7 @@ export default function ClientsPage() {
     const expired = (row.expiryTime ?? 0) > 0 && (row.expiryTime ?? 0) <= now;
     if (expired) return 'depleted';
     if (!row.enable) return 'deactive';
+    // No traffic quota exists in the model, so only the clock can end a client.
     const nearExpiry = (row.expiryTime ?? 0) > 0 && (row.expiryTime ?? 0) - now < (expireDiff || 0);
     if (nearExpiry) return 'expiring';
     return 'active';
@@ -399,6 +400,9 @@ export default function ClientsPage() {
           const bucket = clientBucket(record);
           const lastOnline = record.traffic?.lastOnline ?? 0;
           const title = `${t('lastOnline')}: ${lastOnline > 0 ? IntlUtil.formatDate(lastOnline, datepicker) : '-'}`;
+          // Every state carries the same dot so the column reads down one line;
+          // it inherits the pill's own colour, which keeps it visible on the
+          // filled pills where a green dot on green would vanish.
           const dot = <span className="state-dot" />;
           if (bucket === 'depleted') return <Tooltip title={title}><Tag tone="danger">{dot}{t('depleted')}</Tag></Tooltip>;
           if (record.enable && isOnline(record.email)) return <Tag tone="success">{dot}{t('pages.clients.online')}</Tag>;
@@ -445,6 +449,7 @@ export default function ClientsPage() {
       },
     );
     return cols;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [t, togglingEmail, clientBucket, isOnline, inboundsById, filters, allGroups, datepicker]);
 
   function clearOneFilter<K extends keyof ClientFilters>(key: K) {
@@ -462,6 +467,8 @@ export default function ClientsPage() {
     );
   }
 
+  // Header clicks can land on a column the preset list does not cover — leave
+  // the Select unset in that case so it falls back to its placeholder.
   const presetSortValue = useMemo(() => {
     const value = sortValueFor(sortColumn, sortOrder);
     return SORT_OPTIONS.some((o) => o.value === value) ? value : undefined;

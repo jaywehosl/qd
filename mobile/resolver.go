@@ -31,6 +31,9 @@ type track struct {
 	At    int64  `json:"sinceUpMs"`
 }
 
+// resolver отвечает на имена, спрашивая узел. Слушает свой UDP-порт: движок
+// перехватывает DNS в датапути и приносит запросы сюда — тот же путь, что у
+// клиента под Windows, поэтому и поведение одно.
 type resolver struct {
 	conn  *net.UDPConn
 	node  atomic.Pointer[string]
@@ -73,6 +76,8 @@ func (r *resolver) asking() string {
 	return ""
 }
 
+// SetNode переводит резолвер на узел, который выиграл гонку: спрашивать первый
+// вход подписки незачем, туннель мог подняться совсем через другой.
 func (r *resolver) SetNode(node string) {
 	if node == "" {
 		return
@@ -125,6 +130,8 @@ func (r *resolver) handle(query []byte, from *net.UDPAddr) {
 		return
 	}
 
+	// Телефон живёт по IPv4 внутри туннеля: спрашивать AAAA незачем, а пустой
+	// ответ отправляет систему к записи A немедленно, без ожидания таймаута.
 	if qtype == 28 {
 		r.stats.noV6.Add(1)
 		r.conn.WriteToUDP(dnsproxy.NoData(query), from)
@@ -138,6 +145,8 @@ func (r *resolver) handle(query []byte, from *net.UDPAddr) {
 
 	if err != nil {
 		r.stats.failed.Add(1)
+		// Молчание стоило бы приложению целого таймаута резолвера. Отказ доходит
+		// сразу, и система идёт дальше.
 		r.conn.WriteToUDP(dnsproxy.ServFail(query), from)
 		r.note(track{Name: name, Ms: spent, Whole: since(entered), Err: err.Error(), At: since(r.born)})
 		return
@@ -201,6 +210,8 @@ func (r *resolver) LinesJSON() string {
 
 func since(t time.Time) int64 { return time.Since(t).Milliseconds() }
 
+// rtt меряет задержку до узла тем же вопросом, которым меряет её клиент под
+// Windows: живость и задержка — одно и то же обращение.
 func (r *resolver) rtt() int {
 	began := time.Now()
 	if err := r.ask(r.asking(), "whoami", r.token, nil, nil); err != nil {

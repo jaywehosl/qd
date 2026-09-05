@@ -439,6 +439,9 @@ public class RoutingPage {
         }).start();
     }
 
+    // Only packages that ask for the internet can be routed anywhere, and that
+    // one condition also sweeps out the resource overlays and firmware services
+    // a plain MATCH_ALL listing drags in.
     private List<App> installed() {
         if (catalogue != null) {
             return catalogue;

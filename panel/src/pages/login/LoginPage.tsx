@@ -145,7 +145,7 @@ export default function LoginPage() {
             Your network at a glance
           </h1>
           <p className="login-hero-subtitle">
-            A clean, spacious control panel for the QUIC Diver network.
+            A clean, spacious control panel for the qd network.
           </p>
         </div>
 

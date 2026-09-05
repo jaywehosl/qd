@@ -62,9 +62,10 @@ func (s *shell) carry(url string) {
 		AutoFocus: true,
 		DataPath:  paneData,
 		WindowOptions: webview2.WindowOptions{
-			Title:  "QUIC Diver",
+			Title:  appName,
 			Width:  1280,
 			Height: 860,
+			IconId: 1,
 			Center: true,
 		},
 	})

@@ -26,6 +26,10 @@ type powerThrottlingState struct {
 	StateMask   uint32
 }
 
+// standFull снимает с процесса энергосбережение. Windows сама переводит окно без
+// фокуса в экономный режим: на гибридных процессорах это переезд на слабые ядра,
+// а таймеры в фоне огрубляются до полутора десятков миллисекунд. Клиенту, который
+// несёт весь трафик машины, оба подарка вредны — от них отказываемся явно.
 func standFull() {
 	me := windows.CurrentProcess()
 
@@ -64,6 +68,8 @@ func setProcessInformation(h windows.Handle, class uint32, info unsafe.Pointer, 
 	return nil
 }
 
+// sharpTimers просит систему о миллисекундной точности таймеров, пока идёт
+// трафик. Без этого фоновый процесс спит грубее, чем считает.
 func sharpTimers() func() {
 	if r, _, err := procTimeBeginPeriod.Call(1); r != 0 {
 		fmt.Printf("cpu      timers stay coarse: %v\n", err)
@@ -72,6 +78,9 @@ func sharpTimers() func() {
 	return func() { procTimeEndPeriod.Call(1) }
 }
 
+// runFast закрепляет горутину за своим потоком и поднимает ему приоритет. Зовут
+// те, кто крутит датапуть: их доля машины не должна зависеть от того, смотрит ли
+// пользователь в окно.
 func runFast() {
 	procSetThreadPriority.Call(uintptr(windows.CurrentThread()), aboveNormalThread)
 }

@@ -6,6 +6,8 @@ import { DropdownMenu } from '@/components/ds';
 import type { MenuEntry } from '@/components/ds';
 import { LanguageManager } from '@/utils';
 
+// The header's round controls. One copy, worn by both shells: the admin header
+// and the client header have to be indistinguishable on the right-hand side.
 export function ThemeCycleButton({ id, isDark, isUltra, onCycle, ariaLabel }: {
   id: string;
   isDark: boolean;

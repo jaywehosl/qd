@@ -12,6 +12,11 @@ interface ImportPageProps {
   onImport: (uri: string) => Promise<{ ok: boolean; error?: string }>;
 }
 
+/**
+ * What the operator meets before anything else exists: no account, no password,
+ * just the link. Whether that link makes them an admin is the node's answer,
+ * not something read out of the text here.
+ */
 export default function ImportPage({ onImport }: ImportPageProps) {
   const { t } = useTranslation();
   const { isDark, isUltra, cycleTheme } = useTheme();
@@ -34,6 +39,8 @@ export default function ImportPage({ onImport }: ImportPageProps) {
     }
   }, [busy, onImport, t]);
 
+  // Pasting anywhere on the page is enough — no need to hit the field first,
+  // and no need to press the button afterwards.
   useEffect(() => {
     function onPaste(e: ClipboardEvent) {
       const text = e.clipboardData?.getData('text') ?? '';

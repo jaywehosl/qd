@@ -5,6 +5,8 @@ import (
 	"sort"
 )
 
+// Change is one line of "what publishing would do", as the header's draft
+// summary shows it.
 type Change struct {
 	Kind   string `json:"kind"`
 	Name   string `json:"name"`
@@ -18,6 +20,12 @@ const (
 	ActionEntrypoints = "entrypoints"
 )
 
+// Diff describes the draft against the last published revision.
+//
+// Named by tag rather than by id: the operator recognises "vasya", not 1000,
+// and a summary they cannot read is a summary they will publish without
+// reading. A row whose tag changed therefore reads as a removal plus an
+// addition, which is what it looks like from the outside anyway.
 func Diff(old, cur *State) []Change {
 	if old == nil {
 		old = &State{}
@@ -69,6 +77,8 @@ func diffNodes(old, cur *State) []Change {
 }
 
 func diffEntrypoints(old, cur *State) []Change {
+	// An entrypoint has no tag of its own, so it is named the way the panel
+	// shows it: the node it lives on and the port it answers.
 	name := func(s *State, e Entrypoint) string {
 		node := "?"
 		if n := s.Node(e.NodeID); n != nil {
@@ -120,6 +130,8 @@ func diffGroups(old, cur *State) []Change {
 		case fieldsMoved:
 			out = append(out, Change{"group", g.Tag, ActionUpdated})
 		case membershipMoved:
+			// Called out separately because it is the change that silently
+			// rewrites which nodes a whole set of clients can reach.
 			out = append(out, Change{"group", g.Tag, ActionEntrypoints})
 		}
 	}
@@ -159,6 +171,8 @@ func diffAdmins(old, cur *State) []Change {
 	return []Change{{"network key", short(cur.NetworkKey), ActionUpdated}}
 }
 
+// A fingerprint is 43 characters and unreadable in a list. The head of it is
+// enough to tell two keys apart, which is all the summary is for.
 func short(key string) string {
 	if len(key) <= 12 {
 		return key

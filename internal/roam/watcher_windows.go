@@ -11,9 +11,9 @@ import (
 var (
 	iphlpapi = syscall.NewLazyDLL("iphlpapi.dll")
 
-	procNotifyRouteChange2      = iphlpapi.NewProc("NotifyRouteChange2")
-	procNotifyIpInterfaceChange = iphlpapi.NewProc("NotifyIpInterfaceChange")
-	procCancelMibChangeNotify2  = iphlpapi.NewProc("CancelMibChangeNotify2")
+	procNotifyRouteChange2       = iphlpapi.NewProc("NotifyRouteChange2")
+	procNotifyIpInterfaceChange  = iphlpapi.NewProc("NotifyIpInterfaceChange")
+	procCancelMibChangeNotify2   = iphlpapi.NewProc("CancelMibChangeNotify2")
 )
 
 const afUnspec = 0
@@ -69,3 +69,4 @@ func (w *systemWatcher) Close() error {
 	w.handles = nil
 	return nil
 }
+

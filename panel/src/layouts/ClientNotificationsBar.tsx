@@ -26,6 +26,12 @@ function ago(ts: number, t: TFunction): string {
   return new Date(ts).toLocaleDateString();
 }
 
+/**
+ * The same strip the panel drops under its header, fed by the daemon's log
+ * instead of live panel conditions. It is a third row inside .topbar-shell,
+ * so it stacks by DOM order and animates on max-height alone — the shell owns
+ * the single backdrop-filter and a transform here would kill the glass.
+ */
 export default function ClientNotificationsBar() {
   const { t } = useTranslation();
   const { notifyOpen } = useMetricsPanel();

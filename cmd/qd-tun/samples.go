@@ -35,6 +35,9 @@ func collectSamples(db *clientstate.DB, tun *tunnel, stop <-chan struct{}) {
 		cur := snapshotStats()
 		dns := snapshotDNS(tun.DNS())
 
+		// Тик приходит не ровно через секунду — в фоне система будит процесс реже.
+		// Делить прибавку на «секунду» значит занижать скорость ровно на опоздание:
+		// отсюда и пила на графике, и разница между окном в фокусе и свёрнутым.
 		span := stamp.Sub(last)
 		last = stamp
 		if span <= 0 {
@@ -130,6 +133,8 @@ func delta(now, before uint64) int64 {
 	return int64(now - before)
 }
 
+// connectNow поднимает туннель гонкой по всем точкам входа сразу: кандидата не
+// выбираем заранее, побеждает тот, кто первым отдал адрес.
 func connectNow(db *clientstate.DB, tun *tunnel, sub clientstate.Subscription, key *qdcrypt.Key) error {
 	nodes, err := db.Nodes()
 	if err != nil {
@@ -158,6 +163,8 @@ func connectNow(db *clientstate.DB, tun *tunnel, sub clientstate.Subscription, k
 	return nil
 }
 
+// entrypointsOf — все входы подписки. Выходные узлы клиент не набирает: до них
+// добирается ingress, и делает это своей гонкой.
 func entrypointsOf(nodes []clientstate.Node) []string {
 	out := make([]string, 0, len(nodes))
 	for _, n := range nodes {

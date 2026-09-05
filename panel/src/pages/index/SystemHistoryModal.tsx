@@ -261,6 +261,7 @@ export default function SystemHistoryPanel({ status }: SystemHistoryModalProps) 
     try { await fetchBucket(); } finally { setRefreshing(false); }
   }, [fetchBucket]);
 
+  // Raw samples for the whole window, straight from the node's own store.
   async function downloadRaw() {
     if (nodeId === null) return;
     const msg = await HttpUtil.get<unknown>(`/panel/api/nodes/${nodeId}/history/export`, { window: span * 60 });

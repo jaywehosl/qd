@@ -1,5 +1,8 @@
 package ru.quicdiver.client;
 
+// The core keeps one log of what it does, shared with the desktop client, and
+// writes it in English. Rather than fork that text per platform, the phone
+// recognises what it knows and says it in its own words.
 public final class Words {
 
     private Words() {

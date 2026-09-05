@@ -8,6 +8,17 @@ import { subscribe, getSnapshot, pushEvent } from '@/stores/notificationStore';
 
 const POLL_MS = 60000;
 
+/**
+ * Headless Phase-2 sensor: notify when a client that HAS connected before goes
+ * silent for longer than the configured threshold (hours). Polls the per-email
+ * lastOnline map (epoch ms) only while the sensor is enabled, and edge-triggers
+ * per client — fires once on the false→true crossing and re-arms when the client
+ * reappears (a fresh disconnect later = a new notification). Clients that have
+ * never connected (lastOnline<=0) are skipped so brand-new clients don't alert.
+ *
+ * Note: the lastOnline map carries no enable flag, so a disabled-but-formerly-
+ * online client can still alert — acceptable for now; refine with enable later.
+ */
 export default function ClientOfflineWatcher() {
   const { sensors } = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   const cfg = sensors.clientOffline;

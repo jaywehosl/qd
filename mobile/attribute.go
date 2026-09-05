@@ -86,6 +86,10 @@ func (m *marks) interested() bool {
 	return len(m.role) > 0
 }
 
+// forFlow отвечает, каким выходом идти этому флоу. Спросить систему, кто хозяин
+// флоу, можно только полной четвёркой адресов, и стоит это десятки миллисекунд:
+// для соединения (wait) платим один раз, для датаграмм отвечаем из памяти, а
+// хозяина узнаём в стороне — до ответа пакеты идут общим выходом.
 func (m *marks) forFlow(src, dst netip.AddrPort, udp bool, wait bool) qdcrypt.Exit {
 	global := qdcrypt.Exit(exit.Load())
 	if !m.interested() || !src.IsValid() || !dst.IsValid() {

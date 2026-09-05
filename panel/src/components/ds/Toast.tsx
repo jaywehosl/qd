@@ -11,6 +11,7 @@ import { recordToast, type Severity } from '@/stores/notificationStore';
 
 export type ToastType = 'success' | 'error' | 'warning' | 'info';
 
+/** Toast kind → notification severity (success/info are both informational). */
 const TOAST_SEVERITY: Record<ToastType, Severity> = {
   success: 'info',
   info: 'info',
@@ -24,6 +25,7 @@ interface ToastItem {
   content: ReactNode;
 }
 
+// ---- module store (imperative, framework-agnostic) ------------------------
 let items: ToastItem[] = [];
 const listeners = new Set<() => void>();
 let seq = 0;
@@ -48,6 +50,7 @@ function push(type: ToastType, content: ReactNode, duration = 3000) {
   const id = ++seq;
   items = [...items, { id, type, content }];
   emit();
+  // Mirror into the notification history log (string content only).
   if (typeof content === 'string') {
     recordToast(TOAST_SEVERITY[type], content);
   }
@@ -57,12 +60,15 @@ function push(type: ToastType, content: ReactNode, duration = 3000) {
   return id;
 }
 
+/** Imperative toast API (drop-in for antd `message`'s success/error/...). */
 export const toast = {
   success: (content: ReactNode, duration?: number) => push('success', content, duration),
   error: (content: ReactNode, duration?: number) => push('error', content, duration),
   warning: (content: ReactNode, duration?: number) => push('warning', content, duration),
   info: (content: ReactNode, duration?: number) => push('info', content, duration),
+  /** antd-compat: returns [api, contextHolder]; the viewport is global so holder is null. */
   useMessage: () => [toast, null] as const,
+  /** antd-compat no-op (DS toasts mount in their own global viewport). */
   config: (_opts?: unknown) => { void _opts; },
 };
 
@@ -75,6 +81,7 @@ const ICONS: Record<ToastType, ReactNode> = {
   info: <InfoCircleFilled />,
 };
 
+/** Mount once near the app root (each entry). Renders the live toast stack. */
 export function ToastViewport() {
   const list = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   if (typeof document === 'undefined') return null;

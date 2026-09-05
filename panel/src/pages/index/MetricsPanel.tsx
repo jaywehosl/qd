@@ -43,6 +43,7 @@ export default function MetricsPanel() {
 
   const basePath = window.X_UI_BASE_PATH || '';
 
+  // Signals every node the panel is connected to to restart its datapath.
   const restartNetwork = useCallback(async () => {
     await HttpUtil.post('/panel/api/nodes/restartAll');
     await refresh();

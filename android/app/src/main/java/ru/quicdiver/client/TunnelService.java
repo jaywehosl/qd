@@ -62,6 +62,9 @@ public class TunnelService extends VpnService {
         watchNetwork();
     }
 
+    // The default network is not what matters here: once the tunnel is up the
+    // VPN itself becomes the default, so watching it would mean watching our own
+    // tunnel appear and vanish. What carries us is the network underneath.
     private void watchNetwork() {
         ConnectivityManager net = getSystemService(ConnectivityManager.class);
         if (net == null || watcher != null) {
@@ -93,6 +96,8 @@ public class TunnelService extends VpnService {
                 .build();
 
         try {
+            // Best-matching, not every match: with a plain callback both wifi and
+            // mobile report themselves and the tunnel would rebuild on each one.
             net.registerBestMatchingNetworkCallback(under, watcher,
                     new Handler(Looper.getMainLooper()));
         } catch (Exception e) {
@@ -191,7 +196,7 @@ public class TunnelService extends VpnService {
             Core.say(this, "java: kept " + spared + " node addresses off the tunnel");
 
             builder.setMtu(p.getInt("mtu"));
-            builder.setSession("QUIC Diver");
+            builder.setSession("qd");
             builder.setBlocking(true);
             builder.setConfigureIntent(openIntent());
 
@@ -451,7 +456,7 @@ public class TunnelService extends VpnService {
 
         Notification note = new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(R.drawable.ic_tile)
-                .setContentTitle("QUIC Diver")
+                .setContentTitle("qd")
                 .setContentText(text)
                 .setOngoing(true)
                 .setContentIntent(openIntent())

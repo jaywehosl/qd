@@ -54,6 +54,8 @@ func claim(me Device, token string) map[string]any {
 	}
 }
 
+// Asker — способ задать узлу один вопрос. За ним стоит общий QUIC-диалер: свои
+// кадры, номера запросов и таблица ожидающих ответов ушли вместе с UDP.
 type Asker interface {
 	Ask(endpoint, op, auth string, body any, out any) error
 }

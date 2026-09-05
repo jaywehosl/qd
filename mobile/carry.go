@@ -14,6 +14,9 @@ import (
 	"github.com/jaywehosl/quic-diver/internal/qsrv"
 )
 
+// carry поднимает туннель тем же датапутём, что и клиент под Windows: QUIC,
+// connect-ip, gVisor. Разница одна — источник пакетов: там драйвер захвата,
+// здесь дескриптор от VpnService.
 func (c *Client) carry(servers []string, session uint32) error {
 	c.mu.Lock()
 	if c.running {
@@ -39,6 +42,7 @@ func (c *Client) carry(servers []string, session uint32) error {
 	live, err := qcli.Dial(dialCtx, qcli.Options{
 		Endpoints: servers,
 		Token:     c.token(),
+		Device:    c.device.ID,
 		Route:     c.route(),
 		MTU:       mtu,
 		Workers:   readers,
@@ -69,6 +73,8 @@ func (c *Client) carry(servers []string, session uint32) error {
 
 	dns.SetNode(live.Endpoint())
 
+	// Устройство поднимаем под выданный адрес, а не наугад: узел сверяет, с какого
+	// адреса пришла датаграмма, и чужой отбрасывает.
 	fd, err := c.hold(assigned[0], mtu)
 	if err != nil {
 		cancel()
@@ -159,6 +165,8 @@ func (c *Client) stopCarry() {
 	go live.Close()
 }
 
+// lost поднимает туннель заново, когда датапуть больше не жив. Миграцию к этому
+// моменту уже пробовал сторож.
 func (c *Client) lost() {
 	c.stopCarry()
 
@@ -188,6 +196,10 @@ func (c *Client) route() string {
 	return ""
 }
 
+// exitFor решает судьбу одного флоу: общий выход, если правил по приложениям нет,
+// иначе — то, что сказано про хозяина этого флоу. Для соединения хозяина ждём,
+// для датаграмм не ждём: они идут потоком, и остановка на опрос системы стоила
+// бы дороже, чем первые пакеты общим выходом.
 func (c *Client) exitFor(src, dst netip.AddrPort, udp bool) string {
 	if c.marks.forFlow(src, dst, udp, !udp) == qdcrypt.ExitEgress {
 		return qsrv.AnyExit
@@ -195,6 +207,9 @@ func (c *Client) exitFor(src, dst netip.AddrPort, udp bool) string {
 	return ""
 }
 
+// goesDirect отвечает на вопрос «пустить мимо туннеля вообще». Метки приложений
+// говорят о другом — каким выходом идти, — и путать это с обходом нельзя: при
+// выключенном +egress весь трафик считался прямым и туннель стоял пустым.
 func (c *Client) goesDirect(pkt []byte) bool { return false }
 
 func (c *Client) keepOut() []netip.Prefix {

@@ -66,6 +66,7 @@ export default function TelemetryGuideOverlay({ active, onClose, page }: Telemet
   const steps = page === 'index' ? INDEX_STEPS : INBOUNDS_STEPS;
   const overlayRef = useRef<HTMLDivElement>(null);
 
+  // Recalculate target element position
   const updateTargetPosition = () => {
     if (!active) return;
     const step = steps[currentStep];
@@ -97,6 +98,7 @@ export default function TelemetryGuideOverlay({ active, onClose, page }: Telemet
 
   const stepInfo = steps[currentStep];
   
+  // Calculate callout box layout parameters
   const getCalloutStyles = () => {
     if (!targetRect) {
       return { top: '35%', left: '50%', transform: 'translate(-50%, -50%)' };
@@ -107,9 +109,11 @@ export default function TelemetryGuideOverlay({ active, onClose, page }: Telemet
     let top = targetRect.bottom + window.scrollY + 20;
     let left = targetRect.left + window.scrollX + (targetRect.width / 2) - 160;
 
+    // Boundary checks
     if (left < 10) left = 10;
     if (left + 320 > viewportWidth) left = viewportWidth - 330;
     if (top + 180 > viewportHeight + window.scrollY) {
+      // Show above target if not enough room below
       top = targetRect.top + window.scrollY - 190;
     }
     if (top < 10) top = 10;
@@ -117,12 +121,15 @@ export default function TelemetryGuideOverlay({ active, onClose, page }: Telemet
     return { top: `${top}px`, left: `${left}px` };
   };
 
+  // SVG lines from target center to callout box center
   const renderSVGConnector = () => {
     if (!targetRect || !overlayRef.current) return null;
     
+    // Target center coordinates relative to viewport
     const targetCenterX = targetRect.left + targetRect.width / 2;
     const targetCenterY = targetRect.top + targetRect.height / 2;
 
+    // Callout box position
     const boxStyles = getCalloutStyles();
     const boxTop = parseFloat(boxStyles.top) - window.scrollY;
     const boxLeft = parseFloat(boxStyles.left) - window.scrollX;

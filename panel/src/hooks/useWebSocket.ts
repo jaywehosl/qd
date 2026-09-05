@@ -27,5 +27,6 @@ export function useWebSocket(handlers: Record<string, Handler>) {
     return () => {
       for (const [event, fn] of entries) client.off(event, fn);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 }

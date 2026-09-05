@@ -5,11 +5,18 @@ export interface StatusSensorEval {
   key: SensorKey;
   over: boolean;
   value: number;
+  /** Human row text with the LIVE value, e.g. "CPU usage 87% (threshold 80%)". */
   text: string;
 }
 
 const pct = (cur: number, total: number) => (total > 0 ? Math.round((cur / total) * 100) : 0);
 
+/**
+ * Evaluate the status-derived (live-condition) sensors against the polled
+ * `status`. Shared by useNotifications (displays a live row while over) and
+ * SensorWatcher (re-arms a dismissed sensor once it drops back). clientOffline
+ * is NOT here — it's event-based with its own watcher.
+ */
 export function evalStatusSensors(status: Status, sensors: SensorPrefs): StatusSensorEval[] {
   const defs: { key: SensorKey; value: number; ready: boolean; unit: string; label: string }[] = [
     { key: 'cpu', value: Math.round(status.cpu.current), ready: true, unit: '%', label: 'CPU usage' },

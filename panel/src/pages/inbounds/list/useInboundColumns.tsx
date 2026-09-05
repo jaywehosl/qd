@@ -60,6 +60,8 @@ export function useInboundColumns({
         id: 'actions',
         header: () => <span className="entry-role-name">{roleLabel ?? ''}</span>,
         cell: ({ row }) => (
+          // Same row of actions as the clients table: bare buttons sharing one
+          // travelling highlight.
           <div className="row-actions">
             <Button
               size="sm"
@@ -73,6 +75,9 @@ export function useInboundColumns({
       },
     ];
 
+    // The remark now mirrors the node's name, so showing it beside the node
+    // column would say the same thing twice; the port is what actually tells
+    // one of a node's entrypoints from another.
     cols.push({
       id: 'port',
       accessorFn: (r) => r.port ?? 0,
@@ -104,6 +109,8 @@ export function useInboundColumns({
         id: 'clients',
         accessorFn: (r) => clientCount[r.id]?.online.length ?? 0,
         header: () => t('online', { defaultValue: 'Online' }),
+        // One pill, not two: the count and the button that lists the names were
+        // the same number printed twice.
         cell: ({ row }) => {
           const cc = clientCount[row.original.id];
           const count = cc?.online.length ?? 0;
@@ -120,6 +127,8 @@ export function useInboundColumns({
         id: 'traffic',
         accessorFn: (r) => r.up + r.down,
         header: () => t('pages.inbounds.traffic'),
+        // An entrypoint has no quota, so its "total" is just up + down —
+        // printing both said the same number twice. The split is what matters.
         cell: ({ row }) => (
           <Tag tone="neutral" style={{ whiteSpace: 'nowrap' }}>
             ↑ {SizeFormatter.sizeFormat(row.original.up)} ↓ {SizeFormatter.sizeFormat(row.original.down)}

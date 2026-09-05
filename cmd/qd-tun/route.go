@@ -33,6 +33,9 @@ func setExit(egress bool) {
 	if n := routeByProcess.Load().dropInherited(); n > 0 {
 		fmt.Printf("route    %d connections dropped so the new exit takes hold now\n", n)
 	}
+	if held := liveTunnel.Load(); held != nil {
+		(*held).Reroute()
+	}
 }
 
 func routeTag() string {
@@ -42,9 +45,7 @@ func routeTag() string {
 	return ""
 }
 
-func exitFor(src, _ netip.AddrPort, udp bool) string {
-	port := src.Port()
-
+func exitFor(src, dst netip.AddrPort, udp bool) string {
 	r := routeByProcess.Load()
 	if r == nil || !r.Active() {
 		return routeTag()
@@ -53,7 +54,7 @@ func exitFor(src, _ netip.AddrPort, udp bool) string {
 	if udp {
 		proto = protoUDP
 	}
-	switch r.RoleForPort(proto, port) {
+	switch r.RoleForFlow(proto, src.Port(), dst.Addr()) {
 	case clientstate.RoleEgress:
 		return anyExit
 	case clientstate.RoleNoEgress:

@@ -8,13 +8,32 @@ import (
 	"strings"
 )
 
+// CaptureConfig — гибкое управление перехватом (arch: по семействам, протоколам и
+// портам — глобально или выборочно). Строит WinDivert filter для NETWORK-слоя,
+// только исходящий трафик.
+//
+// Per-process перехват сюда не входит: на NETWORK-слое нет PID. Он делается
+// отдельным механизмом (наблюдение SOCKET-слоя: PID→5-tuple, затем сужение
+// фильтра/пост-фильтрация) — следующий под-шаг B.
 type CaptureConfig struct {
+	// IPv4/IPv6 — какие семейства перехватывать. Оба false → оба (по умолчанию).
 	IPv4, IPv6 bool
-	TCP, UDP   bool
-	Ports      []uint16
-	Bypass     []netip.Prefix
+	// TCP/UDP — какие протоколы. Оба false → все протоколы.
+	TCP, UDP bool
+	// Ports — конкретные dst-порты; пусто → все порты.
+	Ports []uint16
+	// Bypass — префиксы, которые НЕ перехватывать (локалка + IP узлов). Первый
+	// рубеж arch5 + анти-петля: драйвер даже не отдаёт их в userspace.
+	Bypass []netip.Prefix
 }
 
+// BuildFilter собирает WinDivert filter-выражение из конфигурации.
+//
+// Форма: outbound and [proto] and [ports] and ( (ip and <v4-исключения>) or
+// (ipv6 and <v6-исключения>) ). Разделение по семействам обязательно: в WinDivert
+// поле чужого семейства делает тест ложным, а `not` применим лишь к одиночному
+// тесту (не к скобке), поэтому исключения выражаются как «вне диапазона»
+// (< lo or > hi) и `!= addr`, сгруппированные под `ip`/`ipv6`.
 func BuildFilter(cfg CaptureConfig) string {
 	v4, v6 := cfg.IPv4, cfg.IPv6
 	if !v4 && !v6 {
@@ -55,6 +74,7 @@ func BuildFilter(cfg CaptureConfig) string {
 	return strings.Join(parts, " and ")
 }
 
+// family группирует условия одного семейства под тестом семейства: "(ip and ...)".
 func family(fam string, clauses []string) string {
 	if len(clauses) == 0 {
 		return fam
@@ -62,6 +82,7 @@ func family(fam string, clauses []string) string {
 	return "(" + fam + " and " + strings.Join(clauses, " and ") + ")"
 }
 
+// notIn выражает «адрес не в префиксе»: != для одиночного IP, иначе вне диапазона.
 func notIn(field string, p netip.Prefix) string {
 	if p.IsSingleIP() {
 		return fmt.Sprintf("%s != %s", field, p.Addr())
@@ -83,6 +104,7 @@ func protoClause(cfg CaptureConfig) string {
 	}
 }
 
+// portClause — "(tcp.DstPort == a or udp.DstPort == a or ...)".
 func portClause(cfg CaptureConfig) string {
 	tcp := cfg.TCP || (!cfg.TCP && !cfg.UDP)
 	udp := cfg.UDP || (!cfg.TCP && !cfg.UDP)
@@ -99,6 +121,7 @@ func portClause(cfg CaptureConfig) string {
 	return "(" + strings.Join(cl, " or ") + ")"
 }
 
+// prefixRange возвращает первый и последний адрес подсети.
 func prefixRange(p netip.Prefix) (netip.Addr, netip.Addr) {
 	p = p.Masked()
 	lo := p.Addr()

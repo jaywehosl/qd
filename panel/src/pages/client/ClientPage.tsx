@@ -7,6 +7,10 @@ import { useClientState } from '@/hooks/useClientState';
 import ConnectScreen from './ConnectScreen';
 const ImportPage = lazy(() => import('./ImportPage'));
 
+/**
+ * The client shell. Which of the two things it renders is decided by the
+ * daemon, not by a route: with nothing imported there is no client to show.
+ */
 export default function ClientPage() {
   const { t } = useTranslation();
   const { hash } = useLocation();

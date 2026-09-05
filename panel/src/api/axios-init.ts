@@ -112,6 +112,9 @@ export function setupAxios(): void {
         showClientClosed();
         return Promise.reject(error);
       }
+      // Theme save fires from the unauthenticated login screen; a 401 there is
+      // expected and must NOT force a full-page redirect (that reload was the
+      // "login flashes / reloads on theme switch" bug).
       const skipAuthRedirect = Boolean((error.config as { skipAuthRedirect?: boolean } | undefined)?.skipAuthRedirect);
       if (status === 401 && !readLocalToken()) {
         showSessionGone();

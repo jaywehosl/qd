@@ -7,6 +7,7 @@ export interface MenuItem {
   icon?: ReactNode;
   danger?: boolean;
   disabled?: boolean;
+  /** Marks the currently-chosen entry — highlighted when the menu opens. */
   selected?: boolean;
   onSelect?: () => void;
 }
@@ -14,6 +15,7 @@ export interface MenuItem {
 export type MenuEntry = MenuItem | { type: 'divider'; key?: string };
 
 export interface DropdownMenuProps {
+  /** The element that opens the menu. */
   trigger: ReactNode;
   items: MenuEntry[];
   align?: 'start' | 'center' | 'end';

@@ -204,6 +204,9 @@ func (a *API) Import(uri string) error {
 	return nil
 }
 
+// ProbeReach меряет задержку до каждой точки входа вопросом «whoami»: он же
+// отмечает присутствие клиента в базе узла. Раньше сюда летел свой ping-кадр,
+// зашифрованный ключом сети, а отвечал на него XDP прямо в ядре.
 func (a *API) ProbeReach() int {
 	nodes, err := a.db.Nodes()
 	if err != nil {
@@ -342,6 +345,9 @@ func (a *API) KeepProbing(stop <-chan struct{}, every time.Duration) {
 	}
 }
 
+// untilDue counts from the last refresh, not from whenever this loop happened
+// to start. Counting from the start means a subscription that is already overdue
+// waits a whole further interval — the page says "now" and nothing happens.
 func (a *API) untilDue() time.Duration {
 	every := 60 * time.Minute
 	if settings, err := a.db.Settings(); err == nil && settings.RefreshMinutes > 0 {
@@ -530,6 +536,7 @@ func (a *API) Standing() (Standing, bool) {
 	return AskStanding(nodes, a.key(), sub.Key, a.platform.Identify(), a.wire())
 }
 
+// wire — как спросить узел. Платформа даёт общий QUIC-диалер.
 func (a *API) wire() Asker { return a.platform.Wire() }
 
 func (a *API) Key() *qdcrypt.Key { return a.key() }
@@ -606,6 +613,7 @@ func (a *API) Connect() error {
 		}
 	}
 
+	// Кандидата заранее не выбираем: туннель поднимает гонка по всем входам.
 	lane := Entrypoints(nodes)
 	if len(lane) == 0 {
 		a.db.Notify("warning", "No entrypoint to dial on this network.", time.Now().UnixMilli())
@@ -850,6 +858,10 @@ func (a *API) Reset(subscription bool) error {
 	return nil
 }
 
+// UnreadJSON hands over what the core has recorded since anyone last looked.
+// The events are already written for the notification bell; a client that wants
+// to surface them as they happen reads the same list instead of growing a
+// second channel beside it.
 func (a *API) UnreadJSON() (string, error) {
 	items, _, err := a.db.Notifications()
 	if err != nil {
@@ -1156,6 +1168,8 @@ func (a *API) routing(w http.ResponseWriter, r *http.Request) {
 
 	running := a.platform.Processes()
 	live := map[string]bool{}
+	// A rule keyed on a path takes that file's icon; one keyed on a bare name
+	// borrows the icon of whatever is running under it.
 	iconByPath := map[string]string{}
 	iconByName := map[string]string{}
 	for _, p := range running {
@@ -1324,6 +1338,8 @@ func (a *API) adoptFixedRate(mbit int) {
 	a.db.SaveSettings(settings)
 }
 
+// Entrypoints — адреса всех входов подписки. Выходные узлы клиент не набирает:
+// до них добирается ingress своей гонкой.
 func Entrypoints(nodes []clientstate.Node) []string {
 	out := make([]string, 0, len(nodes))
 	for _, n := range nodes {

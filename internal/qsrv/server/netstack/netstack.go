@@ -1,3 +1,13 @@
+// Package netstack — серверный конец модели B: gVisor netstack узла.
+//
+// Разворачивает сырые IP-пакеты из connect-ip туннеля, терминирует TCP/UDP в
+// userspace-стеке и форвардит наружу — напрямую в интернет (direct) или в
+// upstream-узел (chain). Обратный трафик стек сериализует в IP-пакеты и пишет
+// назад в туннель. Это единственное место на узле, где живёт полноценный TCP/IP.
+//
+// NIC работает в promiscuous+spoofing режиме и держит маршрут по умолчанию, чтобы
+// принимать соединения на ЛЮБОЙ адрес назначения (клиент ходит в произвольные
+// хосты). Выбор direct/chain делает Dialer — туда позже придёт routing.Router.
 package netstack
 
 import (
@@ -7,6 +17,8 @@ import (
 	"log"
 	"net"
 	"net/netip"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"gvisor.dev/gvisor/pkg/buffer"
@@ -24,35 +36,49 @@ import (
 )
 
 const (
-	nicID       = 1
+	nicID = 1
+	// channelMTU занижен до 1280 (IPv6 min MTU): узел объявляет MSS ≤1240 и
+	// клиенту, и удалённым серверам, поэтому ни один сегмент не превышает ёмкость
+	// connect-ip датаграммы (QUIC datagram). Иначе крупные пакеты отбрасываются.
 	channelMTU  = 1280
 	maxInFlight = 2048
 	dialTimeout = 15 * time.Second
 )
 
+// Tunnel — двусторонний канал сырых IP-пакетов (серверный connect-ip Conn).
 type Tunnel interface {
 	ReadPacket(b []byte) (int, error)
 	WritePacket(b []byte) (icmp []byte, err error)
 }
 
+// Dialer выходит наружу с узла: direct (реальная сеть) или chain (upstream-узел).
 type Dialer interface {
 	DialTCP(ctx context.Context, dst netip.AddrPort) (net.Conn, error)
 	DialUDP(ctx context.Context, dst netip.AddrPort) (net.Conn, error)
 }
 
+// Stack — netstack узла.
 type Stack struct {
 	opened func(port uint16, shut io.Closer)
 
-	stack  *stack.Stack
-	ep     *channel.Endpoint
-	dialer Dialer
-	mtu    int
+	stack    *stack.Stack
+	ep       *channel.Endpoint
+	dialer   Dialer
+	flows    sync.Map
+	nextFlow atomic.Uint64
+	mtu      int
 }
 
+// NewWithMTU — как New, но с явным MTU канала.
+//
+// Узлу нужен MTU туннеля (пакеты уедут в датаграммах), а клиентскому стеку — MTU
+// локальной сети: он общается с ОС через инжект, и мелкий MTU только дробит поток
+// на лишние пакеты.
 func NewWithMTU(d Dialer, mtu int) (*Stack, error) {
 	return newStack(d, mtu)
 }
 
+// New поднимает стек с TCP/UDP-форвардерами, направляющими трафик через d.
 func New(d Dialer) (*Stack, error) {
 	return newStack(d, channelMTU)
 }
@@ -66,6 +92,9 @@ func newStack(d Dialer, mtu int) (*Stack, error) {
 			tcp.NewProtocol, udp.NewProtocol, icmp.NewProtocol4, icmp.NewProtocol6,
 		},
 	})
+	// Буферы TCP заметно больше дефолтных gVisor: стек между CONNECT-стримом и
+	// приложением, и на дефолтах он становился узким местом (изолированный стрим
+	// давал 645 Мбит, полный тракт — 300-400, при том что CPU стека мизерный).
 	sndBuf := tcpip.TCPSendBufferSizeRangeOption{Min: 4 << 10, Default: 4 << 20, Max: 16 << 20}
 	if err := s.SetTransportProtocolOption(tcp.ProtocolNumber, &sndBuf); err != nil {
 		return nil, fmt.Errorf("tcp send buffer: %v", err)
@@ -76,6 +105,11 @@ func newStack(d Dialer, mtu int) (*Stack, error) {
 	}
 
 	ep := channel.New(4096, uint32(mtu), "")
+	// Источник доверенный (наш перехват / наш туннель), а у перехваченных
+	// исходящих контрольные суммы не досчитаны — их считает NIC (offload), а
+	// WinDivert перехватывает раньше: в заголовке остаётся 0x0000. Без этой
+	// capability стек бракует ВСЕ такие пакеты как malformed (nic.go выставляет
+	// pkt.RXChecksumValidated именно отсюда, поэтому флаг на пакете бесполезен).
 	ep.LinkEPCapabilities = stack.CapabilityRXChecksumOffload
 	if err := s.CreateNIC(nicID, ep); err != nil {
 		return nil, fmt.Errorf("create nic: %v", err)
@@ -101,6 +135,8 @@ func newStack(d Dialer, mtu int) (*Stack, error) {
 	return st, nil
 }
 
+// DebugStats — счётчики стека: видно, доходят ли пакеты до IP/TCP-слоя и почему
+// отбрасываются (битая сумма, чужой адрес, мусор).
 func (s *Stack) DebugStats() string {
 	st := s.stack.Stats()
 	return fmt.Sprintf(
@@ -120,12 +156,18 @@ func (s *Stack) DebugStats() string {
 		st.ICMP.V4.PacketsReceived.Invalid.Value())
 }
 
+// Run гоняет обмен туннель↔стек до отмены ctx. ingress держит горутину вызова,
+// egress — отдельную.
 func (s *Stack) Run(ctx context.Context, t Tunnel) error {
 	go s.egress(ctx, t)
 	return s.ingress(ctx, t)
 }
 
+// ingress: IP-пакеты из туннеля → стек.
 func (s *Stack) ingress(ctx context.Context, t Tunnel) error {
+	// Буфер на максимальный IP-пакет, а не на MTU: на клиенте перехват идёт ДО
+	// сегментации (Windows LSO отдаёт пакеты до 64 КБ), и короткий буфер молча
+	// обрезал бы их — стек считал бы такие пакеты malformed.
 	buf := make([]byte, 65536+header.IPv4MaximumHeaderSize)
 	for {
 		if err := ctx.Err(); err != nil {
@@ -147,6 +189,7 @@ func (s *Stack) ingress(ctx context.Context, t Tunnel) error {
 		default:
 			continue
 		}
+		// Копия: buf переиспользуется на следующей итерации.
 		data := make([]byte, n)
 		copy(data, buf[:n])
 		pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
@@ -157,17 +200,22 @@ func (s *Stack) ingress(ctx context.Context, t Tunnel) error {
 	}
 }
 
+// egress: IP-пакеты из стека → туннель (ответы клиенту).
 func (s *Stack) egress(ctx context.Context, t Tunnel) {
 	var errs uint64
 	for {
 		pkt := s.ep.ReadContext(ctx)
 		if pkt == nil {
-			return
+			return // ctx отменён / стек закрыт
 		}
 		b := pkt.ToBuffer()
 		_, err := t.WritePacket(b.Flatten())
 		pkt.DecRef()
 		if err != nil {
+			// Сбой отправки ОДНОГО пакета — не повод глушить весь обратный путь.
+			// Раньше здесь стоял return: первая же временная ошибка инжекта
+			// навсегда останавливала доставку ответов, и снаружи это выглядело
+			// как «сеть внезапно умерла» (пакеты идут, ответы — нет).
 			errs++
 			if errs <= 3 || errs%1000 == 0 {
 				log.Printf("netstack: egress: %v (ошибок: %d, продолжаю)", err, errs)
@@ -176,6 +224,8 @@ func (s *Stack) egress(ctx context.Context, t Tunnel) {
 	}
 }
 
+// handleTCP терминирует TCP-соединение в стеке и склеивает его с реальным
+// исходящим соединением (direct/chain).
 func (s *Stack) handleTCP(r *tcp.ForwarderRequest) {
 	id := r.ID()
 	dst := netip.AddrPortFrom(toNetip(id.LocalAddress), id.LocalPort)
@@ -187,7 +237,7 @@ func (s *Stack) handleTCP(r *tcp.ForwarderRequest) {
 	cancel()
 	if err != nil {
 		log.Printf("netstack: dial %s: %v (RST инициатору)", dst, err)
-		r.Complete(true)
+		r.Complete(true) // RST инициатору
 		return
 	}
 
@@ -202,9 +252,14 @@ func (s *Stack) handleTCP(r *tcp.ForwarderRequest) {
 	r.Complete(false)
 
 	inbound := gonet.NewTCPConn(&wq, ep)
-	go pipe(inbound, outbound)
+	held := s.keepFlow(Flow{Src: src, Dst: dst}, shutBoth{inbound, outbound})
+	go func() {
+		pipe(inbound, outbound)
+		s.dropFlow(held)
+	}()
 }
 
+// handleUDP терминирует UDP-флоу и склеивает с реальным исходящим сокетом.
 func (s *Stack) handleUDP(r *udp.ForwarderRequest) {
 	id := r.ID()
 	dst := netip.AddrPortFrom(toNetip(id.LocalAddress), id.LocalPort)
@@ -223,13 +278,53 @@ func (s *Stack) handleUDP(r *udp.ForwarderRequest) {
 		return
 	}
 	inbound := gonet.NewUDPConn(s.stack, &wq, ep)
+	shut := shutBoth{inbound, outbound}
 	if s.opened != nil {
-		s.opened(id.RemotePort, shutBoth{inbound, outbound})
+		s.opened(id.RemotePort, shut)
 	}
-	go pipe(inbound, outbound)
+	held := s.keepFlow(Flow{Src: src, Dst: dst, UDP: true}, shut)
+	go func() {
+		pipe(inbound, outbound)
+		s.dropFlow(held)
+	}()
 }
 
+// OnFlow вызывается при открытии UDP-флоу: порт источника и способ его закрыть.
+// Нужен вызывающему, чтобы оборвать один флоу, не трогая остальные.
 func (s *Stack) OnFlow(fn func(port uint16, shut io.Closer)) { s.opened = fn }
+
+// keepFlow заносит живой разговор в реестр. Правило маршрутизации решается один
+// раз при дозвоне, поэтому изменить дорогу уже открытому флоу нельзя — его надо
+// оборвать, чтобы приложение набрало заново. Без реестра рвать было нечего:
+// снаружи оставался только грубый разрыв в стеке ОС, а на телефоне и его нет.
+func (s *Stack) keepFlow(f Flow, shut io.Closer) uint64 {
+	id := s.nextFlow.Add(1)
+	s.flows.Store(id, liveFlow{flow: f, shut: shut})
+	return id
+}
+
+func (s *Stack) dropFlow(id uint64) { s.flows.Delete(id) }
+
+// ShutFlows обрывает флоу, на которые указал take. Возвращает, сколько оборвал.
+func (s *Stack) ShutFlows(take func(Flow) bool) int {
+	shut := 0
+	s.flows.Range(func(id, held any) bool {
+		one := held.(liveFlow)
+		if !take(one.flow) {
+			return true
+		}
+		s.flows.Delete(id)
+		one.shut.Close()
+		shut++
+		return true
+	})
+	return shut
+}
+
+type liveFlow struct {
+	flow Flow
+	shut io.Closer
+}
 
 type shutBoth struct{ a, b net.Conn }
 
@@ -238,6 +333,7 @@ func (s shutBoth) Close() error {
 	return s.b.Close()
 }
 
+// pipe качает данные в обе стороны и корректно закрывает половинки.
 func pipe(a, b net.Conn) {
 	done := make(chan struct{}, 2)
 	cp := func(dst, src net.Conn) {
@@ -264,6 +360,8 @@ func toNetip(a tcpip.Address) netip.Addr {
 	return netip.AddrFrom16(a.As16())
 }
 
+// NetDialer — прямой выход в реальную сеть узла (direct). Chain-реализация Dialer
+// добавится отдельно (dial в upstream-узел).
 type NetDialer struct {
 	D net.Dialer
 }

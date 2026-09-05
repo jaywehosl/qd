@@ -4,11 +4,14 @@ import { Input, Tag } from '@/components/ds';
 export interface TagListEditorProps {
   value?: string[];
   onChange?: (next: string[]) => void;
+  /** Preset suggestions shown as togglable chips even when not selected. */
   presets?: string[];
   placeholder?: string;
+  /** Characters that split a typed entry into multiple tags. */
   separators?: string[];
 }
 
+/** Free-text tag list (antd Select mode="tags" replacement): chips + add-input. */
 export default function TagListEditor({
   value,
   onChange,

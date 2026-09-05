@@ -29,6 +29,12 @@ interface PublishContextValue {
 
 const PublishContext = createContext<PublishContextValue | null>(null);
 
+/**
+ * Owns the network draft — the clients, groups, entrypoints and node roles the
+ * operator has edited but not yet handed to the nodes. Panel preferences are
+ * deliberately NOT part of this: they never leave the machine, so they save
+ * themselves and never light up the header.
+ */
 export function PublishControllerProvider({ children }: { children: ReactNode }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -40,6 +46,8 @@ export function PublishControllerProvider({ children }: { children: ReactNode })
     queryFn: async () => {
       const msg = await HttpUtil.get<DraftState>('/panel/api/publish/draft', undefined, { silent: true });
       if (!msg?.success || !msg.obj) return null;
+      // An empty Go slice serialises as null, so normalise here rather than
+      // guarding every read downstream.
       return { ...msg.obj, changes: msg.obj.changes ?? [] };
     },
     refetchInterval: 5000,

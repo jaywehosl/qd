@@ -9,6 +9,7 @@ import { fetchProcesses } from '@/hooks/useClientRouting';
 interface ProcessPickerDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Lowercased path-or-name of everything that already has a rule. */
   existing: Set<string>;
   onPick: (pick: { process: string; path?: string }) => void;
 }
@@ -23,6 +24,8 @@ export default function ProcessPickerDialog({
     queryKey: ['client', 'routing', 'processes'],
     queryFn: fetchProcesses,
     enabled: open,
+    // The point of the list is to find what is talking right now, so it is not
+    // worth caching across openings.
     staleTime: 0,
   });
 
@@ -34,6 +37,9 @@ export default function ProcessPickerDialog({
         || (p.path ?? '').toLowerCase().includes(needle))
       : processes;
 
+    // A rule keys on the executable, so fifteen chrome.exe rows are fifteen
+    // ways to pick the same one. Fold them into the row a rule would create
+    // and carry the whole family's flow count on it.
     const folded = new Map<string, typeof list[number] & { instances: number }>();
     for (const p of list) {
       const key = (p.path || p.name).toLowerCase();
@@ -46,6 +52,8 @@ export default function ProcessPickerDialog({
       seen.instances += 1;
     }
 
+    // Busiest first: whoever came here came to route something that is
+    // currently moving traffic, not to read an alphabet.
     return [...folded.values()].sort((a, b) => (b.connections ?? 0) - (a.connections ?? 0)
       || a.name.localeCompare(b.name));
   }, [processes, needle]);

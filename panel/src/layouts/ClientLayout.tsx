@@ -27,6 +27,11 @@ const NAV = [
   { key: '/client/settings', icon: SettingOutlined, label: 'client.menu.settings' },
 ];
 
+/**
+ * The client's own shell. It deliberately does not reuse the panel header:
+ * a user who is not an admin has no business seeing entries for nodes,
+ * groups or a publish button.
+ */
 function ClientShell() {
   const { t } = useTranslation();
   const { open: metricsOpen, toggle: toggleMetrics } = useMetricsPanel();
@@ -62,6 +67,8 @@ function ClientShell() {
   const shellClass = ['client-shell', isDark && 'is-dark', isUltra && 'is-ultra']
     .filter(Boolean).join(' ');
 
+  // With nothing imported the shell would frame an import screen that already
+  // draws its own chrome, so it steps aside entirely.
   if (!state?.imported) return <Outlet />;
 
   return (

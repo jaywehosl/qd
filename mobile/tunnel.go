@@ -43,10 +43,20 @@ func (c *Client) applyExit(on bool) {
 		return
 	}
 	live.SetRoute(tag)
+	live.Reroute()
 }
 
 func (c *Client) Running() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.running
+}
+
+func (c *Client) reroute() {
+	c.mu.Lock()
+	live := c.live
+	c.mu.Unlock()
+	if live != nil {
+		live.Reroute()
+	}
 }

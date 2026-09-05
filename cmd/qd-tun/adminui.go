@@ -54,6 +54,9 @@ func (a *adminUI) open() bool {
 
 const panelIdle = 2 * time.Minute
 
+// SetKey rebuilds the fleet when the key arrives. On a first run there is no
+// key until a link is imported, so the panel has to be able to come to life
+// without a restart.
 func (a *adminUI) SetKey(key *qdcrypt.Key) {
 	if key == nil {
 		return
@@ -80,6 +83,7 @@ func (a *adminUI) SetKey(key *qdcrypt.Key) {
 	go api.Converge(stop, a.open)
 }
 
+// live is what the open panel gets pushed instead of polling for it.
 func (a *adminUI) live() []localapi.Push {
 	a.mu.Lock()
 	api := a.api
@@ -111,6 +115,9 @@ func (a *adminUI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	mux.ServeHTTP(w, r)
 }
 
+// discover seeds the fleet from the subscription: the link names one node, and
+// that node's database names the rest. It also asks whether this key
+// administers anything — the node decides that, not the link.
 func (a *adminUI) discover(db *clientstate.DB) {
 	fleet, _ := a.handler()
 	if fleet == nil {
@@ -121,6 +128,10 @@ func (a *adminUI) discover(db *clientstate.DB) {
 	if err != nil || !sub.Imported {
 		return
 	}
+	// The client half of the link is the identity: the node looks it up in its
+	// clients table and answers from that row. The network key only seals the
+	// transport — everyone in the network holds it, so it proves nothing about
+	// who may administer.
 	token := sub.Key
 	fleet.SetToken(token)
 	fleet.SetTag(sub.Tag)

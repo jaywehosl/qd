@@ -1,3 +1,9 @@
+// Package publish drives a network revision out to the nodes in three phases.
+//
+// The phases exist so that a half-delivered rollout never becomes a half-applied
+// one: plan builds every node's configuration, push ships it to sit beside the
+// running revision without taking effect, and apply is the only step that
+// changes what a node is doing.
 package publish
 
 import (
@@ -33,15 +39,28 @@ const (
 	PhaseDone  Phase = "done"
 )
 
+// ErrUnreachable separates "this node is not listening right now" from "this
+// node refused what we sent". The first is skipped and picks the revision up on
+// reconnect; the second is a failure the operator has to look at.
 var ErrUnreachable = errors.New("publish: no control channel")
 
 type Transport interface {
+	// Push stores the blob beside the node's running revision. It does not
+	// activate anything, and pushing the same revision twice is expected —
+	// a broken transfer is retried by sending it again.
 	Push(ctx context.Context, nodeID, revision int, blob []byte, sum string) error
+	// Apply activates a revision the node has already staged. `sum` is the
+	// checksum the node must find on what it holds; a mismatch means the push
+	// never completed, and the node keeps running what it was running.
 	Apply(ctx context.Context, nodeID, revision int, sum string) error
+	// Reachable reports whether a control channel is open right now. Used only
+	// to draw the plan: push is what actually decides, because a channel can
+	// close between the two.
 	Reachable(nodeID int) bool
 }
 
 type Options struct {
+	// Attempts per node per phase, including the first.
 	Attempts int
 	Backoff  time.Duration
 }
@@ -56,6 +75,7 @@ func (o Options) withDefaults() Options {
 	return o
 }
 
+// NodeRun is one node's progress through the rollout.
 type NodeRun struct {
 	ID       int           `json:"id"`
 	Name     string        `json:"name"`
@@ -78,6 +98,11 @@ type Job struct {
 	opts     Options
 }
 
+// Plan freezes a state into per-node configurations.
+//
+// Disabled nodes are not targets at all — they are not part of the network, so
+// they are neither pushed to nor reported as skipped. Skipped means something
+// else entirely: a node that should be receiving this and cannot be reached.
 func Plan(s *netstate.State, tr Transport, opts Options) (*Job, error) {
 	j := &Job{revision: s.Revision, phase: PhasePlan, opts: opts.withDefaults()}
 
@@ -113,9 +138,18 @@ func Plan(s *netstate.State, tr Transport, opts Options) (*Job, error) {
 	return j, nil
 }
 
+// Push ships the planned configuration. Nodes run concurrently: a rollout across
+// twenty nodes should not cost twenty timeouts.
+//
+// `only` restricts the push to the given node ids, which is what a retry of the
+// failures is — the successful nodes are already holding the revision and
+// re-sending to them would be work for nothing.
 func (j *Job) Push(ctx context.Context, tr Transport, only []int) {
 	j.setPhase(PhasePush)
 	j.each(only, func(n *NodeRun) bool {
+		// Skipped nodes stay skipped until the operator asks for them by name;
+		// a blanket push should not spend its retries on a node already known
+		// to be absent.
 		return n.State == StatePlanned || n.State == StateFailed ||
 			(n.State == StateSkipped && len(only) > 0)
 	}, func(n *NodeRun) {
@@ -125,6 +159,11 @@ func (j *Job) Push(ctx context.Context, tr Transport, only []int) {
 	})
 }
 
+// Apply activates the revision on every node that actually staged it.
+//
+// The filter is the whole point of the three-phase split: a node whose push
+// failed is not asked to apply, so an apply can never activate a configuration
+// that only half arrived.
 func (j *Job) Apply(ctx context.Context, tr Transport) {
 	j.setPhase(PhaseApply)
 	j.each(nil, func(n *NodeRun) bool { return n.State == StateStaged }, func(n *NodeRun) {
@@ -135,6 +174,8 @@ func (j *Job) Apply(ctx context.Context, tr Transport) {
 	j.setPhase(PhaseDone)
 }
 
+// attempt runs one node's step with the configured retries, moving it through
+// `busy` and landing it on `done`, StateFailed or StateSkipped.
 func (j *Job) attempt(ctx context.Context, n *NodeRun, busy, done State, do func() error) {
 	j.set(n, func() {
 		n.State = busy
@@ -160,6 +201,8 @@ func (j *Job) attempt(ctx context.Context, n *NodeRun, busy, done State, do func
 			j.set(n, func() { n.State = done; n.Error = "" })
 			return
 		}
+		// A closed channel is not a failure to retry into: the node is not
+		// there, and it will collect this revision when it comes back.
 		if errors.Is(last, ErrUnreachable) {
 			j.set(n, func() {
 				n.State = StateSkipped
@@ -218,6 +261,8 @@ func (j *Job) Revision() int {
 	return j.revision
 }
 
+// Status is a copy, taken under the lock, so the status endpoint can be polled
+// while the rollout is running without reading a node mid-write.
 type Status struct {
 	Revision int        `json:"revision"`
 	Phase    Phase      `json:"phase"`
@@ -237,6 +282,7 @@ func (j *Job) Status() Status {
 	return Status{Revision: j.revision, Phase: j.phase, Nodes: out}
 }
 
+// FailedIDs is what the dialog's "Retry N failed" button acts on.
 func (j *Job) FailedIDs() []int {
 	j.mu.Lock()
 	defer j.mu.Unlock()

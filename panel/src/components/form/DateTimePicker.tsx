@@ -12,6 +12,7 @@ interface DateTimePickerProps {
   value: Dayjs | null;
   onChange: (next: Dayjs | null) => void;
   showTime?: boolean;
+  /** Retained for API compatibility; the gregorian native input formats itself. */
   format?: string;
   placeholder?: string;
   disabled?: boolean;

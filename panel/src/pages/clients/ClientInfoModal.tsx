@@ -100,8 +100,13 @@ export default function ClientInfoModal({
     </div>
   );
 
+  // Devices and addresses are the long lists here, so they stay folded and the
+  // dialog opens at the size of the client's own facts.
   const [shown, setShown] = useState<'devices' | 'ips' | 'exits' | null>(null);
 
+  // Blocking and forgetting are one click from a row of read-only facts, so the
+  // button asks first and answers on the second press. A dialog on top of this
+  // dialog would be heavier than the action deserves.
   const [asking, setAsking] = useState<string | null>(null);
 
   const confirmDevice = (action: 'block' | 'forget', print: string, blocked: boolean) => {
@@ -156,6 +161,9 @@ export default function ClientInfoModal({
         open={open}
         onOpenChange={(o) => !o && onOpenChange(false)}
         title={client ? `${t('pages.clients.clientInfo')} — ${client.email}` : t('pages.clients.clientInfo')}
+        // Same width as the edit dialog: the two read as one pair. autoHeight
+        // keeps it as tall as its contents — without it a dialog this wide is
+        // given a fixed height and scrolls even when the lists are folded.
         width={760}
         autoHeight
         footer={null}

@@ -62,7 +62,7 @@ func WithRemote(ctx context.Context, addr string) context.Context {
 func routeOf(r *http.Request) string { return r.Header.Get(HeaderRoute) }
 
 func (n *Node) carry(ctx context.Context, conn *connectip.Conn, qc *quic.Conn, grant Grant, peer, route string) {
-	address, err := n.pool.take(grant.Session)
+	address, err := n.pool.take(grant.Seat)
 	if err != nil {
 		conn.Close()
 		return
@@ -85,21 +85,21 @@ func (n *Node) carry(ctx context.Context, conn *connectip.Conn, qc *quic.Conn, g
 	s.route.Store(&route)
 
 	n.mu.Lock()
-	if was := n.held[grant.Session]; was != nil {
+	if was := n.held[grant.Seat]; was != nil {
 		n.pool.give(was.address)
 	}
-	n.held[grant.Session] = s
+	n.held[grant.Seat] = s
 	n.mu.Unlock()
 
 	defer func() {
 		n.mu.Lock()
-		if n.held[grant.Session] == s {
-			delete(n.held, grant.Session)
+		if n.held[grant.Seat] == s {
+			delete(n.held, grant.Seat)
 		}
 		n.mu.Unlock()
 		n.pool.give(address)
 		conn.Close()
-		n.links.forget(grant.Session)
+		n.links.forget(grant.Seat)
 	}()
 
 	tun := counted{conn: conn, s: s}
@@ -141,6 +141,10 @@ func (c counted) WritePacket(b []byte) ([]byte, error) {
 	return icmp, err
 }
 
+// dialerFor выбирает, чем выпускать флоу. Метка клиента исполняется буквально:
+// сказано «через выход» — значит только через выход. Недоступен — флоу не
+// состоится, приложение получит отказ. Тихо выпустить трафик здесь нельзя:
+// клиент считал бы, что идёт через другую страну, а шёл бы отсюда.
 func (n *Node) dialerFor(ctx context.Context, grant Grant, route string, hops int) netstack.Dialer {
 	local := netstack.NetDialer{}
 
@@ -154,15 +158,17 @@ func (n *Node) dialerFor(ctx context.Context, grant Grant, route string, hops in
 		return refusing{why: fmt.Errorf("this subscription may not take an exit")}
 	}
 
-	won, endpoint, err := n.raceExit(ctx, route, grant.Session)
+	won, endpoint, err := n.raceExit(ctx, route, grant.Seat)
 	if err != nil {
 		return refusing{why: err}
 	}
 
 	n.transits.Add(1)
-	return chained{cc: won, ls: n.links, endpoint: endpoint, seat: grant.Session, hops: hops - 1}
+	return chained{cc: won, ls: n.links, endpoint: endpoint, seat: grant.Seat, hops: hops - 1}
 }
 
+// refusing отказывает во всех дозвонах: выход недоступен, а подменять его
+// локальным нельзя.
 type refusing struct{ why error }
 
 func (d refusing) DialTCP(context.Context, netip.AddrPort) (net.Conn, error) {
@@ -193,10 +199,14 @@ func (n *Node) serveConnect(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
+	// Просить у узла адрес, до которого он не доберётся, незачем: без ответа флоу
+	// висит на дозвоне и держит поток, а за ним ждут остальные. Отказ мгновенный.
 	if dst.Addr().Is6() && !dst.Addr().Is4In6() && !n.holdsV6() {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
+	// Подставной адрес NAT46 разворачиваем в настоящий IPv6 до дозвона — и до
+	// транзита, чтобы соседний узел получил уже честный адрес.
 	if n.stale(dst) {
 		w.WriteHeader(http.StatusGone)
 		return
@@ -242,7 +252,7 @@ func (n *Node) serveConnect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	n.mu.Lock()
-	s := n.held[grant.Session]
+	s := n.held[grant.Seat]
 	n.mu.Unlock()
 	if s == nil {
 		s = n.peerSession(grant)
@@ -285,6 +295,8 @@ type steered struct {
 	hops  int
 }
 
+// Подставной адрес разворачивается в настоящий здесь: дальше по пути (и на
+// соседнем узле, если флоу транзитный) едет уже честный IPv6.
 func (d steered) DialTCP(ctx context.Context, dst netip.AddrPort) (net.Conn, error) {
 	dst = d.node.behind(dst)
 	return d.node.dialerFor(ctx, d.grant, d.route(ctx), d.hops).DialTCP(ctx, dst)

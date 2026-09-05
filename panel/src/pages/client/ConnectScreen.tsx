@@ -36,6 +36,8 @@ function dip(spread: number, gone: number, back: number) {
 
 const rate = bitsPerSec;
 
+// What the Android client puts here: not how many nodes answered, but how long
+// until the daemon fetches the subscription again.
 function countdown(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
   const h = Math.floor(total / 3600);
@@ -67,6 +69,8 @@ export default function ConnectScreen({
   const { data: pace } = useQuery({
     queryKey: ['client', 'pace'],
     queryFn: async () => {
+      // The shortest window the daemon keeps: its points are the freshest, and
+      // this readout is meant to show what is moving right now.
       const msg = await HttpUtil.get<{ points?: { down?: number; up?: number }[] }>(
         '/client/api/history/1', undefined, { silent: true },
       );
@@ -101,6 +105,8 @@ export default function ConnectScreen({
     spreadAim.current = exiting && state.connected ? 1 : 0;
   }, [exiting, state.connected]);
 
+  // One timeline drives everything the screen shows, so a reversal is just the
+  // same curve walked backwards — no separate teardown path to keep in step.
   useEffect(() => {
     let frame = 0;
     let last = 0;

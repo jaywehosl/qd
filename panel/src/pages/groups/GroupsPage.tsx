@@ -198,6 +198,7 @@ export default function GroupsPage() {
         </Tag>
       ),
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   ], [t, groups, inboundLabel]);
 
   const pageClass = ['groups-page', isDark && 'is-dark', isUltra && 'is-ultra'].filter(Boolean).join(' ');

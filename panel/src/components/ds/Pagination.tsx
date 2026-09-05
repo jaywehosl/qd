@@ -2,14 +2,17 @@ import { LeftOutlined, RightOutlined } from '@ant-design/icons';
 import { Select } from './Select';
 
 export interface PaginationProps {
+  /** 1-based current page. */
   page: number;
   pageSize: number;
   total: number;
   onChange: (page: number, pageSize: number) => void;
   pageSizeOptions?: number[];
+  /** "X-Y of N" label renderer. */
   showTotal?: (total: number, range: [number, number]) => string;
 }
 
+/** Build a page list with ellipsis markers, e.g. [1, '…', 4, 5, 6, '…', 20]. */
 function pageList(current: number, totalPages: number): (number | 'gap')[] {
   if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
   const out: (number | 'gap')[] = [1];

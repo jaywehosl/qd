@@ -32,6 +32,7 @@ export interface DialogProps {
   title?: ReactNode;
   children?: ReactNode;
   footer?: ReactNode;
+  /** Convenience confirm/cancel footer. Ignored when `footer` is provided. */
   okText?: ReactNode;
   cancelText?: ReactNode;
   onOk?: () => void;
@@ -39,10 +40,16 @@ export interface DialogProps {
   okDisabled?: boolean;
   confirmLoading?: boolean;
   width?: number | string;
+  /** Skip the fixed-height layout that wide dialogs get by default. */
   autoHeight?: boolean;
+  /** Hide the default header close button. */
   hideClose?: boolean;
 }
 
+/**
+ * Accessible modal dialog (Radix). Focus-trap, ESC, scroll-lock and overlay
+ * click-to-close are handled by Radix; we only style it.
+ */
 export function Dialog({
   open,
   onOpenChange,
@@ -73,7 +80,15 @@ export function Dialog({
           )
         : null;
 
+  // Form/content dialogs (inbound/outbound/rule/…) are unified to one standard
+  // size — the "Add Inbound" reference (780 × fixed height) — so every form
+  // modal is identical and never resizes/jumps between tabs; the body is the
+  // single scroll region. Narrow confirms (<520) keep their own width + auto
+  // height.
   const isTall = !autoHeight && typeof width === 'number' && width >= 520;
+  // A confirm that names no width used to be held in by a 560px cap in the
+  // stylesheet; without that cap it stretched the full page, so the default
+  // lives here now — where the other size decisions already are.
   const resolvedWidth = isTall ? 780 : (width ?? 460);
 
   const closing = useClosing(open);

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { toast as dsToast } from '@/components/ds/Toast';
 
+// Generate responsive grid styles dynamically at runtime to support all standard breakpoints and layout spans
 if (typeof document !== 'undefined') {
   const styleId = 'custom-ui-grid-styles';
   if (!document.getElementById(styleId)) {
@@ -54,6 +55,7 @@ if (typeof document !== 'undefined') {
 }
 
 
+// Card replacement
 export function Card({ title, extra, children, actions, className = '', ...props }: any) {
   return (
     <div className={`custom-card ${className}`} {...props}>
@@ -75,6 +77,7 @@ export function Card({ title, extra, children, actions, className = '', ...props
   );
 }
 
+// Button replacement
 export function Button({ type = 'default', children, className = '', icon, loading, ...props }: any) {
   return (
     <button className={`custom-btn custom-btn-${type} ${className}`} disabled={loading} {...props}>
@@ -85,6 +88,7 @@ export function Button({ type = 'default', children, className = '', icon, loadi
   );
 }
 
+// Row replacement
 export function Row({ gutter = [0, 0], children, className = '', style, ...props }: any) {
   const rowStyle = {
     display: 'flex',
@@ -101,6 +105,7 @@ export function Row({ gutter = [0, 0], children, className = '', style, ...props
   );
 }
 
+// Col replacement
 export function Col({ span, xs, sm, md, lg, children, className = '', style, ...props }: any) {
   const colClass = [
     'custom-col',
@@ -127,6 +132,7 @@ export function Col({ span, xs, sm, md, lg, children, className = '', style, ...
   );
 }
 
+// Space replacement
 export function Space({ direction = 'horizontal', align = 'center', size = 8, children, className = '', style, ...props }: any) {
   const spaceStyle = {
     display: 'inline-flex',
@@ -155,6 +161,7 @@ Space.Compact = function SpaceCompact({ children, className = '', style, ...prop
   );
 };
 
+// Spin replacement (Loader)
 export function Spin({ spinning = true, children, description, size = 'default' }: any) {
   if (!spinning) return children || null;
   return (
@@ -170,6 +177,7 @@ export function Spin({ spinning = true, children, description, size = 'default' 
   );
 }
 
+// Tag replacement
 export function Tag({ color, children, className = '', ...props }: any) {
   return (
     <span className={`custom-tag color-${color} ${className}`} {...props}>
@@ -178,6 +186,7 @@ export function Tag({ color, children, className = '', ...props }: any) {
   );
 }
 
+// Alert replacement
 export function Alert({ type = 'info', title, description, showIcon, className = '', ...props }: any) {
   return (
     <div className={`custom-alert type-${type} ${className}`} {...props}>
@@ -188,6 +197,7 @@ export function Alert({ type = 'info', title, description, showIcon, className =
 }
 
 
+// Custom Modal Dialog
 export function Modal({
   open,
   title,
@@ -240,6 +250,7 @@ export function Modal({
   );
 }
 
+// Custom hook matching Ant Design's Modal.useModal()
 Modal.useModal = function useModal() {
   const [modals, setModals] = useState<any[]>([]);
 
@@ -297,6 +308,7 @@ Modal.useModal = function useModal() {
 };
 
 
+// Custom Popover
 export function Popover({ title, content, children }: any) {
   const [visible, setVisible] = useState(false);
   return (
@@ -317,6 +329,7 @@ export function Popover({ title, content, children }: any) {
   );
 }
 
+// Radio Group buttons
 export const Radio = {
   Group: ({ value, onChange, children, style }: any) => {
     return (
@@ -344,6 +357,7 @@ export const Radio = {
   },
 };
 
+// Result error pages
 export function Result({ status, title, subTitle, extra }: any) {
   return (
     <div className={`custom-result status-${status}`}>
@@ -355,6 +369,7 @@ export function Result({ status, title, subTitle, extra }: any) {
   );
 }
 
+// Back top floating button
 export function FloatButton() {
   return null;
 }
@@ -388,6 +403,7 @@ FloatButton.BackTop = function BackTop({ target }: any) {
   );
 };
 
+// Pass-through Layout
 export const Layout = ({ children, className = '' }: any) => {
   return <div className={`custom-layout ${className}`}>{children}</div>;
 };
@@ -400,10 +416,12 @@ Layout.Content = ({ children, className = '', id }: any) => {
   );
 };
 
+// Pass-through ConfigProvider
 export function ConfigProvider({ children }: any) {
   return children;
 }
 
+// Toast — delegate to the unified DS toaster (single message system).
 export const message = {
   success: (msg: React.ReactNode) => dsToast.success(msg),
   error: (msg: React.ReactNode) => dsToast.error(msg),
@@ -413,6 +431,7 @@ export const message = {
   useMessage: () => [message, null] as const,
 };
 
+// Tooltip replacement
 export function Tooltip({ title, children, placement = 'top' }: any) {
   const [visible, setVisible] = useState(false);
   return (
@@ -432,6 +451,7 @@ export function Tooltip({ title, children, placement = 'top' }: any) {
   );
 }
 
+// Badge replacement
 export function Badge({ status, text, color }: any) {
   return (
     <span className="custom-badge">

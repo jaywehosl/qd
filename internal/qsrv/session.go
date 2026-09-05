@@ -2,6 +2,8 @@ package qsrv
 
 import (
 	"context"
+	"fmt"
+	"hash/fnv"
 	"net/http"
 	"strconv"
 	"sync"
@@ -53,14 +55,28 @@ func (n *Node) verified(r *http.Request) (Grant, bool) {
 		if !ok {
 			return Grant{}, false
 		}
+		grant.Seat = grant.Session
 		if seat := seatOf(r); seat != 0 {
 			grant.Session = seat
+			grant.Seat = seat
 			grant.Client = r.Header.Get(HeaderNode)
+		} else if device := r.Header.Get(HeaderDevice); device != "" {
+			grant.Seat = seatFor(grant.Session, device)
 		}
 		sessionOf(r.Context()).remember(grant)
 		return grant, true
 	}
 	return sessionOf(r.Context()).recall()
+}
+
+func seatFor(session uint32, device string) uint32 {
+	h := fnv.New32a()
+	fmt.Fprintf(h, "%d/%s", session, device)
+	seat := h.Sum32()
+	if seat == 0 || seat == session {
+		seat = session ^ 0x5bf03635
+	}
+	return seat
 }
 
 func seatOf(r *http.Request) uint32 {
@@ -95,10 +111,10 @@ func (h *held) heading() string {
 
 func (n *Node) peerSession(grant Grant) *live {
 	uuid := grant.Client
-	if uuid == "" || grant.Session == 0 {
+	if uuid == "" || grant.Seat == 0 {
 		return nil
 	}
-	id := grant.Session
+	id := grant.Seat
 
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -109,7 +125,7 @@ func (n *Node) peerSession(grant Grant) *live {
 
 	now := time.Now().Unix()
 	s := &live{
-		grant:   Grant{Client: uuid, AllowExit: grant.AllowExit, Session: id},
+		grant:   Grant{Client: uuid, AllowExit: grant.AllowExit, Session: grant.Session, Seat: id},
 		peer:    uuid,
 		since:   now,
 		transit: true,
@@ -126,20 +142,21 @@ func (n *Node) untilGone(c *quic.Conn, h *held) {
 	<-c.Context().Done()
 
 	grant, ok := h.recall()
-	if !ok || grant.Session == 0 {
-		n.cfg.Log("quic      a connection closed with nothing to forget (known %v)", ok)
+	if !ok || grant.Seat == 0 {
 		return
 	}
 
 	n.mu.Lock()
-	s := n.held[grant.Session]
+	s := n.held[grant.Seat]
 	dropped := s != nil && s.transit
 	if dropped {
-		delete(n.held, grant.Session)
+		delete(n.held, grant.Seat)
 	}
 	n.mu.Unlock()
 
-	n.cfg.Log("quic      %s left, transit %d dropped %v (held %v)", grant.Client, grant.Session, dropped, s != nil)
+	if dropped {
+		n.cfg.Log("quic      %s left, transit seat %d dropped", grant.Client, grant.Seat)
+	}
 }
 
 func (h *held) quic() *quic.Conn {

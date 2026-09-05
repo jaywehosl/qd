@@ -13,10 +13,17 @@ interface CalendarProps {
 
 const WEEK_STARTS_MONDAY = 1;
 
+/**
+ * The month grid the skin draws itself. A native datetime-local field paints
+ * its popup outside the document, where no stylesheet reaches it — that popup
+ * arrived in system colours and could not carry the panel's shape or shadow.
+ */
 export default function Calendar({ value, onChange, showTime = true, onDone }: CalendarProps) {
   const { t } = useTranslation();
   const [month, setMonth] = useState(() => (value ?? dayjs()).startOf('month'));
 
+  // Six rows of seven always: a month that starts on a Sunday would otherwise
+  // add a row and the panel would change height as you page through it.
   const days = useMemo(() => {
     const lead = (month.day() - WEEK_STARTS_MONDAY + 7) % 7;
     const first = month.subtract(lead, 'day');
@@ -26,6 +33,7 @@ export default function Calendar({ value, onChange, showTime = true, onDone }: C
   const weekdays = useMemo(() => days.slice(0, 7).map((d) => d.format('dd')), [days]);
 
   const pick = (day: Dayjs) => {
+    // Keep whatever time is already set; picking a date should not reset it.
     const base = value ?? dayjs().startOf('day');
     onChange(day.hour(base.hour()).minute(base.minute()).second(base.second()));
   };

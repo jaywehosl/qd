@@ -29,7 +29,11 @@ func redirectOutput(statePath string) {
 	}
 	os.Stdout = f
 	os.Stderr = f
+	// log держит writer, захваченный при инициализации пакета: подмены os.Stderr
+	// ему мало, и всё, что движок пишет через log, улетало в никуда.
 	log.SetOutput(f)
+	// А runtime пишет панику прямо в дескриптор 2, мимо любых переменных: без
+	// подмены самого дескриптора падение клиента не оставляло следов вообще.
 	windows.SetStdHandle(windows.STD_ERROR_HANDLE, windows.Handle(f.Fd()))
 	windows.SetStdHandle(windows.STD_OUTPUT_HANDLE, windows.Handle(f.Fd()))
 }

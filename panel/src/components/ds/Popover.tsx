@@ -6,10 +6,13 @@ export interface PopoverProps {
   content: ReactNode;
   side?: 'top' | 'right' | 'bottom' | 'left';
   align?: 'start' | 'center' | 'end';
+  /** Padding inside the floating panel (default 12). */
   padded?: boolean;
+  /** Fires on open and on close; the panel stays uncontrolled either way. */
   onOpenChange?: (open: boolean) => void;
 }
 
+/** Click-triggered floating panel with arbitrary content (Radix Popover). */
 export function Popover({
   trigger, content, side = 'bottom', align = 'center', padded = true, onOpenChange,
 }: PopoverProps) {

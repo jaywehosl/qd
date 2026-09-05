@@ -11,6 +11,20 @@ import (
 	"github.com/jaywehosl/quic-diver/internal/roam"
 )
 
+// roamWatch держит туннель на месте при смене сети. Адрес поменялся — QUIC
+// переезжает миграцией по connection ID, соединение остаётся тем же: ни нового
+// рукопожатия, ни новой сессии на узле, ни разрыва живых флоу.
+//
+// Переподнимать туннель здесь нельзя: это была бы гонка входов из-под ног у
+// работающих соединений.
+//
+// Мёртвый путь одними счётчиками не отличить от простаивающего. Машина уходит в
+// сон — процесс стоит, keepalive не идёт, и узел снимает сессию по своему idle.
+// Проснувшись, клиент видит ровный туннель: писать в него некому, «глухоты» не
+// видно, а QUIC о смерти не сообщает — наш же keepalive держит его idle-таймер
+// живым и после того, как с той стороны никого не осталось. Поэтому узел
+// спрашивают напрямую — тем же запросом, каким клиент здоровается при дозвоне:
+// ответил, значит путь жив и сессию помнят.
 func roamWatch(ctx context.Context, stop <-chan struct{}, live *qcli.Tunnel, lost func(error)) {
 	defer func() {
 		if fell := recover(); fell != nil {
@@ -53,6 +67,9 @@ func roamWatch(ctx context.Context, stop <-chan struct{}, live *qcli.Tunnel, los
 				return
 			}
 
+			// Процесс стоял (сон машины, заморозка): пока он стоял, узел успел
+			// снять сессию по своему idle, а счётчики этого не покажут — в
+			// туннель было некому писать.
 			if stood > goneFor {
 				lost(fmt.Errorf("the process stood still for %s, the node has dropped the session by now", stood.Round(time.Second)))
 				return
@@ -84,6 +101,10 @@ func roamWatch(ctx context.Context, stop <-chan struct{}, live *qcli.Tunnel, los
 				continue
 			}
 
+			// Обратно давно ничего не приходило. Само по себе это не поломка — в
+			// молчащий туннель никто не писал, — но и здоровьем это не считается:
+			// мёртвый путь молчит так же. Спрашиваем сами, пока узел ещё держит
+			// сессию.
 			if time.Since(heardAt) > silenceFor {
 				fmt.Printf("roam     nothing has come back for %s, asking the path\n", silenceFor)
 				if !pathAnswers(ctx, live) {
@@ -99,6 +120,7 @@ func roamWatch(ctx context.Context, stop <-chan struct{}, live *qcli.Tunnel, los
 				continue
 			}
 
+			// Наружу пишем, обратно тишина — это уже глухота.
 			if deaf.IsZero() {
 				deaf = time.Now()
 				continue
@@ -118,6 +140,7 @@ func roamWatch(ctx context.Context, stop <-chan struct{}, live *qcli.Tunnel, los
 	}
 }
 
+// pathAnswers спрашивает узел по тому же соединению и ждёт ответа.
 func pathAnswers(ctx context.Context, live *qcli.Tunnel) bool {
 	round, done := context.WithTimeout(ctx, askWait)
 	err := live.Ask(round)
@@ -129,6 +152,8 @@ func pathAnswers(ctx context.Context, live *qcli.Tunnel) bool {
 	return false
 }
 
+// migrate просит QUIC переехать на новый путь. Смена сети редко бывает мгновенной:
+// адрес уже другой, а маршрут или DHCP ещё нет, поэтому одной попытки мало.
 func migrate(ctx context.Context, live *qcli.Tunnel) {
 	for try := 1; try <= roamTries; try++ {
 		round, done := context.WithTimeout(ctx, roamWait)

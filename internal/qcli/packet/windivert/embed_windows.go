@@ -10,9 +10,15 @@ import (
 	"path/filepath"
 )
 
+// WinDivert вшит в бинарь: релизный клиент — один .exe без внешних зависимостей.
+// При запуске файлы распаковываются в рабочую папку (%APPDATA%\QUICDiver), откуда
+// и грузятся: WinDivert.dll сама поднимает драйвер из лежащего рядом .sys,
+// поэтому оба файла обязаны быть в одном каталоге.
+//
 //go:embed assets/WinDivert.dll assets/WinDivert64.sys
 var assets embed.FS
 
+// DefaultDir — рабочая папка клиента (%APPDATA%\QUICDiver).
 func DefaultDir() (string, error) {
 	appData, err := os.UserConfigDir()
 	if err != nil {
@@ -21,6 +27,9 @@ func DefaultDir() (string, error) {
 	return filepath.Join(appData, "QUICDiver"), nil
 }
 
+// Extract раскладывает вшитый WinDivert в dir и возвращает путь к DLL.
+// Существующие файлы перезаписываются только при несовпадении содержимого —
+// иначе загруженный драйвер держал бы файл и запись падала бы.
 func Extract(dir string) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("создать %s: %w", dir, err)
@@ -45,7 +54,7 @@ func Extract(dir string) (string, error) {
 func writeIfDiffers(path string, want []byte) error {
 	if have, err := os.ReadFile(path); err == nil &&
 		sha256.Sum256(have) == sha256.Sum256(want) {
-		return nil
+		return nil // уже актуален
 	}
 	if err := os.WriteFile(path, want, 0o644); err != nil {
 		return fmt.Errorf("записать %s: %w", path, err)

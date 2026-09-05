@@ -41,6 +41,8 @@ func TestNoEditsMeansNoChanges(t *testing.T) {
 	if len(got) != 0 {
 		t.Fatalf("an untouched draft reported %+v", got)
 	}
+	// The header hides both buttons on an empty list, so it must encode as [],
+	// never null.
 	blob, err := json.Marshal(got)
 	if err != nil {
 		t.Fatal(err)
@@ -73,6 +75,8 @@ func TestAddRemoveUpdateAreTold_Apart(t *testing.T) {
 	has(t, got, Change{"node", "node-1", ActionRemoved})
 }
 
+// Membership is called out separately: it is the edit that quietly changes
+// which nodes a whole set of clients can reach.
 func TestGroupMembershipIsItsOwnAction(t *testing.T) {
 	cur := base()
 	cur.Groups[0].EntrypointIDs = []int{10, 11}
@@ -95,6 +99,8 @@ func TestReorderingMembershipIsNotAChange(t *testing.T) {
 	}
 }
 
+// A change to a field wins over membership: reporting "entrypoints" when the
+// exit right also moved would hide the more consequential half.
 func TestFieldEditOutranksMembership(t *testing.T) {
 	cur := base()
 	cur.Groups[0].AllowExit = false
@@ -106,6 +112,8 @@ func TestFieldEditOutranksMembership(t *testing.T) {
 	}
 }
 
+// Comments never reach a node, but they are configuration: the snapshot has to
+// capture them or a later discard would quietly lose the text.
 func TestAnEditThatNoNodeSeesIsStillAChange(t *testing.T) {
 	cur := base()
 	cur.Clients[0].Comment = "paid until March"
@@ -115,6 +123,7 @@ func TestAnEditThatNoNodeSeesIsStillAChange(t *testing.T) {
 	}
 }
 
+// Entrypoints have no tag, so they are named the way the operator sees them.
 func TestEntrypointIsNamedByNodeAndPort(t *testing.T) {
 	cur := base()
 	cur.Entrypoints[0].Remark = "renamed"
@@ -123,6 +132,8 @@ func TestEntrypointIsNamedByNodeAndPort(t *testing.T) {
 	has(t, got, Change{"entrypoint", "node-1:443", ActionUpdated})
 }
 
+// A renamed row reads as a removal plus an addition, which is what it is from
+// outside: the old name is gone and a new one appeared.
 func TestRenameReadsAsRemovedAndAdded(t *testing.T) {
 	cur := base()
 	cur.Clients[0].Tag = "vasiliy"
@@ -140,11 +151,15 @@ func TestNetworkKeyChangeIsReported(t *testing.T) {
 	if len(got) != 1 || got[0].Kind != "network key" || got[0].Action != ActionUpdated {
 		t.Fatalf("want one network key change, got %+v", got)
 	}
+	// Runes, not bytes: the ellipsis is three bytes and would make a correct
+	// answer look wrong.
 	if n := len([]rune(got[0].Name)); n > 14 {
 		t.Fatalf("the whole key was printed (%d runes): %q", n, got[0].Name)
 	}
 }
 
+// The summary is rendered in a list; a set-derived ordering would reshuffle it
+// on every poll.
 func TestDiffOrderIsStable(t *testing.T) {
 	cur := base()
 	cur.Clients = append(cur.Clients,

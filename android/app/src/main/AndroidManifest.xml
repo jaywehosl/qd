@@ -12,7 +12,7 @@
     <application
         android:allowBackup="false"
         android:icon="@drawable/ic_launcher"
-        android:label="QUIC Diver"
+        android:label="qd"
         android:theme="@style/AppTheme">
 
         <activity
@@ -49,7 +49,7 @@
             android:name=".TileService"
             android:exported="true"
             android:icon="@drawable/ic_tile"
-            android:label="QUIC Diver"
+            android:label="qd"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <intent-filter>
                 <action android:name="android.service.quicksettings.action.QS_TILE" />

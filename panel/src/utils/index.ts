@@ -19,6 +19,10 @@ export class Msg<T = unknown> {
 
 export interface HttpOptions extends AxiosRequestConfig {
   silent?: boolean;
+  /** When this request 401s, do NOT trigger the global "session expired" page
+   *  redirect — just let it fail. Used by theme save, which is fired from the
+   *  (unauthenticated) login screen where a 401 is expected and must not reload
+   *  the page. */
   skipAuthRedirect?: boolean;
 }
 
@@ -107,7 +111,7 @@ export class HttpUtil {
 }
 
 export function applyDocumentTitle(): void {
-  document.title = 'QUIC Diver Client';
+  document.title = 'qd';
 }
 
 export class PromiseUtil {
@@ -590,6 +594,11 @@ export class ClipboardManager {
       textarea.focus({ preventScroll: true });
       textarea.select();
       textarea.setSelectionRange(0, text.length);
+      // Routed through a dynamic lookup so the @deprecated tag on
+      // Document.execCommand doesn't surface here. execCommand is the
+      // only copy path that works in insecure contexts (HTTP panels
+      // behind IP/localhost) — reached only after navigator.clipboard
+      // fails or is unavailable.
       const exec = (document as unknown as Record<string, unknown>)['execCommand'];
       if (typeof exec === 'function') {
         ok = (exec as (cmd: string) => boolean).call(document, 'copy');
@@ -790,6 +799,9 @@ export interface SupportedLanguage {
 }
 
 export class LanguageManager {
+  // Localizations are TEMPORARILY disabled — many modals aren't translated yet,
+  // so English is the only language (default + sole dropdown entry everywhere).
+  // Restore the full list here to re-enable i18n.
   static readonly supportedLanguages: readonly SupportedLanguage[] = [
     { name: 'English', value: 'en-US', icon: '🇺🇸' },
   ];
@@ -803,6 +815,7 @@ export class LanguageManager {
   }
 
   static setLanguage(_language: string): void {
+    // English only for now — pin the cookie, no reload loop.
     if (CookieManager.getCookie('lang') !== 'en-US') {
       CookieManager.setCookie('lang', 'en-US', 365);
       window.location.reload();

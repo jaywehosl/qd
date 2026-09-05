@@ -23,6 +23,12 @@ async function fetchState(): Promise<ClientState | null> {
   return parseMsg(msg, ClientStateSchema, 'client/state').obj ?? null;
 }
 
+/**
+ * The daemon in the tray is the source of truth for everything on this page —
+ * whether a subscription exists, whether the tunnel is up, what the toggles
+ * read. Every mutation returns the fresh state, so nothing here keeps a local
+ * copy that could drift from what the tunnel is actually doing.
+ */
 export function useClientState() {
   const queryClient = useQueryClient();
 

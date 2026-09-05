@@ -25,7 +25,10 @@ import (
 const (
 	AuthPath      = "/qd/hello"
 	ConnectIPPath = "/qd/ip"
-	RPCPath       = "/qd/rpc/"
+	// RPCPath — управление одним запросом: путь несёт операцию, тело — её данные,
+	// ответ — её результат. Никакого своего кадрирования и шифрования поверх TLS:
+	// это осталось от UDP-датаграмм XDP-эпохи, где иначе было нельзя.
+	RPCPath = "/qd/rpc/"
 
 	defaultHops = 2
 )
@@ -34,6 +37,7 @@ type Grant struct {
 	Client    string
 	AllowExit bool
 	Session   uint32
+	Seat      uint32
 }
 
 type Tunables struct {
@@ -78,11 +82,13 @@ type Config struct {
 	Peers  func() []Peer
 	Tune   func() Tunables
 
+	// Ask выполняет одну управляющую операцию. auth — кто спрашивает.
 	Ask func(op string, body []byte, auth string) (any, error)
 	Log func(format string, args ...any)
 }
 
 type Session struct {
+	Seat      uint32
 	Session   uint32
 	Client    string
 	Address   netip.Prefix
@@ -225,9 +231,14 @@ func (n *Node) Sessions() []Session {
 	defer n.mu.Unlock()
 
 	out := make([]Session, 0, len(n.held))
-	for id, s := range n.held {
+	for seat, s := range n.held {
+		id := s.grant.Session
+		if id == 0 {
+			id = seat
+		}
 		out = append(out, Session{
 			Session:   id,
+			Seat:      seat,
 			Client:    s.grant.Client,
 			Address:   s.address,
 			Peer:      s.where(),
@@ -246,26 +257,37 @@ func (n *Node) Sessions() []Session {
 
 func (n *Node) Forget(id uint32) {
 	n.mu.Lock()
-	s := n.held[id]
-	delete(n.held, id)
+	going := []*live{}
+	for seat, s := range n.held {
+		if seat == id || s.grant.Session == id {
+			going = append(going, s)
+			delete(n.held, seat)
+		}
+	}
 	n.mu.Unlock()
 
-	if s != nil {
+	for _, s := range going {
 		n.pool.give(s.address)
+		n.links.forget(s.grant.Seat)
 	}
 }
 
 func (n *Node) Reset(id uint32) {
 	n.mu.Lock()
-	s := n.held[id]
-	n.mu.Unlock()
-	if s == nil {
-		return
+	going := []*live{}
+	for seat, s := range n.held {
+		if seat == id || s.grant.Session == id {
+			going = append(going, s)
+		}
 	}
-	s.up.Store(0)
-	s.down.Store(0)
-	s.pktUp.Store(0)
-	s.pktDown.Store(0)
+	n.mu.Unlock()
+
+	for _, s := range going {
+		s.up.Store(0)
+		s.down.Store(0)
+		s.pktUp.Store(0)
+		s.pktDown.Store(0)
+	}
 }
 
 func (n *Node) quicConfig() *quic.Config {
@@ -349,7 +371,7 @@ func (n *Node) admit(r *http.Request) (Grant, bool) {
 
 func (n *Node) carrier(r *http.Request) (Grant, bool) {
 	grant, ok := n.admit(r)
-	if !ok || grant.Session == 0 {
+	if !ok || grant.Session == 0 || grant.Seat == 0 {
 		return Grant{}, false
 	}
 	return grant, true
@@ -368,14 +390,14 @@ func (n *Node) serveAuth(w http.ResponseWriter, r *http.Request) {
 
 	n.mu.Lock()
 	turned := false
-	if s := n.held[grant.Session]; s != nil {
+	if s := n.held[grant.Seat]; s != nil {
 		turned = s.steer(route)
 	}
 	n.mu.Unlock()
 
 	if turned {
 		n.cfg.Log("quic      %s now steers to %q", grant.Client, route)
-		n.links.forget(grant.Session)
+		n.links.forget(grant.Seat)
 	}
 
 	w.WriteHeader(http.StatusNoContent)
@@ -451,6 +473,8 @@ func (s *live) noteMark(pkt []byte, mark uint64) {
 	s.shutFlow(port)
 }
 
+// shutFlow обрывает один UDP-флоу, чтобы следующий пакет открыл его заново уже
+// через новый выход. Стек и остальные флоу сессии не трогаются.
 func (s *live) shutFlow(port uint16) {
 	held, ok := s.flows.LoadAndDelete(port)
 	if !ok {
@@ -503,6 +527,9 @@ func (s *live) forgetStaleMarks() {
 
 const markCeiling = 4096
 
+// serveSite держит на том же порту обычный HTTPS. Узел говорит по QUIC, но порт
+// без TCP выдаёт себя: у настоящего сайта TCP отвечает всегда. Здесь он отдаёт
+// только decoy — служебные пути живут в HTTP/3 и снаружи не видны.
 func (n *Node) serveSite(ctx context.Context, quicSrv *http3.Server) {
 	conf := n.cfg.TLS.Clone()
 	conf.NextProtos = []string{"h2", "http/1.1"}
@@ -520,7 +547,9 @@ func (n *Node) serveSite(ctx context.Context, quicSrv *http3.Server) {
 			n.site.ServeHTTP(w, r)
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
-		ErrorLog:          log.New(io.Discard, "", 0),
+		// Открытый 443 сканируют круглосуточно: чужой мусор вместо TLS — не наша
+		// ошибка, а в журнале он топит настоящие.
+		ErrorLog: log.New(io.Discard, "", 0),
 	}
 
 	go func() {
@@ -544,6 +573,8 @@ func (s *live) where() string {
 var v6Once sync.Once
 var v6Held bool
 
+// holdsV6 говорит, есть ли у машины путь в IPv6. Спрашиваем один раз: адреса
+// интерфейсов за время жизни узла не меняются.
 func (n *Node) holdsV6() bool {
 	v6Once.Do(func() {
 		addrs, err := net.InterfaceAddrs()

@@ -17,6 +17,8 @@ func open(t *testing.T) *DB {
 	return d
 }
 
+// A minimal but complete network: one node, one entrypoint, one group holding
+// it, one client in that group.
 func seed(t *testing.T, d *DB) {
 	t.Helper()
 	exec := func(q string, args ...any) {
@@ -76,6 +78,7 @@ func TestSchemaApplies(t *testing.T) {
 	}
 }
 
+// Re-opening must not fail on the second CREATE, or every restart is a crash.
 func TestSchemaIsIdempotent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "panel.db")
 	for i := 0; i < 3; i++ {
@@ -113,6 +116,8 @@ func TestLoadStateFeedsTheProjection(t *testing.T) {
 	}
 }
 
+// The invariant the schema is shaped around: a discard rewrites every
+// configuration row, and must not cost a single byte of collected statistics.
 func TestDiscardKeepsTelemetry(t *testing.T) {
 	d := open(t)
 	seed(t, d)
@@ -125,6 +130,8 @@ func TestDiscardKeepsTelemetry(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// A draft that deletes the client outright — the harshest case, because a
+	// cascade would fire on exactly this row.
 	if _, err := d.Touch(3); err != nil {
 		t.Fatal(err)
 	}
@@ -157,6 +164,8 @@ func TestDiscardKeepsTelemetry(t *testing.T) {
 	}
 }
 
+// Runtime state lives outside `nodes` precisely so a discard cannot rewind it:
+// what a node is actually running is a fact, not a draft.
 func TestDiscardDoesNotRewindWhatNodesAreRunning(t *testing.T) {
 	d := open(t)
 	seed(t, d)
@@ -240,6 +249,8 @@ func TestPublishRefusesWithoutADraft(t *testing.T) {
 	}
 }
 
+// With nothing ever published the nodes hold nothing, so a discard means an
+// empty configuration rather than "keep whatever is lying around".
 func TestDiscardBeforeAnyPublishEmptiesTheDraft(t *testing.T) {
 	d := open(t)
 	seed(t, d)
@@ -267,7 +278,7 @@ func TestRollbackRestoresAnEarlierRevisionAsAFreshDraft(t *testing.T) {
 	if _, err := d.Touch(1); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.Publish(2); err != nil {
+	if _, err := d.Publish(2); err != nil { // revision 1: port 443
 		t.Fatal(err)
 	}
 
@@ -277,7 +288,7 @@ func TestRollbackRestoresAnEarlierRevisionAsAFreshDraft(t *testing.T) {
 	if _, err := d.SQL().Exec(`UPDATE nodes SET port = 8443 WHERE id = 1`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.Publish(4); err != nil {
+	if _, err := d.Publish(4); err != nil { // revision 2: port 8443
 		t.Fatal(err)
 	}
 
@@ -293,6 +304,7 @@ func TestRollbackRestoresAnEarlierRevisionAsAFreshDraft(t *testing.T) {
 		t.Fatalf("rollback did not restore revision 1: port=%d", port)
 	}
 
+	// A rollback is a new event, not a resurrection of the old number.
 	draft, err := d.Draft()
 	if err != nil || draft == nil {
 		t.Fatalf("rollback left no draft to publish: %+v (%v)", draft, err)
@@ -313,6 +325,8 @@ func TestRollbackRefusesAnUnpublishedRevision(t *testing.T) {
 	}
 }
 
+// A published snapshot has to survive the round trip, or a discard silently
+// restores something other than what was published.
 func TestSnapshotRoundTripsEverything(t *testing.T) {
 	d := open(t)
 	seed(t, d)

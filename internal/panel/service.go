@@ -1,3 +1,6 @@
+// Package panel is the panel's own HTTP service: the place where the database,
+// the projection, the rollout machine and the control channel are finally one
+// program rather than five that fit together on paper.
 package panel
 
 import (
@@ -18,6 +21,9 @@ type Service struct {
 	opts      publish.Options
 	now       func() int64
 
+	// One rollout at a time. The dialog can be closed and reopened, which is
+	// what `job` outliving a request is for; two rollouts at once would have
+	// nodes racing each other to a revision.
 	mu  sync.Mutex
 	job *publish.Job
 }
@@ -26,7 +32,8 @@ type Config struct {
 	DB        *store.DB
 	Transport publish.Transport
 	Options   publish.Options
-	Now       func() int64
+	// Now is injectable so tests are not at the mercy of the clock.
+	Now func() int64
 }
 
 func New(cfg Config) *Service {
@@ -46,6 +53,8 @@ func (s *Service) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("/panel/api/publish/status", s.handleStatus)
 }
 
+// publishedState reads back the snapshot the nodes are running, which is what a
+// draft is measured against.
 func (s *Service) publishedState() (*netstate.State, int, error) {
 	pub, err := s.db.LastPublished()
 	if err != nil || pub == nil {
@@ -70,6 +79,9 @@ func (s *Service) handleDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if draft == nil {
+		// No draft means the tables match what the nodes hold. The header shows
+		// neither button, so an empty change list is the honest answer rather
+		// than an absent object.
 		ok(w, map[string]any{
 			"revision":          publishedRev,
 			"publishedRevision": publishedRev,
@@ -103,6 +115,13 @@ func (s *Service) handleDiscard(w http.ResponseWriter, r *http.Request) {
 	ok(w, map[string]any{"revision": rev})
 }
 
+// handlePlan freezes the draft into a revision and builds every node's
+// configuration from it.
+//
+// Publishing happens here rather than after a successful apply on purpose: the
+// revision has to exist and be recorded before any of it leaves the machine, or
+// a panel that dies mid-rollout would have nodes running a revision it has no
+// record of.
 func (s *Service) handlePlan(w http.ResponseWriter, r *http.Request) {
 	state, err := s.db.Publish(s.now())
 	if errors.Is(err, store.ErrNothingToPublish) {
@@ -192,6 +211,9 @@ func (s *Service) handleStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// jobFor refuses to act on a revision other than the one in flight. Without the
+// check a stale dialog — reopened after a later plan — would push one revision
+// and apply another.
 func (s *Service) jobFor(revision int) (*publish.Job, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -205,6 +227,9 @@ func (s *Service) jobFor(revision int) (*publish.Job, error) {
 	return s.job, nil
 }
 
+// recordProgress writes what each node is actually running back to the
+// telemetry half. It is what the nodes list compares against to show drift, and
+// it survives a discard because it is a fact rather than a draft.
 func (s *Service) recordProgress(job *publish.Job) {
 	st := job.Status()
 	for _, n := range st.Nodes {
@@ -219,6 +244,9 @@ func (s *Service) recordProgress(job *publish.Job) {
 			continue
 		}
 		if err := s.db.RecordNodeProgress(n.ID, applied, staged, string(n.State), s.now()); err != nil {
+			// Losing a progress note must not fail a rollout that worked: the
+			// node is running the revision either way, and the next report
+			// puts the record straight.
 			continue
 		}
 	}
@@ -245,6 +273,7 @@ func nodeStates(job *publish.Job) []map[string]any {
 	return out
 }
 
+// The envelope every endpoint in this system answers with.
 func ok(w http.ResponseWriter, obj any) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"success": true, "msg": "", "obj": obj})

@@ -11,8 +11,18 @@ import (
 	"time"
 )
 
+// Синтетический пул для имён, у которых есть только IPv6. Клиент говорит по
+// IPv4, а сайт живёт в IPv6 — узел выдаёт такому имени адрес отсюда, запоминает
+// пару и при дозвоне подставляет настоящий адрес.
+//
+// 198.18.0.0/15 (RFC 2544) выбран потому, что в интернете не маршрутизируется:
+// если пакет с ним куда-то утечёт, он умрёт, а не уедет к чужому хосту.
 var synthetic = netip.MustParsePrefix("198.18.0.0/15")
 
+// Потолок и срок жизни пары. Пул вмещает 131070 адресов, но держать столько в
+// памяти незачем: сотне устройств хватает тысяч записей с большим запасом.
+// Пара живёт, пока по ней ходят: адрес имени может смениться, и вечная запись
+// уводила бы трафик на старый узел.
 const (
 	natCeiling = 8192
 	natIdle    = time.Hour
@@ -38,6 +48,7 @@ func newNAT64() *nat64 {
 	}
 }
 
+// stand выдаёт имени подставной IPv4 (повторный вопрос вернёт тот же адрес).
 func (n *nat64) stand(v6 netip.Addr) (netip.Addr, bool) {
 	if !v6.Is6() || v6.Is4In6() {
 		return netip.Addr{}, false
@@ -88,6 +99,8 @@ func (n *nat64) stand(v6 netip.Addr) (netip.Addr, bool) {
 	return v4, true
 }
 
+// real возвращает настоящий адрес, если dst — подставной, и отмечает пару
+// живой: пока по ней ходят, вытеснение её не тронет.
 func (n *nat64) real(v4 netip.Addr) (netip.Addr, bool) {
 	if !synthetic.Contains(v4) {
 		return netip.Addr{}, false
@@ -102,6 +115,8 @@ func (n *nat64) real(v4 netip.Addr) (netip.Addr, bool) {
 	return held.v6, true
 }
 
+// forgetOldestLocked освобождает место под новую пару, выбрасывая ту, к которой
+// дольше всех не обращались.
 func (n *nat64) forgetOldestLocked() {
 	var oldest netip.Addr
 	var since int64
@@ -121,6 +136,8 @@ func (n *nat64) forgetOldestLocked() {
 	delete(n.byV4, oldest)
 }
 
+// sweep выбрасывает пары, к которым не обращались natIdle. Адрес имени может
+// смениться, и вечная запись уводила бы трафик на прежний узел.
 func (n *nat64) sweep() int {
 	cut := time.Now().Add(-natIdle).Unix()
 
@@ -142,6 +159,7 @@ func (n *nat64) sweep() int {
 	return gone
 }
 
+// Stand — подставной адрес для IPv6-имени; зовёт резолвер узла.
 func (n *Node) Stand(v6 netip.Addr) (netip.Addr, bool) {
 	if n.nat == nil {
 		return netip.Addr{}, false
@@ -149,6 +167,7 @@ func (n *Node) Stand(v6 netip.Addr) (netip.Addr, bool) {
 	return n.nat.stand(v6)
 }
 
+// behind разворачивает подставной адрес обратно в настоящий перед дозвоном.
 func (n *Node) behind(dst netip.AddrPort) netip.AddrPort {
 	if n.nat == nil {
 		return dst
@@ -159,6 +178,10 @@ func (n *Node) behind(dst netip.AddrPort) netip.AddrPort {
 	return dst
 }
 
+// stale отвечает, что адрес из подставного пула, но пары для него нет: узел
+// перезапускался, а клиент держит наш прежний ответ в своём кэше. Дозваниваться
+// по такому адресу некуда — честнее отказать сразу, чтобы приложение спросило
+// имя заново, чем ждать таймаут.
 func (n *Node) stale(dst netip.AddrPort) bool {
 	if n.nat == nil || !synthetic.Contains(dst.Addr()) {
 		return false
@@ -167,6 +190,12 @@ func (n *Node) stale(dst netip.AddrPort) bool {
 	return !known
 }
 
+// Карта переживает перезапуск: клиент держит наш ответ по TTL несколько минут, и
+// без этого каждый перезапуск узла разом обнулял бы все выданные адреса —
+// приложения получали бы отказ и шли спрашивать имена заново.
+//
+// Лежит рядом с базой, но НЕ в ней: база разъезжается по узлам целиком, а карта
+// у каждого своя — чужие пары тут были бы враньём.
 type natFile struct {
 	Next  uint32            `json:"next"`
 	Pairs map[string]string `json:"pairs"`
@@ -215,6 +244,9 @@ func (n *nat64) save(path string) error {
 
 func (n *nat64) dirty() bool { return n.marks.Swap(0) > 0 }
 
+// Remember роняет карту на диск, когда в ней появилось новое. Пишем не на каждую
+// пару, а раз в keepEvery — карта мелкая, но и трогать диск на каждый запрос имени
+// незачем.
 func (n *Node) Remember(ctx context.Context, path string) {
 	if n.nat == nil || path == "" {
 		return

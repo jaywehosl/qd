@@ -312,6 +312,10 @@ func age(msg []byte, by uint32) {
 			return
 		}
 
+		// An OPT record carries the extended rcode, the EDNS version and the
+		// flags where every other record keeps its ttl. Ageing it corrupts the
+		// answer, and a resolver that sees a set Z bit throws the whole reply
+		// away — which is exactly what a browser reports as no internet.
 		if binary.BigEndian.Uint16(msg[i:i+2]) != 41 {
 			left := binary.BigEndian.Uint32(msg[i+4 : i+8])
 			if by == staleTTL || by >= left {
@@ -799,6 +803,8 @@ func Answer(query []byte, ip net.IP, qtype uint16) []byte {
 	return out
 }
 
+// FirstAddr достаёт первый адрес нужного типа из ответа. Нужен для NAT64: узел
+// смотрит, есть ли у имени IPv6, когда IPv4 у него нет вовсе.
 func FirstAddr(msg []byte, qtype uint16) (net.IP, bool) {
 	if len(msg) < 12 {
 		return nil, false
@@ -846,6 +852,7 @@ func FirstAddr(msg []byte, qtype uint16) (net.IP, bool) {
 	return nil, false
 }
 
+// AskFor переписывает вопрос на другой тип, сохраняя имя и идентификатор.
 func AskFor(query []byte, qtype uint16) []byte {
 	end := questionEnd(query)
 	if end < 4 {
