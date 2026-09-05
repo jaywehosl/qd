@@ -46,6 +46,7 @@ type NodeHealth struct {
 type Fleet struct {
 	key   qdcrypt.Key
 	token string
+	tag   string
 	wire  *qwire.Dialer
 
 	mu    sync.RWMutex
@@ -75,6 +76,18 @@ func (f *Fleet) SetToken(token string) {
 		return
 	}
 	f.token = token
+}
+
+func (f *Fleet) Tag() string {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.tag
+}
+
+func (f *Fleet) SetTag(tag string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.tag = tag
 }
 
 func (f *Fleet) Add(addr NodeAddress) {

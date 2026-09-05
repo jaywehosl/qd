@@ -619,14 +619,18 @@ func (a *API) networkKey(w http.ResponseWriter, r *http.Request) {
 
 	if token := a.fleet.Token(); token != "" {
 		out["adminUuid"] = token
-		if rows, _, err := a.readClients(); err == nil {
-			for _, row := range rows {
-				if textOf(row["uuid"]) == token {
-					out["adminTag"] = textOf(row["email"])
-					break
+		tag := a.fleet.Tag()
+		if tag == "" {
+			if rows, _, err := a.readClients(); err == nil {
+				for _, row := range rows {
+					if textOf(row["uuid"]) == token {
+						tag = textOf(row["email"])
+						break
+					}
 				}
 			}
 		}
+		out["adminTag"] = tag
 	}
 	sendOK(w, out)
 }

@@ -107,6 +107,10 @@ USAGE
 
 while [ $# -gt 0 ]; do
     case "$1" in
+        --no-cert|--uninstall|--yes|-y|--help|-h) ;;
+        -*) [ $# -ge 2 ] || die "$1 needs a value" ;;
+    esac
+    case "$1" in
         --mode)        MODE="${2:-}"; shift 2 ;;
         --version)     WANT_VERSION="${2:-}"; shift 2 ;;
         --from)        LOCAL_DIR="${2:-}"; shift 2 ;;

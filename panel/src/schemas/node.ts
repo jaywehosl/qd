@@ -52,6 +52,7 @@ export const NodeEditSchema = z.object({
   authority: z.string().trim(),
   certPath: z.string().trim(),
   keyPath: z.string().trim(),
+  address: z.string().trim().min(1, 'pages.nodes.toasts.fillRequired'),
 });
 
 export const NodeFormSchema = NodeEditSchema.extend({

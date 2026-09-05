@@ -145,8 +145,8 @@ export default function NodeFormModal({
     [isEdit, node?.name, t],
   );
 
-  const addressLabel = t('pages.nodes.ipAddress');
-  const addressPlaceholder = t('pages.nodes.ipPlaceholder');
+  const addressLabel = t("pages.nodes.authority", { defaultValue: "Domain clients dial" });
+  const addressPlaceholder = "node.example.com";
 
   function buildPayload(v: NodeFormValues): Partial<NodeRecord> {
     const common = {
@@ -156,11 +156,11 @@ export default function NodeFormModal({
       port: v.port,
       dnsPrimary: v.dnsPrimary.trim(),
       dnsSecondary: v.dnsSecondary.trim(),
-      authority: v.authority.trim(),
+      authority: v.address.trim(),
       certPath: v.certPath.trim(),
       keyPath: v.keyPath.trim(),
     };
-    if (isEdit) return common;
+    if (isEdit) return { ...common, address: v.address.trim() };
     return {
       ...common,
       uuid: v.uuid,
@@ -185,14 +185,14 @@ export default function NodeFormModal({
   function onGenerate() {
     const v = validate();
     if (!v) return;
-    if (!identity.adminUuid) {
-      message.error(t('pages.nodes.toasts.noAdmin', {
-        defaultValue: 'The panel does not know which administrator it is running as yet',
+    if (!identity.adminUuid || !identity.adminTag) {
+      message.error(t("pages.nodes.toasts.noAdmin", {
+        defaultValue: "The panel does not know which administrator it is running as yet",
       }));
       return;
     }
 
-    const domain = (v.authority.trim() || v.address.trim()).replace(/:\d+$/, '');
+    const domain = v.address.trim().replace(/:\d+$/, '');
     const args = [
       `--key ${v.apiToken}`,
       `--tag ${v.name.trim()}`,
@@ -273,26 +273,14 @@ export default function NodeFormModal({
             />
           </Field>
         </div>
-        <div className="node-form-grid">
-          <Field label={t('pages.nodes.authority', { defaultValue: 'Domain clients dial' })}>
+        <div className="node-form-grid cols-address">
+          <Field label={addressLabel}>
             <Input
-              value={values.authority}
-              placeholder={t('pages.nodes.authorityHint', { defaultValue: 'empty — the address above' })}
-              onChange={(e) => set('authority', e.target.value)}
+              value={values.address}
+              placeholder={addressPlaceholder}
+              onChange={(e) => set('address', e.target.value)}
             />
           </Field>
-        </div>
-
-        <div className={isEdit ? 'node-form-grid' : 'node-form-grid cols-address'}>
-          {!isEdit && (
-            <Field label={addressLabel}>
-              <Input
-                value={values.address}
-                placeholder={addressPlaceholder}
-                onChange={(e) => set('address', e.target.value)}
-              />
-            </Field>
-          )}
           <Field label={t('pages.nodes.port')}>
             <Input
               type="number"

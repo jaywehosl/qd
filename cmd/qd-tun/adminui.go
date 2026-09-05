@@ -123,6 +123,7 @@ func (a *adminUI) discover(db *clientstate.DB) {
 	}
 	token := sub.Key
 	fleet.SetToken(token)
+	fleet.SetTag(sub.Tag)
 
 	nodes, err := db.Nodes()
 	if err != nil || len(nodes) == 0 {
