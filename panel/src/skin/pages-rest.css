@@ -1,0 +1,134 @@
+.login-content {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: var(--step-4);
+  background: var(--ink);
+}
+
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  padding: var(--step-5);
+  background: var(--card);
+  border-radius: var(--radius-card);
+  box-sizing: border-box;
+}
+
+html.is-dark .login-card,
+html.is-dark .ap-presets-card { border: 1px solid var(--edge); }
+
+.login-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--step-2);
+  padding-bottom: var(--step-4);
+  text-align: center;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--step-3);
+}
+
+.login-field { position: relative; }
+
+.login-field-icon {
+  position: absolute;
+  top: 50%;
+  left: var(--step-3);
+  transform: translateY(-50%);
+  color: var(--text);
+  pointer-events: none;
+}
+
+.login-field.has-icon input { padding-left: 38px; }
+
+.content-shell,
+.content-area,
+.docs-wrapper {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.docs-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-card);
+}
+
+.appearance-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-card);
+}
+
+.ap-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--step-1);
+}
+
+.ap-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--step-3);
+}
+
+.ap-presets-card {
+  padding: var(--pad-card);
+  background: var(--card);
+  border-radius: var(--radius-card);
+}
+
+.ap-presets-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--step-2);
+}
+
+.ap-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--step-3);
+  min-height: 40px;
+}
+
+.ap-row-label { color: var(--bold); }
+.ap-row-hint { font-size: var(--size-note); color: var(--text); }
+.ap-row-control { display: flex; align-items: center; gap: var(--step-2); }
+
+.ap-color {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--edge);
+  border-radius: 10px;
+  background: none;
+  cursor: pointer;
+}
+
+.ap-range { accent-color: var(--good); }
+
+.ap-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--step-2);
+}
+
+.ap-warning-pill,
+.ap-soon {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px var(--step-2);
+  border-radius: var(--radius-chip);
+  background: var(--card);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.ap-contrast-indicator { font-family: var(--mono); font-size: 12px; }
+.is-skipped { opacity: 0.5; }

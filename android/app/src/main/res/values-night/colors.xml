@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ink">#FF000000</color>
+    <color name="ink_text">#FFFFFFFF</color>
+    <color name="ink_bold">#FFFFFFFF</color>
+    <color name="ink_muted">#FF7C7C82</color>
+    <color name="ink_good">#FF1E9E4A</color>
+    <color name="ink_idle">#FF232327</color>
+    <color name="ink_card">#CC131318</color>
+    <color name="ink_edge">#1FFFFFFF</color>
+    <color name="ink_press">#26FFFFFF</color>
+</resources>

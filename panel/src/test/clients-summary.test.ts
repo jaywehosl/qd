@@ -1,0 +1,57 @@
+import { describe, it, expect } from 'vitest';
+
+import { computeClientsSummary } from '@/hooks/useClients';
+import type { ClientTraffic } from '@/schemas/client';
+
+type Row = ClientTraffic & { email?: string };
+
+const GB = 1024 * 1024 * 1024;
+const DAY = 86_400_000;
+
+function row(over: Partial<Row>): Row {
+  return { email: 'x', enable: true, up: 0, down: 0, total: 0, expiryTime: 0, ...over } as Row;
+}
+
+describe('computeClientsSummary', () => {
+  it('buckets each client the way the Go service does', () => {
+    const now = Date.now();
+    const stats: Row[] = [
+      row({ email: 'online@x', enable: true }),
+      row({ email: 'offline@x', enable: true }),
+      row({ email: 'disabled@x', enable: false }),
+      row({ email: 'exhausted@x', enable: true, total: 1 * GB, up: 1 * GB }),
+      row({ email: 'expired@x', enable: true, expiryTime: now - DAY }),
+      row({ email: 'nearexpiry@x', enable: true, expiryTime: now + DAY }),
+      row({ email: 'nearlimit@x', enable: true, total: 10 * GB, up: 9.9 * GB }),
+    ];
+    const online = new Set(['online@x', 'disabled@x']); // disabled-but-online must NOT count as online
+    const expireDiffMs = 3 * DAY;
+
+    const s = computeClientsSummary(stats, online, expireDiffMs);
+
+    expect(s.total).toBe(7);
+    expect(s.online).toEqual(['online@x']);
+    expect(s.depleted).toEqual(['expired@x']);
+    expect(s.deactive).toEqual(['disabled@x']);
+    expect(s.expiring).toEqual(['nearexpiry@x']);
+    expect(s.active).toBe(5);
+  });
+
+  it('depleted wins over disabled and over online', () => {
+    const stats: Row[] = [
+      row({ email: 'a@x', enable: false, expiryTime: Date.now() - DAY }),
+    ];
+    const s = computeClientsSummary(stats, new Set(['a@x']), 0);
+    expect(s.depleted).toEqual(['a@x']);
+    expect(s.deactive).toEqual([]);
+    expect(s.online).toEqual([]);
+  });
+
+  it('unlimited + no expiry is active', () => {
+    const stats: Row[] = [row({ email: 'a@x', enable: true, total: 0, expiryTime: 0 })];
+    const s = computeClientsSummary(stats, new Set(), 3 * DAY);
+    expect(s.active).toBe(1);
+    expect(s.expiring).toEqual([]);
+    expect(s.depleted).toEqual([]);
+  });
+});

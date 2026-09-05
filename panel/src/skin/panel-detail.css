@@ -1,0 +1,521 @@
+.index-page-area,
+.inbound-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-card);
+}
+
+.card-head,
+.card-toolbar,
+.log-toolbar,
+.history-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--step-3);
+  flex-wrap: wrap;
+}
+
+.log-toolbar__mid,
+.history-toolbar__mid {
+  display: flex;
+  align-items: center;
+  gap: var(--step-2);
+}
+
+.card-id {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text);
+}
+
+.card-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: var(--step-2);
+}
+
+.card-actions,
+.action-buttons,
+.share-buttons {
+  display: flex;
+  align-items: center;
+  gap: var(--step-2);
+  flex-wrap: wrap;
+}
+
+.card-bulk-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--step-3);
+  padding: var(--step-2) var(--step-3);
+  background: var(--card);
+  border-radius: var(--radius-control);
+}
+
+.bulk-count { color: var(--bold); font-weight: 500; }
+
+.card-empty,
+.log-empty,
+.node-select__empty {
+  padding: var(--step-5);
+  text-align: center;
+  color: var(--text);
+}
+
+.info-list,
+.info-list-block,
+.ci-rows,
+.pub-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.info-row,
+.tg-row,
+.account-row,
+.pub-row {
+  display: flex;
+  align-items: center;
+  gap: var(--step-3);
+  min-height: var(--row-height);
+  padding: var(--step-1) 0;
+}
+
+.info-row + .info-row,
+.tg-row + .tg-row,
+.pub-row + .pub-row { border-top: 1px solid var(--edge); }
+
+.account-sep { height: 1px; margin: var(--step-2) 0; background: var(--edge); }
+
+.info-table,
+.summary-table { width: 100%; border-collapse: collapse; }
+
+.info-table td,
+.summary-table td {
+  padding: var(--step-2) 0;
+  border-bottom: 1px solid var(--edge);
+}
+
+.info-large-tag {
+  display: inline-flex;
+  padding: 4px var(--step-2);
+  border-radius: var(--radius-chip);
+  background: var(--card);
+  font-size: var(--size-note);
+}
+
+.client-count-tag,
+.tag-name,
+.value-tag,
+.mb-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px var(--step-2);
+  border-radius: var(--radius-chip);
+  background: var(--card);
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.mb-pill--node-off { opacity: 0.5; }
+
+.client-email-list,
+.gp-chips,
+.ge-picks,
+.mb-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--step-1);
+}
+
+.ci {
+  display: flex;
+  flex-direction: column;
+  gap: var(--step-3);
+}
+
+/* Two halves per row, label above value — the edit dialog's rhythm, so the two
+   panels read as the same thing seen twice. */
+.ci-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--step-4);
+  align-items: start;
+}
+
+.ci-pair .ci-field {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  min-height: 0;
+  min-width: 0;
+}
+
+.ci-pair .ci-field__label { flex: 0 0 auto; }
+
+.ci-pair .ci-field__value {
+  font-family: inherit;
+  font-size: var(--size-note);
+  color: var(--bold);
+  overflow: visible;
+}
+
+/* A value that can be copied gets the field's frame, so it lines up with the
+   inputs of the edit dialog instead of floating as bare text. */
+.ci-copyable {
+  display: flex;
+  align-items: center;
+  gap: var(--step-2);
+  padding: 7px var(--step-3);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-control);
+  min-width: 0;
+}
+
+.ci-copyable code {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ci-value-row {
+  display: flex;
+  align-items: center;
+  gap: var(--step-2);
+  flex-wrap: wrap;
+  min-height: 34px;
+}
+
+.ci-plain,
+.ci-comment {
+  display: flex;
+  align-items: center;
+  min-height: 34px;
+  color: var(--bold);
+  font-size: var(--size-note);
+}
+
+/* Short facts sit side by side; each keeps its label above its value so the
+   columns stay narrow and the dialog stops being a tall list of one-liners. */
+.ci-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--step-2) var(--step-4);
+  padding: var(--step-1) 0;
+}
+
+.ci-grid .ci-field {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-height: 0;
+}
+
+.ci-grid .ci-field__label { flex: 0 0 auto; }
+.ci-grid .ci-field__value { font-family: inherit; }
+
+.ci-comment { color: var(--bold); font-size: var(--size-note); }
+
+.ci-head { display: flex; align-items: center; justify-content: space-between; gap: var(--step-3); }
+.ci-section-title { font-weight: 700; color: var(--bold); }
+
+.ci-field,
+.ci-cred,
+.ci-uri {
+  display: flex;
+  align-items: center;
+  gap: var(--step-2);
+  min-height: 28px;
+}
+
+.ci-field__label,
+.ci-cred__label,
+.ci-uri__label {
+  flex: 0 0 140px;
+  color: var(--text);
+  font-size: var(--size-note);
+}
+
+.ci-field__value,
+.ci-cred__value,
+.ci-uri__value,
+.value-code {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--bold);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ci-uri__empty { color: var(--text); font-style: italic; }
+.ci-creds { display: flex; flex-direction: column; gap: var(--step-1); }
+
+.value-block {
+  display: flex;
+  align-items: center;
+  gap: var(--step-2);
+}
+
+.value-copy {
+  border: none;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.value-copy:hover { color: var(--good); }
+
+.link-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--step-2);
+  padding: var(--pad-card);
+  background: var(--card);
+  border-radius: var(--radius-card);
+}
+
+.link-panel-header { font-weight: 700; color: var(--bold); }
+.link-panel-text { font-size: var(--size-note); color: var(--text); }
+.link-panel-anchor { color: var(--good); word-break: break-all; }
+
+.log-card {
+  background: var(--card);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+}
+
+.log-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--step-3);
+  padding: var(--step-3);
+  border-bottom: 1px solid var(--edge);
+}
+
+.log-body {
+  max-height: 420px;
+  overflow: auto;
+  padding: var(--step-2) 0;
+}
+
+.log-line {
+  display: flex;
+  gap: var(--step-2);
+  padding: 2px var(--step-3);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.log-line:hover { background: var(--ink); }
+.log-stamp,
+.log-date,
+.log-time { color: var(--text); white-space: nowrap; }
+.log-body-text { color: var(--bold); min-width: 0; word-break: break-word; }
+
+.history-tabs {
+  display: flex;
+  gap: var(--step-1);
+  flex-wrap: wrap;
+}
+
+.history-chart-title,
+.metric-modal-title,
+.ds-popover-title {
+  font-weight: 700;
+  color: var(--bold);
+}
+
+.cpu-chart-wrap { width: 100%; }
+
+.mb-container {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--step-3);
+  flex-wrap: wrap;
+}
+
+.mb-left,
+.mb-center {
+  display: flex;
+  align-items: center;
+  gap: var(--step-2);
+}
+
+.mb-center {
+  flex: 1 0 100%;
+  justify-content: center;
+}
+
+.mb-history {
+  flex: 1 0 100%;
+  min-width: 0;
+}
+
+.node-select {
+  display: flex;
+  flex-direction: column;
+  gap: var(--step-1);
+}
+
+.pub-steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--step-2);
+}
+
+.pub-row__icon { flex: 0 0 auto; color: var(--text); }
+.pub-row__name { flex: 1; min-width: 0; color: var(--bold); }
+.pub-row__state { color: var(--text); font-size: var(--size-note); }
+.pub-row__error { color: #e03a2f; font-size: var(--size-note); }
+.pub-changes { display: flex; flex-direction: column; gap: var(--step-1); }
+.pub-hint { color: var(--text); font-size: var(--size-note); }
+
+.entry-role-name { color: var(--bold); font-weight: 500; }
+.add-group-btn { align-self: flex-start; }
+.loading-spacer { min-height: 120px; }
+.block { display: block; }
+
+/* Client info --------------------------------------------------------------- */
+
+/* A link is one string, not prose: it stays on its line and clips, with the
+   full value on the copy button beside it. */
+.ci-uri__value,
+.ci-cred__value {
+  white-space: nowrap;
+}
+
+/* Facts on the left wrapping as they need, actions pinned to the same column
+   the section counts stand in — so the right edge reads as one line. */
+.ci-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--step-3);
+}
+
+.ci-row__facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--step-1);
+  min-width: 0;
+}
+
+.ci-row > .ds-tag {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-block;
+  line-height: 20px;
+}
+
+.ci-row__actions {
+  margin-inline-start: auto;
+  display: flex;
+  gap: 6px;
+}
+
+.ci-section-title {
+  display: flex;
+  align-items: center;
+  gap: var(--step-2);
+  padding-top: var(--step-2);
+  font-size: var(--size-section);
+}
+
+/* The status row is a set of chips, not two ends of a bar. */
+.ci-head {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: var(--step-2);
+}
+
+/* A section header is a control now: it folds its list away. */
+.ci-section-title {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--bold);
+}
+
+.ci-section-title__caret {
+  font-size: 10px;
+  color: var(--text);
+  transition: transform 0.18s cubic-bezier(0.4, 0.12, 0.28, 1);
+}
+
+.ci-section-title.is-open .ci-section-title__caret { transform: rotate(180deg); }
+
+/* Counts read as figures, so they get the width the table's pills have rather
+   than hugging a single digit. */
+/* The count sits in the same column as a row's Block/Delete stack, so it
+   carries that stack's width and the right edge reads as one line. */
+.ci-count,
+.ci-grid .ds-tag {
+  min-width: 88px;
+  justify-content: center;
+}
+
+/* Block and Delete sat flush against the facts beside them and read a size
+   smaller; their own strip separates them and matches the pill height. */
+/* Stacked, not side by side: the row is two lines tall once the facts wrap,
+   and a column of buttons fills that height instead of hanging at the top. */
+.ci-row__actions {
+  width: 88px;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 3px;
+  border-radius: var(--radius-control);
+  background: var(--edge);
+}
+
+.ci-row__actions .ds-btn {
+  padding: 5px var(--step-3);
+  border-radius: 11px;
+}
+
+/* The header carries its own rule. It used to sit inside a Divider — a 1px
+   strip — so the button spilled out of it and the list overlapped the title. */
+.ci-section-title {
+  width: 100%;
+  justify-content: flex-start;
+  padding: var(--step-2) 0 var(--step-1);
+  border-top: 1px solid var(--edge);
+  font-size: var(--size-body);
+}
+
+/* The first header separates itself from the facts above; between the two
+   folded headers a full gap read as a hole. */
+.ci-section-title:first-of-type { margin-top: var(--step-2); }
+
+/* The count belongs to the row, not to the word: pushed to the far edge and
+   centred against the title. */
+.ci-section-title .ci-count { margin-inline-start: auto; }
+
+/* The panel's own row gap sits between the header and the list as well, which
+   read as a hole once the header lost its rule. */
+.ci-rows {
+  margin-top: calc(-1 * var(--step-2));
+  padding-bottom: var(--step-2);
+}
+
+/* Same width as the Duration pill in the clients table, so the two read as one
+   value seen in two places. */
+.ci-duration {
+  min-width: 76px;
+  justify-content: center;
+}

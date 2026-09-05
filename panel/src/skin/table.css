@@ -1,0 +1,119 @@
+.ds-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border-radius: var(--radius-card);
+  background: var(--card);
+}
+
+html.is-dark .ds-table-wrap { border: 1px solid var(--edge); }
+
+.ds-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--size-note);
+}
+
+.ds-table th {
+  padding: var(--step-3) var(--step-3);
+  text-align: left;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  border-bottom: 1px solid var(--edge);
+}
+
+.ds-table td {
+  padding: 0 var(--step-3);
+  height: var(--row-height);
+  color: var(--bold);
+  vertical-align: middle;
+}
+
+.ds-table tbody tr + tr td { border-top: 1px solid var(--edge); }
+/* --ink is the page white, so on a card it read as a lighter row rather than a
+   highlight. --press is a translucent tint: darker on light, lighter on dark. */
+.ds-table tbody tr:hover td { background: var(--press); }
+
+.ds-th--sortable { cursor: pointer; user-select: none; }
+.ds-th--sortable:hover { color: var(--bold); }
+.ds-table__sort { margin-left: 4px; opacity: 0.6; }
+
+.ds-table__empty {
+  padding: var(--step-6) var(--step-4);
+  text-align: center;
+  color: var(--text);
+}
+
+.ds-table__expand-btn {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.ds-table__expand-btn.is-open { transform: rotate(90deg); }
+.ds-table__expanded-cell { padding: var(--step-3); background: var(--ink); }
+
+.ds-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--step-3);
+  padding: var(--step-3) 0 0;
+  font-size: var(--size-note);
+  color: var(--text);
+}
+
+.ds-pagination__pages { display: flex; align-items: center; gap: var(--step-1); }
+
+.ds-pager__btn {
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--bold);
+  font-size: var(--size-note);
+  cursor: pointer;
+}
+
+.ds-pager__btn:hover { filter: brightness(0.97); }
+.ds-pager__btn[aria-current='true'] { background: var(--good); color: #fff; }
+.ds-pager__btn:disabled { opacity: 0.4; cursor: default; }
+.ds-pager__gap { padding: 0 4px; color: var(--text); }
+
+.ds-stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--step-1);
+}
+
+.ds-stat__value {
+  font-size: var(--size-title);
+  font-weight: 700;
+  color: var(--bold);
+}
+
+.ds-stat__title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--step-2);
+  font-size: var(--size-note);
+  color: var(--text);
+}
+
+.ds-stat__title > .anticon { flex: 0 0 auto; font-size: 14px; }
+
+.ds-empty-state,
+.ds-result {
+  padding: var(--step-6) var(--step-4);
+  text-align: center;
+  color: var(--text);
+}

@@ -1,0 +1,326 @@
+.ds-dialog__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.ds-dialog__viewport {
+  display: grid;
+  place-items: center;
+  padding: var(--step-4);
+  overflow-y: auto;
+}
+
+/* The width each dialog asks for is set inline; this cap only keeps it inside
+   the window. A fixed 560 here quietly overrode every wider request. */
+.ds-dialog__content {
+  width: 100%;
+  max-width: min(94vw, 1040px);
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--ink);
+  border-radius: var(--radius-card);
+  box-sizing: border-box;
+  pointer-events: auto;
+  overflow: hidden;
+}
+
+html.is-dark .ds-dialog__content { border: 1px solid var(--edge); }
+
+.ds-dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--step-3);
+  padding: var(--step-4) var(--step-4) var(--step-3);
+}
+
+.ds-dialog__title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--size-title);
+  font-weight: 700;
+  color: var(--bold);
+}
+
+.ds-dialog__close {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: var(--radius-round);
+  background: var(--card);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.ds-dialog__close:hover { color: var(--bold); }
+
+.ds-dialog__body {
+  padding: 0 var(--step-4) var(--step-4);
+  overflow: auto;
+}
+
+.ds-dialog__footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--step-2);
+  padding: var(--step-3) var(--step-4) var(--step-4);
+  border-top: 1px solid var(--edge);
+}
+
+.ds-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 101;
+  width: min(480px, 92vw);
+  display: flex;
+  flex-direction: column;
+  background: var(--ink);
+  border-left: 1px solid var(--edge);
+}
+
+.ds-drawer__body { flex: 1; padding: var(--step-4); overflow: auto; }
+
+.ds-drawer__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--step-2);
+  padding: var(--step-3) var(--step-4);
+  border-top: 1px solid var(--edge);
+}
+
+.ds-toast-viewport {
+  position: fixed;
+  top: var(--step-3);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: var(--step-2);
+  pointer-events: none;
+}
+
+.ds-toast {
+  display: flex;
+  align-items: center;
+  gap: var(--step-2);
+  max-width: 520px;
+  padding: 10px var(--step-3);
+  border-radius: var(--radius-round);
+  background: var(--ink);
+  color: var(--bold);
+  font-size: var(--size-note);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
+  pointer-events: auto;
+}
+
+html.is-dark .ds-toast { border: 1px solid var(--edge); }
+
+.ds-toast__icon { display: grid; place-items: center; flex: 0 0 auto; }
+.ds-toast__text { min-width: 0; }
+.ds-toast--success .ds-toast__icon { color: var(--good); }
+.ds-toast--error .ds-toast__icon { color: #e03a2f; }
+.ds-toast--warning .ds-toast__icon { color: #f0a020; }
+
+.ds-tooltip {
+  padding: 6px 10px;
+  border-radius: var(--radius-chip);
+  background: var(--ink);
+  color: var(--bold);
+  border: 1px solid var(--edge);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+  font-size: 12px;
+  z-index: 300;
+}
+
+.ds-menu {
+  min-width: 180px;
+  padding: var(--step-1);
+  border-radius: var(--radius-control);
+  background: var(--ink);
+  border: 1px solid var(--edge);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.10);
+  z-index: 300;
+}
+
+.ds-menu__item {
+  display: flex;
+  align-items: center;
+  gap: var(--step-2);
+  padding: 8px var(--step-2);
+  border-radius: 10px;
+  color: var(--bold);
+  font-size: var(--size-note);
+  cursor: pointer;
+  outline: none;
+  user-select: none;
+}
+
+.ds-menu__item[data-highlighted],
+.ds-menu__item:hover { background: var(--card); }
+
+.ds-menu__item[data-disabled] { opacity: 0.45; cursor: default; }
+.ds-menu__item--danger { color: #e03a2f; }
+
+.ds-menu__label {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--step-2);
+}
+
+.ds-menu__sep { height: 1px; margin: var(--step-1) 0; background: var(--edge); }
+
+.ds-menu__check {
+  flex: 0 0 auto;
+  color: var(--good);
+  font-size: 12px;
+}
+
+.ds-menu__flag {
+  flex: 0 0 auto;
+  min-width: 26px;
+  padding: 1px 6px;
+  border-radius: var(--radius-chip);
+  background: var(--card);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-align: center;
+}
+
+.ds-menu__item--selected .ds-menu__flag { background: var(--ink); color: var(--bold); }
+
+.ds-popover {
+  border-radius: var(--radius-control);
+  background: var(--ink);
+  border: 1px solid var(--edge);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.10);
+  z-index: 300;
+}
+
+.ds-popover--padded { padding: var(--step-3); }
+
+/* Client form ---------------------------------------------------------------
+   Every row is the same pair of halves, so fields line up down the dialog and
+   a long label has room instead of being squeezed by an 'auto' column. */
+.cf-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--step-4);
+}
+
+.cf-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--step-4);
+  align-items: start;
+}
+
+.cf-hint {
+  font-size: var(--size-note);
+  color: var(--text);
+}
+
+.cf-regen {
+  display: flex;
+  gap: var(--step-2);
+}
+
+.cf-regen .ds-input { flex: 1; min-width: 0; }
+
+.cf-switch {
+  display: flex;
+  align-items: center;
+  gap: var(--step-2);
+}
+
+.cf-switch label {
+  color: var(--bold);
+  cursor: pointer;
+  user-select: none;
+}
+
+.cf-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--step-3);
+  width: 100%;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+/* Sized to its own content: any fixed width left a gap between the choice and
+   the confirmation standing next to it. */
+.cf-foot__group { flex: 0 0 auto; }
+.cf-foot__actions {
+  margin-inline-start: auto;
+  display: flex;
+  gap: var(--step-2);
+  flex: 0 0 auto;
+}
+
+/* The title row carries the admin switch, so it spans the header and keeps the
+   close button at the far edge. */
+.cf-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--step-4);
+  flex: 1;
+  min-width: 0;
+}
+
+.cf-title > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cf-title .cf-switch {
+  flex: 0 0 auto;
+  margin-inline-end: var(--step-2);
+}
+
+.cf-title .cf-switch label {
+  font-size: var(--size-note);
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+/* A confirm is a sentence and two buttons; it reads better with the question
+   given room and the footer close under it rather than a strip away. */
+.ds-confirm__text {
+  margin: 0;
+  padding-bottom: var(--step-2);
+  color: var(--text);
+  font-size: var(--size-note);
+  line-height: 1.5;
+}
+
+/* The node's name belongs to the title, so it is set at the title's weight
+   rather than at chip size. */
+.ef-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--step-2);
+}
+
+.ef-title__node {
+  padding: 4px var(--step-3);
+  font-size: var(--size-body);
+  font-weight: 600;
+}

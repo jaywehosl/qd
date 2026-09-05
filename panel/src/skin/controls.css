@@ -1,0 +1,497 @@
+.ds-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--step-2);
+  padding: 9px var(--step-3);
+  border: none;
+  border-radius: var(--radius-control);
+  background: var(--card);
+  color: var(--bold);
+  font-size: var(--size-note);
+  font-weight: 500;
+  line-height: 1.2;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: filter 0.15s ease, transform 0.15s ease, background 0.15s ease;
+}
+
+.ds-btn:hover { filter: brightness(0.97); }
+.ds-btn:active { transform: scale(0.97); }
+
+.ds-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+  transform: none;
+}
+
+.ds-btn--primary {
+  background: var(--good);
+  color: #fff;
+}
+
+.ds-btn--primary:hover { filter: brightness(1.06); }
+
+.ds-btn--danger {
+  background: #e03a2f;
+  color: #fff;
+}
+
+.ds-btn--sm { padding: 6px var(--step-2); font-size: 12px; }
+.ds-btn--lg { padding: 12px var(--step-4); font-size: var(--size-body); }
+.ds-btn--block { width: 100%; }
+
+.ds-btn--icon {
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  flex: 0 0 38px;
+}
+
+.ds-btn--icon.ds-btn--sm { width: 32px; height: 32px; flex-basis: 32px; }
+
+.ds-btn__spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: var(--radius-round);
+  animation: ds-spin 0.8s linear infinite;
+}
+
+@keyframes ds-spin { to { transform: rotate(360deg); } }
+
+.ds-input,
+.ds-field input,
+.ds-field textarea,
+.ds-field select {
+  width: 100%;
+  padding: 9px var(--step-3);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-control);
+  background: var(--ink);
+  color: var(--bold);
+  font-size: var(--size-note);
+  box-sizing: border-box;
+  transition: border-color 0.15s ease;
+}
+
+.ds-input:focus,
+.ds-field input:focus,
+.ds-field textarea:focus {
+  outline: none;
+  border-color: var(--good);
+}
+
+.ds-input::placeholder { color: var(--text); }
+
+.ds-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ds-field > label {
+  font-size: var(--size-note);
+  color: var(--text);
+}
+
+.ds-switch {
+  position: relative;
+  width: 40px;
+  height: 22px;
+  flex: 0 0 40px;
+  border: none;
+  border-radius: var(--radius-round);
+  background: var(--idle);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.2s ease;
+}
+
+.ds-switch__thumb,
+.ds-switch::after {
+  content: '';
+  display: block;
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-round);
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+  transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Radix renders a thumb element, so the pseudo-element would double it. */
+.ds-switch:has(.ds-switch__thumb)::after { display: none; }
+
+.ds-switch[data-state='checked'],
+.ds-switch[aria-checked='true'],
+.ds-switch.is-on { background: var(--good); }
+
+.ds-switch[data-state='checked'] .ds-switch__thumb,
+.ds-switch[aria-checked='true']::after,
+.ds-switch.is-on::after { transform: translateX(18px); }
+
+.ds-check { accent-color: var(--good); }
+
+.ds-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px var(--step-2);
+  border-radius: var(--radius-chip);
+  background: var(--card);
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.ds-tag--primary,
+.ds-tag--success { background: var(--good); color: #fff; }
+.ds-tag--warning { background: #f0a020; color: #fff; }
+.ds-tag--danger,
+.ds-tag--error { background: #e03a2f; color: #fff; }
+
+.ds-card {
+  background: var(--card);
+  border-radius: var(--radius-card);
+  padding: var(--pad-card);
+  box-sizing: border-box;
+}
+
+html.is-dark .ds-card { border: 1px solid var(--edge); }
+
+.ds-divider {
+  height: 1px;
+  margin: var(--step-3) 0;
+  background: var(--edge);
+  border: none;
+}
+
+.ds-segmented {
+  display: inline-flex;
+  gap: 3px;
+  padding: 3px;
+  border-radius: var(--radius-control);
+  background: var(--card);
+}
+
+.ds-segmented button {
+  padding: 7px var(--step-3);
+  border: none;
+  border-radius: 11px;
+  background: none;
+  color: var(--text);
+  font-size: var(--size-note);
+  cursor: pointer;
+}
+
+.ds-segmented button[aria-selected='true'],
+.ds-segmented button.is-active {
+  background: var(--good);
+  color: #fff;
+}
+
+.ds-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px var(--step-2) 7px var(--step-3);
+  border: none;
+  border-radius: var(--radius-control);
+  background: var(--ink);
+  color: var(--bold);
+  font-size: var(--size-note);
+  font-family: inherit;
+  cursor: pointer;
+  transition: filter 0.16s ease;
+}
+
+.ds-select:hover { filter: brightness(0.97); }
+.ds-select:disabled { opacity: 0.5; cursor: default; }
+
+.ds-select__icon {
+  display: grid;
+  place-items: center;
+  color: var(--text);
+  font-size: 11px;
+}
+
+.ds-select__content {
+  z-index: 300;
+  min-width: var(--radix-select-trigger-width);
+  max-width: min(420px, calc(100vw - var(--step-6)));
+  max-height: min(320px, var(--radix-select-content-available-height, 320px));
+  padding: 5px;
+  border-radius: 18px;
+  background: var(--ink);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+  overflow: hidden;
+}
+
+html.is-dark .ds-select__content { border: 1px solid var(--edge); }
+
+.ds-select__viewport {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: min(310px, calc(var(--radix-select-content-available-height, 320px) - 10px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--edge) transparent;
+}
+
+.ds-select__viewport::-webkit-scrollbar { width: 8px; }
+.ds-select__viewport::-webkit-scrollbar-track { background: transparent; }
+
+.ds-select__viewport::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: var(--radius-round);
+  background: var(--edge);
+  background-clip: content-box;
+}
+
+.ds-select__viewport::-webkit-scrollbar-thumb:hover { background: var(--press); background-clip: content-box; }
+
+.ds-select__item > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ds-select__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--step-3);
+  padding: 7px var(--step-3);
+  border-radius: var(--radius-control);
+  color: var(--text);
+  font-size: var(--size-note);
+  cursor: pointer;
+  user-select: none;
+  outline: none;
+}
+
+.ds-select__item[data-highlighted] {
+  background: var(--card);
+  color: var(--bold);
+}
+
+.ds-select__item[data-state='checked'] { color: var(--bold); }
+
+.ds-select__item[data-disabled] { opacity: 0.45; cursor: default; }
+
+.ds-select__indicator {
+  display: grid;
+  place-items: center;
+  color: var(--good);
+  font-size: 11px;
+}
+
+.ds-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--step-3);
+  margin-bottom: var(--step-3);
+}
+
+.ds-card__title {
+  font-size: var(--size-section);
+  font-weight: 700;
+  color: var(--bold);
+}
+
+.ds-card__extra { flex: 0 0 auto; }
+
+.ds-card--pad-0 .ds-card__header { margin-bottom: var(--step-2); }
+
+/* A datetime-local field draws its own popup outside the document, so the page
+   cannot paint it. color-scheme is the one lever there is: it makes the engine
+   render the calendar dark when the skin is dark. */
+input[type='date'],
+input[type='datetime-local'],
+input[type='time'] {
+  color-scheme: light;
+  font-family: inherit;
+}
+
+html.is-dark input[type='date'],
+html.is-dark input[type='datetime-local'],
+html.is-dark input[type='time'] { color-scheme: dark; }
+
+input[type='date']::-webkit-calendar-picker-indicator,
+input[type='datetime-local']::-webkit-calendar-picker-indicator {
+  opacity: 0.5;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+input[type='date']::-webkit-calendar-picker-indicator:hover,
+input[type='datetime-local']::-webkit-calendar-picker-indicator:hover { opacity: 1; }
+
+/* Date field ---------------------------------------------------------------- */
+
+.dt-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--step-2);
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.dt-field:disabled { opacity: 0.5; cursor: default; }
+.dt-field__hint { color: var(--text); }
+.dt-field__icon { color: var(--text); font-size: 13px; }
+
+.cal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--step-2);
+  width: 268px;
+}
+
+.cal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--step-2);
+}
+
+.cal-title {
+  font-weight: 500;
+  color: var(--bold);
+  text-transform: capitalize;
+}
+
+.cal-step {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--text);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.cal-step:hover { background: var(--card); color: var(--bold); }
+
+.cal-grid {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+
+/* Same travelling highlight as the header: one shape follows the cursor across
+   the grid rather than each day lighting up on its own. */
+.cal-grid .chp-glow { background: var(--card); }
+
+.cal-day { position: relative; z-index: 1; }
+.cal-day:hover { background: none; }
+
+.cal-weekday {
+  display: grid;
+  place-items: center;
+  height: 24px;
+  color: var(--text);
+  font-size: 11px;
+  text-transform: capitalize;
+}
+
+.cal-day {
+  height: 30px;
+  border: none;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--bold);
+  font-size: var(--size-note);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.cal-day:hover { background: var(--card); }
+.cal-day.is-outside { color: var(--text); opacity: 0.45; }
+
+/* Today is marked but not selected, so it gets an outline rather than a fill. */
+.cal-day.is-today { box-shadow: inset 0 0 0 1px var(--edge); }
+
+.cal-day.is-chosen {
+  background: var(--good);
+  color: #fff;
+  box-shadow: none;
+}
+
+.cal-time {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--step-2);
+  padding-top: var(--step-2);
+  border-top: 1px solid var(--edge);
+}
+
+.cal-time .ds-input {
+  width: 54px;
+  padding: 6px var(--step-2);
+  text-align: center;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.cal-colon { color: var(--text); }
+
+.cal-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--step-3);
+  padding-top: var(--step-2);
+  border-top: 1px solid var(--edge);
+}
+
+.cal-link {
+  border: none;
+  background: none;
+  color: var(--text);
+  font-size: var(--size-note);
+  cursor: pointer;
+  padding: 0;
+}
+
+.cal-link:hover { color: var(--bold); }
+
+.cal-done {
+  margin-inline-start: auto;
+  padding: 5px var(--step-3);
+  border: none;
+  border-radius: var(--radius-control);
+  background: var(--good);
+  color: #fff;
+  font-size: var(--size-note);
+  cursor: pointer;
+}
+
+/* The panel floats over a dialog of the same white, so a menu-weight shadow
+   left it looking pasted on. It needs its own edge and a deeper drop. */
+.ds-popover:has(.cal) {
+  padding: var(--step-3);
+  border: 1px solid rgba(28, 28, 30, 0.16);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.22), 0 2px 8px rgba(0, 0, 0, 0.10);
+}
+
+html.is-dark .ds-popover:has(.cal) {
+  border-color: rgba(255, 255, 255, 0.16);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.6);
+}

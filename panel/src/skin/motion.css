@@ -1,0 +1,141 @@
+@keyframes qd-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes qd-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes qd-modal-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes qd-modal-out {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(4px) scale(0.99); }
+}
+
+@keyframes qd-pop-in {
+  from { opacity: 0; transform: translateY(-4px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes qd-drawer-in-right {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes qd-drawer-out-right {
+  from { transform: translateX(0); }
+  to { transform: translateX(100%); }
+}
+
+@keyframes qd-drawer-in-left {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes qd-drawer-out-left {
+  from { transform: translateX(0); }
+  to { transform: translateX(-100%); }
+}
+
+@keyframes qd-toast-in {
+  from { opacity: 0; transform: translateY(-10px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes qd-page-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes qd-page-out {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(-4px); }
+}
+
+.ds-dialog__overlay { animation: qd-fade-in 0.16s ease; }
+.ds-dialog__overlay.is-closing { animation: qd-fade-out 0.15s ease both; }
+
+.ds-dialog__content { animation: qd-modal-in 0.2s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.ds-dialog__content.is-closing { animation: qd-modal-out 0.15s ease both; }
+
+.ds-drawer__content--right {
+  animation: qd-drawer-in-right 0.24s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.ds-drawer__content--right.is-closing {
+  animation: qd-drawer-out-right 0.15s ease both;
+}
+
+.ds-drawer__content--left {
+  animation: qd-drawer-in-left 0.24s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.ds-drawer__content--left.is-closing {
+  animation: qd-drawer-out-left 0.15s ease both;
+}
+
+.ds-menu[data-state='open'],
+.ds-popover[data-state='open'],
+.ds-select__content[data-state='open'],
+.ds-tooltip[data-state='delayed-open'],
+.ds-tooltip[data-state='instant-open'] {
+  animation: qd-pop-in 0.14s cubic-bezier(0.2, 0.8, 0.2, 1);
+  transform-origin: var(--radix-popper-transform-origin, center);
+}
+
+.ds-toast { animation: qd-toast-in 0.18s cubic-bezier(0.2, 0.8, 0.2, 1); }
+
+.ds-tabs__content[data-state='active'] { animation: qd-fade-in 0.18s ease; }
+
+.qd-page-swap { animation: qd-page-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); }
+
+/* The header and the slide-out under it keep their own name, so a page swap
+   crossfades the content alone and the chrome stays put. */
+.topbar-shell { view-transition-name: qd-topbar; }
+
+::view-transition-old(qd-topbar),
+::view-transition-new(qd-topbar) { animation: none; }
+
+::view-transition-old(root) {
+  animation: qd-page-out 0.16s cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+::view-transition-new(root) {
+  animation: qd-page-in 0.24s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+/* A theme swap repaints the chrome too, so the header joins the one snapshot
+   and the whole window crossfades instead of the body alone. */
+:root[data-vt='theme'] .topbar-shell { view-transition-name: none; }
+
+:root[data-vt='theme']::view-transition-old(root) {
+  animation: qd-fade-out 0.2s ease both;
+}
+
+:root[data-vt='theme']::view-transition-new(root) {
+  animation: qd-fade-in 0.26s ease both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ds-dialog__overlay[data-state],
+  .ds-dialog__content[data-state],
+  .ds-drawer__content--right[data-state],
+  .ds-drawer__content--left[data-state],
+  .ds-menu[data-state],
+  .ds-popover[data-state],
+  .ds-select__content[data-state],
+  .ds-tooltip[data-state],
+  .ds-toast,
+  .ds-tabs__content[data-state='active'],
+  .qd-page-swap,
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+  }
+}

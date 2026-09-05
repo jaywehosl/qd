@@ -1,0 +1,63 @@
+html {
+  background: var(--ink);
+  color-scheme: light;
+}
+
+html.is-dark {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background: var(--ink);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--size-body);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4 {
+  margin: 0;
+  color: var(--bold);
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+h1 { font-size: var(--size-display); }
+h2 { font-size: var(--size-title); }
+h3 { font-size: var(--size-section); }
+h4 { font-size: var(--size-body); }
+
+p { margin: 0; }
+
+a {
+  color: var(--bold);
+  text-decoration: none;
+}
+
+a:hover { color: var(--good); }
+
+button, input, select, textarea {
+  font: inherit;
+  color: inherit;
+}
+
+::selection {
+  background: var(--good);
+  color: #ffffff;
+}
+
+.lead {
+  font-size: var(--size-lead);
+  color: var(--text);
+}
+
+.note {
+  font-size: var(--size-note);
+  color: var(--text);
+}
+
+.mono { font-family: var(--mono); }
+.strong { color: var(--bold); }
+.good { color: var(--good); }

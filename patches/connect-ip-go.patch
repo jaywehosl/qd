@@ -1,0 +1,85 @@
+--- a/conn.go
++++ b/conn.go
+@@ -257,30 +257,34 @@
+ }
+ 
+ func (c *Conn) ReadPacket(b []byte) (n int, err error) {
++	n, _, err = c.ReadPacketMarked(b)
++	return n, err
++}
++
++// ReadPacketMarked reads a proxied packet and reports the context ID it arrived
++// under. Context IDs other than zero carry a caller-defined meaning; the
++// upstream library drops them.
++func (c *Conn) ReadPacketMarked(b []byte) (n int, mark uint64, err error) {
+ start:
+ 	data, err := c.str.ReceiveDatagram(context.Background())
+ 	if err != nil {
+ 		select {
+ 		case <-c.closeChan:
+-			return 0, c.closeErr
++			return 0, 0, c.closeErr
+ 		default:
+-			return 0, err
++			return 0, 0, err
+ 		}
+ 	}
+ 	contextID, n, err := quicvarint.Parse(data)
+ 	if err != nil {
+ 		// TODO: close connection
+-		return 0, fmt.Errorf("connect-ip: malformed datagram: %w", err)
+-	}
+-	if contextID != 0 {
+-		// Drop this datagram. We currently only support proxying of IP payloads.
+-		goto start
++		return 0, 0, fmt.Errorf("connect-ip: malformed datagram: %w", err)
+ 	}
+ 	if err := c.handleIncomingProxiedPacket(data[n:]); err != nil {
+ 		log.Printf("dropping proxied packet: %s", err)
+ 		goto start
+ 	}
+-	return copy(b, data[n:]), nil
++	return copy(b, data[n:]), contextID, nil
+ }
+ 
+ func (c *Conn) handleIncomingProxiedPacket(data []byte) error {
+@@ -356,7 +360,14 @@
+ // If sending the packet fails, it might return an ICMP packet.
+ // It is the caller's responsibility to send the ICMP packet to the sender.
+ func (c *Conn) WritePacket(b []byte) (icmp []byte, err error) {
+-	data, err := c.composeDatagram(b)
++	return c.WritePacketMarked(b, 0)
++}
++
++// WritePacketMarked writes an IP packet under the given context ID, so the peer
++// can tell packets apart without inspecting them. Zero is the plain IP payload
++// the upstream library speaks.
++func (c *Conn) WritePacketMarked(b []byte, mark uint64) (icmp []byte, err error) {
++	data, err := c.composeDatagram(b, mark)
+ 	if err != nil {
+ 		log.Printf("dropping proxied packet (%d bytes) that can't be proxied: %s", len(b), err)
+ 		return nil, nil
+@@ -380,7 +391,7 @@
+ 	return nil, nil
+ }
+ 
+-func (c *Conn) composeDatagram(b []byte) ([]byte, error) {
++func (c *Conn) composeDatagram(b []byte, mark uint64) ([]byte, error) {
+ 	// TODO: implement src, dst and ipproto checks
+ 	if len(b) == 0 {
+ 		return nil, nil
+@@ -409,8 +420,12 @@
+ 		}
+ 		b[7]-- // Decrement Hop Limit
+ 	}
+-	data := make([]byte, 0, len(contextIDZero)+len(b))
+-	data = append(data, contextIDZero...)
++	prefix := contextIDZero
++	if mark != 0 {
++		prefix = quicvarint.Append([]byte{}, mark)
++	}
++	data := make([]byte, 0, len(prefix)+len(b))
++	data = append(data, prefix...)
+ 	data = append(data, b...)
+ 	return data, nil
+ }
