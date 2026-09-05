@@ -321,22 +321,96 @@ func certificateEnds(path string) string {
 	return fmt.Sprintf("%s, %d days left", crt.NotAfter.UTC().Format("2006-01-02"), int(left.Hours()/24))
 }
 
-func listening(port int, proto string) bool {
-	out, err := exec.Command("ss", "-ln"+proto).Output()
-	if err != nil {
-		return false
-	}
-	tail := ":" + strconv.Itoa(port)
-	for _, line := range strings.Split(string(out), "\n")[1:] {
-		fields := strings.Fields(line)
-		if len(fields) < 4 {
-			continue
-		}
-		if strings.HasSuffix(fields[3], tail) {
+type ears struct {
+	udp []int
+	tcp []int
+}
+
+func (e ears) quiet() bool { return len(e.udp) == 0 && len(e.tcp) == 0 }
+
+func (e ears) holds(port int) bool {
+	for _, p := range append(append([]int{}, e.udp...), e.tcp...) {
+		if p == port {
 			return true
 		}
 	}
 	return false
+}
+
+func listeningNow() ears {
+	held := socketsOfService()
+	if len(held) == 0 {
+		return ears{}
+	}
+	return ears{
+		udp: portsHeld(held, []string{"/proc/net/udp", "/proc/net/udp6"}, ""),
+		tcp: portsHeld(held, []string{"/proc/net/tcp", "/proc/net/tcp6"}, "0A"),
+	}
+}
+
+func socketsOfService() map[string]bool {
+	out := map[string]bool{}
+	dirs, _ := filepath.Glob("/proc/[0-9]*")
+	for _, dir := range dirs {
+		comm, err := os.ReadFile(filepath.Join(dir, "comm"))
+		if err != nil || strings.TrimSpace(string(comm)) != serviceName {
+			continue
+		}
+		fds, _ := filepath.Glob(filepath.Join(dir, "fd", "*"))
+		for _, fd := range fds {
+			link, err := os.Readlink(fd)
+			if err != nil || !strings.HasPrefix(link, "socket:[") {
+				continue
+			}
+			out[strings.TrimSuffix(strings.TrimPrefix(link, "socket:["), "]")] = true
+		}
+	}
+	return out
+}
+
+func portsHeld(held map[string]bool, files []string, state string) []int {
+	seen := map[int]bool{}
+	for _, name := range files {
+		body, err := os.ReadFile(name)
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(body), "\n")[1:] {
+			fields := strings.Fields(line)
+			if len(fields) < 10 || !held[fields[9]] {
+				continue
+			}
+			if state != "" && fields[3] != state {
+				continue
+			}
+			at := strings.LastIndex(fields[1], ":")
+			if at < 0 {
+				continue
+			}
+			port, err := strconv.ParseUint(fields[1][at+1:], 16, 32)
+			if err != nil {
+				continue
+			}
+			seen[int(port)] = true
+		}
+	}
+	out := make([]int, 0, len(seen))
+	for port := range seen {
+		out = append(out, port)
+	}
+	sort.Ints(out)
+	return out
+}
+
+func spellPorts(ports []int) string {
+	if len(ports) == 0 {
+		return "nothing"
+	}
+	words := make([]string, len(ports))
+	for i, p := range ports {
+		words[i] = strconv.Itoa(p)
+	}
+	return strings.Join(words, ", ")
 }
 
 func mark(ok bool) string {
@@ -360,36 +434,57 @@ func selfFromDatabase(cfg nodeConfig, db *store.DB) netstate.Node {
 }
 
 func runStatus(cfg nodeConfig, dbFlag string) error {
-	if db, _, err := cliDatabase(cfg, dbFlag); err == nil {
-		self := selfFromDatabase(cfg, db)
-		if cfg.Cert == "" {
-			cfg.Cert, cfg.Key = self.CertPath, self.KeyPath
-		}
-		if cfg.Authority == "" {
-			cfg.Authority = self.Authority
-		}
-		if cfg.Tag == "" {
-			cfg.Tag, cfg.Role = self.Tag, string(self.Role)
-		}
-		db.Close()
+	self := netstate.Node{}
+	db, path, err := cliDatabase(cfg, dbFlag)
+	if err == nil {
+		self = selfFromDatabase(cfg, db)
+		defer db.Close()
+	}
+
+	id := self.ID
+	if id == 0 {
+		id = cfg.ID
+	}
+	uuid := self.UUID
+	if uuid == "" {
+		uuid = cfg.UUID
+	}
+	certPath := self.CertPath
+	if certPath == "" {
+		certPath = cfg.Cert
+	}
+
+	heard := listeningNow()
+	answers := self.Authority
+	if answers == "" {
+		answers = self.Address
+	}
+	if host, _, cut := net.SplitHostPort(answers); cut == nil {
+		answers = host
+	}
+	if answers != "" && self.Port > 0 {
+		answers = net.JoinHostPort(answers, strconv.Itoa(self.Port))
 	}
 
 	fmt.Printf("\nidentity\n")
-	fmt.Printf("  node       %s, %s, id %d\n", orNone(cfg.Tag), orNone(cfg.Role), cfg.ID)
-	fmt.Printf("  uuid       %s\n", orNone(cfg.UUID))
-	fmt.Printf("  answers as %s\n", orNone(cfg.Authority))
-	fmt.Printf("  address    %s:%d\n", orNone(cfg.Address), cfg.Port)
-	fmt.Printf("  config     %s\n", configPath)
+	fmt.Printf("  node       %s, %s, id %d\n", orNone(self.Tag), orNone(string(self.Role)), id)
+	fmt.Printf("  uuid       %s\n", orNone(uuid))
+	fmt.Printf("  answers as %s\n", orNone(answers))
+	fmt.Printf("  address    %s\n", orNone(self.Address))
+	fmt.Printf("  database   %s\n", orNone(path))
 
 	fmt.Printf("\nservice\n")
 	active := serviceActive()
 	fmt.Printf("  running    %s\n", mark(active))
-	fmt.Printf("  udp/%-6d %s\n", cfg.Port, mark(listening(cfg.Port, "u")))
-	fmt.Printf("  tcp/%-6d %s\n", cfg.Port, mark(listening(cfg.Port, "t")))
+	fmt.Printf("  udp        %s\n", spellPorts(heard.udp))
+	fmt.Printf("  tcp        %s\n", spellPorts(heard.tcp))
+	if self.Port > 0 && !heard.quiet() && !heard.holds(self.Port) {
+		fmt.Printf("  mismatch   the network says this node is on %d, it listens elsewhere\n", self.Port)
+	}
 
-	if cfg.Cert == "" {
+	if certPath == "" {
 		fmt.Printf("  certificate self-signed\n")
-	} else if ends := certificateEnds(cfg.Cert); ends != "" {
+	} else if ends := certificateEnds(certPath); ends != "" {
 		fmt.Printf("  certificate %s\n", ends)
 		hook := "missing"
 		if _, err := os.Stat(renewHook); err == nil {
@@ -397,18 +492,15 @@ func runStatus(cfg nodeConfig, dbFlag string) error {
 		}
 		fmt.Printf("  renew hook %s\n", hook)
 	} else {
-		fmt.Printf("  certificate %s is unreadable\n", cfg.Cert)
+		fmt.Printf("  certificate %s is unreadable\n", certPath)
 	}
 
-	db, path, err := cliDatabase(cfg, dbFlag)
 	if err != nil {
 		fmt.Printf("\ndatabase\n  %v\n\n", err)
 		return nil
 	}
-	defer db.Close()
 
 	fmt.Printf("\nnetwork\n")
-	fmt.Printf("  database   %s\n", path)
 
 	version, err := db.Version()
 	if err == nil {
@@ -429,7 +521,7 @@ func runStatus(cfg nodeConfig, dbFlag string) error {
 
 	seen := ""
 	if progress, err := db.NodeProgress(); err == nil {
-		if p, ok := progress[cfg.ID]; ok {
+		if p, ok := progress[id]; ok {
 			if p.LastSeen > 0 {
 				ago := time.Since(time.UnixMilli(p.LastSeen)).Round(time.Second)
 				seen = fmt.Sprintf("%s ago, applied revision %d, %s", ago, p.Applied, p.Status)
