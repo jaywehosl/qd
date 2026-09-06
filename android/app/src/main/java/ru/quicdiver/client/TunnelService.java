@@ -74,9 +74,11 @@ public class TunnelService extends VpnService {
         watcher = new ConnectivityManager.NetworkCallback() {
             @Override
             public void onAvailable(Network network) {
+                Network was = carrier;
                 carrier = network;
                 setUnderlyingNetworks(new Network[]{network});
-                Core.say(TunnelService.this, "java: onAvailable " + network);
+                Core.say(TunnelService.this, "java: onAvailable " + network
+                        + " " + describe(network) + " (was " + was + ")");
                 tell(network);
             }
 
@@ -240,14 +242,17 @@ public class TunnelService extends VpnService {
     boolean bind(int socket) {
         Network under = carrier;
         if (under == null) {
+            Core.say(this, "java: bind fd=" + socket + " no carrier, left unbound");
             return true;
         }
         ParcelFileDescriptor copy = null;
         try {
             copy = ParcelFileDescriptor.fromFd(socket);
             under.bindSocket(copy.getFileDescriptor());
+            Core.say(this, "java: bind fd=" + socket + " to " + under + " " + describe(under));
             return true;
         } catch (Exception e) {
+            Core.say(this, "java: bind fd=" + socket + " to " + under + " failed: " + e);
             Log.e(TAG, "bind socket", e);
             return false;
         } finally {
@@ -257,6 +262,31 @@ public class TunnelService extends VpnService {
                 } catch (Exception ignored) {
                 }
             }
+        }
+    }
+
+    String describe(Network network) {
+        try {
+            ConnectivityManager net = getSystemService(ConnectivityManager.class);
+            NetworkCapabilities caps = net.getNetworkCapabilities(network);
+            android.net.LinkProperties link = net.getLinkProperties(network);
+            String kind = "?";
+            if (caps != null) {
+                if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+                    kind = "wifi";
+                } else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) {
+                    kind = "cell";
+                } else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+                    kind = "vpn";
+                }
+            }
+            return kind
+                    + " iface=" + (link == null ? "?" : link.getInterfaceName())
+                    + " addrs=" + (link == null ? "?" : link.getLinkAddresses())
+                    + " validated=" + (caps != null
+                        && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED));
+        } catch (Exception e) {
+            return "describe failed: " + e;
         }
     }
 

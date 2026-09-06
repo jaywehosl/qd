@@ -27,12 +27,6 @@ type gate struct {
 
 func newGate() *gate { return &gate{allowed: map[uint32]bool{}} }
 
-func (g *gate) hold(allowed map[uint32]bool) {
-	g.mu.Lock()
-	g.allowed = allowed
-	g.mu.Unlock()
-}
-
 func (g *gate) list() map[uint32]struct{} {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
@@ -50,13 +44,6 @@ func (g *gate) add(id uint32) {
 		g.allowed[id] = false
 	}
 	g.mu.Unlock()
-}
-
-func (g *gate) alive(id uint32) bool {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
-	_, held := g.allowed[id]
-	return held
 }
 
 func (g *gate) del(id uint32) {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync/atomic"
 	"time"
+
+	"github.com/jaywehosl/quic-diver/internal/roads"
 )
 
 const settle = 250 * time.Millisecond
@@ -31,6 +33,7 @@ func (c *Client) NetworkChanged(tag string) {
 	if same {
 		return
 	}
+	roads.Forget()
 	if first || !running {
 		return
 	}

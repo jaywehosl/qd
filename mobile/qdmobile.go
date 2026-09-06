@@ -3,13 +3,9 @@ package qdmobile
 import (
 	"context"
 	"encoding/hex"
-	"errors"
-	"net"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
-	"syscall"
-	"time"
 
 	"github.com/jaywehosl/quic-diver/internal/adblock"
 	"github.com/jaywehosl/quic-diver/internal/clientapi"
@@ -239,39 +235,4 @@ func (c *Client) Ping() int {
 
 	// Резолвер молчит только когда туннель опущен: тогда мерить нечего.
 	return -1
-}
-
-func dialProtected(protector Protector, address string, must bool) (*net.UDPConn, error) {
-	var refused bool
-
-	d := net.Dialer{
-		Timeout: 4 * time.Second,
-		Control: func(network, addr string, rc syscall.RawConn) error {
-			return rc.Control(func(fd uintptr) {
-				if protector != nil && !protector.Protect(int(fd)) {
-					refused = true
-				}
-			})
-		},
-	}
-
-	conn, err := d.Dial("udp4", address)
-	if err != nil {
-		say("dial %s: %v", address, err)
-		return nil, err
-	}
-	if refused && must {
-		conn.Close()
-		say("dial %s: not protected", address)
-		return nil, errors.New("the system refused to keep this socket out of the tunnel")
-	}
-
-	udp, ok := conn.(*net.UDPConn)
-	if !ok {
-		conn.Close()
-		return nil, errors.New("not a udp socket")
-	}
-	udp.SetReadBuffer(1 << 20)
-	udp.SetWriteBuffer(1 << 20)
-	return udp, nil
 }

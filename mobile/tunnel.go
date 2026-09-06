@@ -6,9 +6,15 @@ import (
 	"github.com/jaywehosl/quic-diver/internal/clientapi"
 	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
 	"github.com/jaywehosl/quic-diver/internal/qsrv"
+	"github.com/jaywehosl/quic-diver/internal/roads"
 )
 
 var exit atomic.Uint32
+
+func (c *Client) OnlyTCP(on bool) {
+	roads.Only(on)
+	say("carry: only tcp = %v", on)
+}
 
 func (c *Client) announce(op string) {
 	sub, err := c.db.Subscription()

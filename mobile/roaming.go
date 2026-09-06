@@ -169,6 +169,12 @@ func (c *Client) migrate(ctx context.Context) {
 		return
 	}
 
+	if !live.CanMigrate() {
+		say("roam: this path does not migrate, bringing the tunnel up again")
+		go c.lost()
+		return
+	}
+
 	for try := 1; try <= tries; try++ {
 		round, done := context.WithTimeout(ctx, moveWait)
 		err := live.Rebind(round)

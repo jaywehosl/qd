@@ -152,7 +152,6 @@ var (
 	loadOnce sync.Once
 	loadErr  error
 
-	dll             *windows.DLL
 	procOpen        *windows.Proc
 	procRecvEx      *windows.Proc
 	procSendEx      *windows.Proc
@@ -172,7 +171,6 @@ func Load(dllPath string) error {
 			loadErr = fmt.Errorf("load %s: %w", dllPath, err)
 			return
 		}
-		dll = d
 		for name, p := range map[string]**windows.Proc{
 			"WinDivertOpen":                &procOpen,
 			"WinDivertRecvEx":              &procRecvEx,

@@ -190,17 +190,20 @@ func (a *API) Import(uri string) error {
 		a.OnImport()
 	}
 
-	reached := a.ProbeAll()
-	if reached == 0 {
-		a.db.Notify("warning", "No node answered this link yet.", now)
-		return nil
-	}
-
-	if fresh, err := a.db.Subscription(); err == nil {
-		fresh.LastRefresh = time.Now().UnixMilli()
-		a.db.SaveSubscription(fresh)
-	}
-	a.db.Notify("info", fmt.Sprintf("Subscription imported: %d of %d entrypoints reachable.", reached, len(nodes)), now)
+	go func() {
+		reached := a.ProbeAll()
+		if reached == 0 {
+			a.db.Notify("warning", "No node answered this link yet.", time.Now().UnixMilli())
+			return
+		}
+		if fresh, err := a.db.Subscription(); err == nil {
+			fresh.LastRefresh = time.Now().UnixMilli()
+			a.db.SaveSubscription(fresh)
+		}
+		a.db.Notify("info",
+			fmt.Sprintf("Subscription imported: %d of %d entrypoints reachable.", reached, len(nodes)),
+			time.Now().UnixMilli())
+	}()
 	return nil
 }
 

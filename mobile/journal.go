@@ -33,6 +33,25 @@ func markJournal(dir string) {
 	holdStderr(dir)
 }
 
+func (c *Client) LogTo(dir string) {
+	if dir == "" {
+		return
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return
+	}
+	if kept := book.Swap(nil); kept != nil {
+		kept.mu.Lock()
+		if kept.file != nil {
+			kept.file.Close()
+		}
+		kept.mu.Unlock()
+	}
+	path := filepath.Join(dir, "qd.log")
+	where.Store(&path)
+	c.Verbose(true)
+}
+
 func (c *Client) Verbose(on bool) {
 	loud.Store(on)
 	spot := where.Load()
@@ -67,6 +86,22 @@ func (c *Client) Verbose(on bool) {
 	book.Store(kept)
 }
 
+func (j *journal) roll() {
+	if j.file == nil {
+		return
+	}
+	j.file.Close()
+	os.Remove(j.path + ".1")
+	os.Rename(j.path, j.path+".1")
+
+	fresh, err := os.OpenFile(j.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		j.file = nil
+		return
+	}
+	j.file, j.size = fresh, 0
+}
+
 func whoCalled() string {
 	var out []string
 	for depth := 2; depth < 8; depth++ {
@@ -96,9 +131,7 @@ func say(format string, args ...any) {
 	}
 
 	if kept.size > journalCap {
-		kept.file.Truncate(0)
-		kept.file.Seek(0, 0)
-		kept.size = 0
+		kept.roll()
 	}
 
 	written, _ := fmt.Fprintf(kept.file, "%s %s\n",

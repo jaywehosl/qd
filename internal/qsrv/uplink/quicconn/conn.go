@@ -11,7 +11,10 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"net"
+	"net/netip"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -54,6 +57,7 @@ type Conn struct {
 	pc       net.PacketConn    // сокет активного пути
 	prev     []transportSocket // старые пути после миграции, живут до Close
 	remote   net.Addr
+	keep     func(fd uintptr)
 	maxDgram atomic.Int64
 }
 
@@ -99,11 +103,12 @@ func (c *Conn) QUIC() *quic.Conn { return c.qc }
 // Открывает сокет на laddr, добавляет путь, валидирует его (PATH_CHALLENGE),
 // переключается и закрывает старый транспорт.
 func (c *Conn) Migrate(ctx context.Context, laddr *net.UDPAddr) error {
-	pc, err := net.ListenUDP("udp", laddr)
+	pc, err := c.listenLike(laddr)
 	if err != nil {
 		return err
 	}
 	setUDPBuffers(pc)
+	keepOutside(pc, c.keep)
 	newTr := &quic.Transport{Conn: pc}
 
 	path, err := c.qc.AddPath(newTr)
@@ -176,27 +181,83 @@ type Dialer struct {
 
 // Dial резолвит endpoint (host:port по домену — arch3) и устанавливает сессию.
 func (d Dialer) Dial(ctx context.Context, endpoint string) (uplink.Conn, error) {
-	raddr, err := resolve(endpoint)
+	addrs, err := resolve(ctx, endpoint)
 	if err != nil {
 		return nil, err
 	}
-	pc, err := net.ListenUDP("udp", &net.UDPAddr{Port: 0})
+
+	if len(addrs) == 1 {
+		conn, err := d.reach(ctx, addrs[0])
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", addrs[0], err)
+		}
+		return conn, nil
+	}
+
+	round, stop := context.WithCancel(ctx)
+	defer stop()
+
+	type finish struct {
+		conn uplink.Conn
+		err  error
+	}
+	line := make(chan finish, len(addrs))
+
+	for i, raddr := range addrs {
+		go func(n int, where *net.UDPAddr) {
+			if n > 0 {
+				select {
+				case <-time.After(time.Duration(n) * headStart):
+				case <-round.Done():
+					line <- finish{err: round.Err()}
+					return
+				}
+			}
+			conn, err := d.reach(round, where)
+			if err != nil {
+				line <- finish{err: fmt.Errorf("%s: %w", where, err)}
+				return
+			}
+			line <- finish{conn: conn}
+		}(i, raddr)
+	}
+
+	tried := make([]string, 0, len(addrs))
+	for range addrs {
+		got := <-line
+		if got.err == nil {
+			return got.conn, nil
+		}
+		tried = append(tried, got.err.Error())
+	}
+	return nil, errors.New(strings.Join(tried, " / "))
+}
+
+func (d Dialer) reach(ctx context.Context, raddr *net.UDPAddr) (uplink.Conn, error) {
+	pc, err := listenFor(raddr)
 	if err != nil {
+		fmt.Printf("dial     %s: no socket: %v\n", raddr, err)
 		return nil, err
 	}
 	setUDPBuffers(pc)
 	keepOutside(pc, d.Keep)
+	fmt.Printf("dial     %s from %s\n", raddr, pc.LocalAddr())
 	tr := &quic.Transport{Conn: pc}
 
+	began := time.Now()
 	qc, err := tr.Dial(ctx, raddr, ensureALPN(d.TLS), configOrDefault(d.QUIC))
 	if err != nil {
+		fmt.Printf("dial     %s gave up after %d ms: %v\n", raddr, time.Since(began).Milliseconds(), err)
 		tr.Close()
 		return nil, err
 	}
-	c := &Conn{qc: qc, tr: tr, pc: pc, remote: raddr}
+	fmt.Printf("dial     %s answered in %d ms\n", raddr, time.Since(began).Milliseconds())
+	c := &Conn{qc: qc, tr: tr, pc: pc, remote: raddr, keep: d.Keep}
 	c.maxDgram.Store(defaultMaxDatagram)
 	return c, nil
 }
+
+const headStart = 250 * time.Millisecond
 
 var _ uplink.Dialer = Dialer{}
 
@@ -282,21 +343,104 @@ func keepOutside(pc *net.UDPConn, keep func(fd uintptr)) {
 	raw.Control(keep)
 }
 
-// resolve помнит адрес, по которому узел однажды ответил. Имя резолвится
+// resolve помнит адреса, по которым узел однажды ответил. Имя резолвится
 // системой, а система бывает недоступна ровно тогда, когда она нужнее всего:
 // на мобильной сети под белым списком оператора DNS не выпускают наружу, и
 // клиент, переехавший с Wi-Fi на соту, переставал находить собственный узел —
 // хотя сам узел оставался достижим.
 var known sync.Map
 
-func resolve(endpoint string) (*net.UDPAddr, error) {
-	addr, err := net.ResolveUDPAddr("udp", endpoint)
-	if err == nil {
-		known.Store(endpoint, addr)
-		return addr, nil
+func Addrs(ctx context.Context, endpoint string) ([]string, error) {
+	held, err := resolve(ctx, endpoint)
+	if err != nil {
+		return nil, err
 	}
-	if held, ok := known.Load(endpoint); ok {
-		return held.(*net.UDPAddr), nil
+	out := make([]string, 0, len(held))
+	for _, one := range held {
+		out = append(out, one.String())
 	}
-	return nil, err
+	return out, nil
 }
+
+func resolve(ctx context.Context, endpoint string) ([]*net.UDPAddr, error) {
+	host, port, err := net.SplitHostPort(endpoint)
+	if err != nil {
+		return nil, err
+	}
+	number, err := net.LookupPort("udp", port)
+	if err != nil {
+		return nil, err
+	}
+
+	if ip, err := netip.ParseAddr(host); err == nil {
+		return []*net.UDPAddr{{IP: ip.AsSlice(), Port: number}}, nil
+	}
+
+	look, stop := context.WithTimeout(ctx, resolveWait)
+	ips, err := net.DefaultResolver.LookupIP(look, "ip", host)
+	stop()
+	if err != nil || len(ips) == 0 {
+		if held, ok := known.Load(endpoint); ok {
+			return held.([]*net.UDPAddr), nil
+		}
+		if err == nil {
+			err = fmt.Errorf("no address for %s", host)
+		}
+		return nil, err
+	}
+
+	out := order(ips, number)
+	known.Store(endpoint, out)
+	fmt.Printf("resolve  %s -> %v (v6 route %v)\n", endpoint, out, holdsV6())
+	return out, nil
+}
+
+func order(ips []net.IP, port int) []*net.UDPAddr {
+	v6 := holdsV6()
+
+	first := make([]*net.UDPAddr, 0, len(ips))
+	rest := make([]*net.UDPAddr, 0, len(ips))
+	for _, ip := range ips {
+		one := &net.UDPAddr{IP: ip, Port: port}
+		if ip.To4() != nil || v6 {
+			first = append(first, one)
+			continue
+		}
+		rest = append(rest, one)
+	}
+	return append(first, rest...)
+}
+
+func holdsV6() bool {
+	c, err := net.Dial("udp6", "[2001:4860:4860::8888]:53")
+	if err != nil {
+		return false
+	}
+	c.Close()
+	return true
+}
+
+func listenFor(raddr *net.UDPAddr) (*net.UDPConn, error) {
+	network := "udp6"
+	if raddr.IP.To4() != nil {
+		network = "udp4"
+	}
+	return net.ListenUDP(network, &net.UDPAddr{Port: 0})
+}
+
+func (c *Conn) listenLike(laddr *net.UDPAddr) (*net.UDPConn, error) {
+	network := "udp"
+	if remote, ok := c.remote.(*net.UDPAddr); ok && remote != nil {
+		if remote.IP.To4() != nil {
+			network = "udp4"
+		} else {
+			network = "udp6"
+		}
+	}
+	if laddr == nil {
+		laddr = &net.UDPAddr{Port: 0}
+	}
+	return net.ListenUDP(network, laddr)
+}
+
+const resolveWait = 4 * time.Second

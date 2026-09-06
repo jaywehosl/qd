@@ -118,6 +118,18 @@ public class SettingsPage {
         }
         page.addView(guard, skin.gap(14));
 
+        LinearLayout diag = skin.card();
+        diag.addView(skin.label("Журнал", skin.text, 17));
+        final TextView told = skin.note("");
+        action(diag, "Выгрузить журнал в Загрузки", skin.good).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                told.setText(saveJournal());
+            }
+        });
+        diag.addView(told);
+        page.addView(diag, skin.gap(14));
+
         LinearLayout danger = skin.card();
         danger.addView(skin.label("Сброс", skin.text, 17));
 
@@ -458,5 +470,59 @@ public class SettingsPage {
 
     private static String date(long ms) {
         return android.text.format.DateFormat.format("dd.MM.yyyy", ms).toString();
+    }
+
+    private String saveJournal() {
+        java.io.File from = null;
+        try {
+            Client client = Core.client(host);
+            String path = client.logPath();
+            if (path == null || path.isEmpty()) {
+                return "Журнал не ведётся";
+            }
+            from = new java.io.File(path);
+            if (!from.exists() || from.length() == 0) {
+                return "Журнал пуст";
+            }
+        } catch (Exception e) {
+            return "Журнал недоступен: " + e.getMessage();
+        }
+
+        String name = "qd-" + android.text.format.DateFormat
+                .format("MMdd-HHmmss", System.currentTimeMillis()) + ".log";
+        try {
+            android.content.ContentValues row = new android.content.ContentValues();
+            row.put(android.provider.MediaStore.Downloads.DISPLAY_NAME, name);
+            row.put(android.provider.MediaStore.Downloads.MIME_TYPE, "text/plain");
+            row.put(android.provider.MediaStore.Downloads.RELATIVE_PATH,
+                    android.os.Environment.DIRECTORY_DOWNLOADS);
+
+            android.net.Uri put = host.getContentResolver().insert(
+                    android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, row);
+            if (put == null) {
+                return "Не удалось создать файл";
+            }
+
+            java.io.OutputStream out = host.getContentResolver().openOutputStream(put);
+            byte[] buf = new byte[8192];
+            long written = 0;
+            for (java.io.File part : new java.io.File[]{
+                    new java.io.File(from.getPath() + ".1"), from}) {
+                if (!part.exists()) {
+                    continue;
+                }
+                java.io.InputStream in = new java.io.FileInputStream(part);
+                int n;
+                while ((n = in.read(buf)) > 0) {
+                    out.write(buf, 0, n);
+                    written += n;
+                }
+                in.close();
+            }
+            out.close();
+            return "Загрузки/" + name + " (" + (written / 1024) + " КБ)";
+        } catch (Exception e) {
+            return "Не сохранилось: " + e.getMessage();
+        }
     }
 }

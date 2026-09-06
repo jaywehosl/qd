@@ -51,10 +51,9 @@ type controlState struct {
 	logs       *logRing
 	restart    func()
 
-	netKey   *qdcrypt.Key
-	dnsUp    string
-	dnsDown  string
-	saidExit string
+	netKey  *qdcrypt.Key
+	dnsUp   string
+	dnsDown string
 
 	node     *qsrv.Node
 	sessions *sessionMap
@@ -742,20 +741,6 @@ func read[T any](req request, list func() ([]T, error)) response {
 		return response{OK: false, Error: err.Error()}
 	}
 	return reply(req, rows)
-}
-
-func save[T any](state *controlState, req request, write func(T, int64) (int, error)) response {
-	var row T
-	if err := json.Unmarshal(req.Body, &row); err != nil {
-		return response{OK: false, Error: err.Error()}
-	}
-	now := time.Now().UnixMilli()
-	id, err := write(row, now)
-	if err != nil {
-		return response{OK: false, Error: err.Error()}
-	}
-	revision, _ := state.db.Settle(wanted(req), now)
-	return reply(req, map[string]int{"id": id, "revision": revision})
 }
 
 func (state *controlState) followPort() {

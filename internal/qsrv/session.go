@@ -165,3 +165,70 @@ func (h *held) quic() *quic.Conn {
 	}
 	return h.conn
 }
+
+// counting находит сессию, которой принадлежит этот флоу. Клиент на QUIC уже
+// заведён connect-ip'ом; сосед по сети — транзитом; клиент, пришедший стримом,
+// заводится здесь, иначе его трафик не считает никто и в панели он висит
+// подключённым без единого байта.
+func (n *Node) counting(grant Grant, r *http.Request, route string) *live {
+	n.mu.Lock()
+	s := n.held[grant.Seat]
+	n.mu.Unlock()
+	if s != nil {
+		return s
+	}
+	if sessionOf(r.Context()).quic() != nil {
+		return n.peerSession(grant)
+	}
+	return n.streamSession(grant, r, route)
+}
+
+func (n *Node) streamSession(grant Grant, r *http.Request, route string) *live {
+	if grant.Seat == 0 {
+		return nil
+	}
+
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	if s := n.held[grant.Seat]; s != nil {
+		return s
+	}
+
+	now := time.Now().Unix()
+	s := &live{
+		grant:   grant,
+		address: n.pool.stream(grant.Seat),
+		peer:    r.RemoteAddr,
+		since:   now,
+		stream:  true,
+	}
+	s.lastSeen.Store(now)
+	s.route.Store(&route)
+	n.held[grant.Seat] = s
+	return s
+}
+
+// sweepStreams убирает стримовых клиентов, замолчавших надолго. У QUIC о конце
+// сессии сообщает само соединение, у стримового пути такого сигнала нет: клиент
+// просто перестаёт открывать флоу и здороваться.
+func (n *Node) sweepStreams(quiet time.Duration) {
+	cut := time.Now().Add(-quiet).Unix()
+
+	n.mu.Lock()
+	going := []*live{}
+	for seat, s := range n.held {
+		if s.stream && s.lastSeen.Load() < cut {
+			going = append(going, s)
+			delete(n.held, seat)
+		}
+	}
+	n.mu.Unlock()
+
+	for _, s := range going {
+		s.shutFlows()
+		n.links.forget(s.grant.Seat)
+	}
+}
+
+const streamQuiet = 2 * time.Minute

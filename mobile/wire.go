@@ -16,12 +16,10 @@ func (c *Client) keeper() func(fd uintptr) {
 		protector := c.protector
 		c.mu.Unlock()
 
-		if protector == nil {
+		if protector == nil || !c.Running() {
 			return
 		}
-		// Пока туннеля нет, отметка и не нужна: заворачивать трафик некуда.
-		// Жаловаться на это значит шуметь на каждом обращении к узлу.
-		if !protector.Protect(int(fd)) && c.Running() {
+		if !protector.Protect(int(fd)) {
 			say("socket: the system refused to keep fd %d out of the tunnel", fd)
 		}
 	}

@@ -20,9 +20,7 @@ package hybrid
 
 import (
 	"context"
-	"encoding/binary"
 	"log"
-	"net/netip"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -30,6 +28,7 @@ import (
 
 	quic "github.com/quic-go/quic-go"
 
+	"github.com/jaywehosl/quic-diver/internal/ippkt"
 	"github.com/jaywehosl/quic-diver/internal/qcli/engine"
 	"github.com/jaywehosl/quic-diver/internal/qcli/guard"
 	"github.com/jaywehosl/quic-diver/internal/qcli/packet"
@@ -51,12 +50,13 @@ type Engine struct {
 	tcpPool     sync.Pool // буферы TCP-моста; отдельный, чтобы пути не делили пул
 
 	cOutRecv, cTCP, cUDP, cBypass, cWriteErr, cOversize atomic.Uint64
-	loud                                               bool
+	loud                                                bool
 	cInRecv, cInject, cInErr                            atomic.Uint64
 
 	meter    *Meter
 	fast     atomic.Pointer[func()]
 	catchDNS atomic.Bool
+	streams  atomic.Bool
 	direct   atomic.Pointer[func([]byte) bool]
 	mark     atomic.Pointer[func([]byte) uint64]
 }
@@ -82,7 +82,9 @@ func New(g *guard.Guard, rw engine.Rewriter, ns *netstack.Stack, recvWorkers int
 
 // Run гоняет трафик до отмены ctx или фатальной ошибки.
 func (e *Engine) Run(ctx context.Context, src packet.Source, tun engine.PacketTunnel) error {
-	errc := make(chan error, 3)
+	// Канал вмещает всех пишущих: стек, каждый читатель захвата и насос
+	// входящих. Меньше — и лишние навсегда зависли бы на отправке.
+	errc := make(chan error, e.recvWorkers+2)
 
 	// Локальный стек обслуживает TCP: читает перехваченные TCP-пакеты из tt,
 	// терминирует флоу, ходит наружу CONNECT-стримами, а ответные пакеты пишет
@@ -116,6 +118,8 @@ func (e *Engine) Run(ctx context.Context, src packet.Source, tun engine.PacketTu
 		}()
 	}
 
+	defer e.ns.Load().Reset(tt, resetDrain)
+
 	go func() { errc <- e.ns.Load().Run(ctx, tt) }()
 
 	if ms, ok := src.(packet.MultiSource); ok && e.recvWorkers > 1 {
@@ -132,10 +136,12 @@ func (e *Engine) Run(ctx context.Context, src packet.Source, tun engine.PacketTu
 			e.pumpOutbound(ctx, src, tun, tt, errc)
 		}()
 	}
-	go func() {
-		defer e.hurry()()
-		e.pumpInbound(ctx, src, tun, errc)
-	}()
+	if !e.streams.Load() {
+		go func() {
+			defer e.hurry()()
+			e.pumpInbound(ctx, src, tun, errc)
+		}()
+	}
 	if e.loud {
 		go e.logStats(ctx, tt, src)
 	}
@@ -205,14 +211,14 @@ func (e *Engine) pumpOutboundReader(ctx context.Context, rd packet.Reader, src p
 		reinject = reinject[:0]
 		for i := range pkts {
 			p := &pkts[i]
-			dst, ok := dstAddr(p.Data)
+			dst, ok := ippkt.Dst(p.Data)
 			if !ok {
 				continue
 			}
 			// DNS решается раньше guard: системный резолвер обычно смотрит в
 			// локальную сеть (роутер), а её guard отпускает мимо туннеля — и запрос
 			// уходил к провайдеру. Забираем такие пакеты себе независимо от адреса.
-			catch := e.catchDNS.Load() && isDNS(p.Data)
+			catch := e.catchDNS.Load() && ippkt.IsDNS(p.Data)
 			if !catch {
 				if (e.guard != nil && e.guard.Bypass(dst)) || e.stepsAside(p.Data) {
 					e.cBypass.Add(1)
@@ -220,7 +226,7 @@ func (e *Engine) pumpOutboundReader(ctx context.Context, rd packet.Reader, src p
 					continue
 				}
 			}
-			if isTCP(p.Data) || catch {
+			if ippkt.IsTCP(p.Data) || catch || e.streams.Load() {
 				e.cTCP.Add(1)
 				e.meter.carried(len(p.Data))
 				tt.push(p.Data) // локальный стек терминирует и уедет CONNECT-стримом
@@ -339,11 +345,10 @@ func (e *Engine) prep(data []byte, batch *[]packet.Packet) {
 // секунду, и syscall на каждый (плюс аллокация) резал скорость втрое — upload,
 // которому инжект не нужен, всё это время выдавал полную линию.
 type tcpTunnel struct {
-	src     packet.Source
-	writers []packet.Writer // независимые инжекторы (по одному на поток)
-	ch      chan []byte     // перехват → стек
-	out     chan []byte     // стек → инжект (батчится в injector)
-	pool    *sync.Pool
+	src  packet.Source
+	ch   chan []byte // перехват → стек
+	out  chan []byte // стек → инжект (батчится в injector)
+	pool *sync.Pool
 
 	cPush, cDrop, cRead, cWrite, cWriteErr, cOutDrop, cBatches atomic.Uint64
 
@@ -457,59 +462,11 @@ func (t *tcpTunnel) injector(ctx context.Context, w packet.Writer) {
 	}
 }
 
-func isTCP(pkt []byte) bool {
-	if len(pkt) < 1 {
-		return false
-	}
-	switch pkt[0] >> 4 {
-	case 4:
-		return len(pkt) >= 20 && pkt[9] == 6
-	case 6:
-		return len(pkt) >= 40 && pkt[6] == 6
-	}
-	return false
-}
-
-func dstAddr(b []byte) (netip.Addr, bool) {
-	if len(b) < 1 {
-		return netip.Addr{}, false
-	}
-	switch b[0] >> 4 {
-	case 4:
-		if len(b) < 20 {
-			return netip.Addr{}, false
-		}
-		return netip.AddrFrom4([4]byte(b[16:20])), true
-	case 6:
-		if len(b) < 40 {
-			return netip.Addr{}, false
-		}
-		return netip.AddrFrom16([16]byte(b[24:40])), true
-	}
-	return netip.Addr{}, false
-}
-
 var _ engine.Engine = (*Engine)(nil)
 
-func isDNS(pkt []byte) bool {
-	var proto byte
-	var rest []byte
-	switch {
-	case len(pkt) >= 20 && pkt[0]>>4 == 4:
-		head := int(pkt[0]&0x0f) * 4
-		if head < 20 || len(pkt) < head+8 {
-			return false
-		}
-		proto, rest = pkt[9], pkt[head:]
-	case len(pkt) >= 48 && pkt[0]>>4 == 6:
-		proto, rest = pkt[6], pkt[40:]
-	default:
-		return false
-	}
-	return proto == 17 && binary.BigEndian.Uint16(rest[2:4]) == 53
-}
-
 func (e *Engine) CatchDNS(on bool) { e.catchDNS.Store(on) }
+
+func (e *Engine) Streams(on bool) { e.streams.Store(on) }
 
 func (e *Engine) Direct(fn func(pkt []byte) bool) { e.direct.Store(&fn) }
 
@@ -552,3 +509,5 @@ func (e *Engine) hurry() func() {
 	(*held)()
 	return runtime.UnlockOSThread
 }
+
+const resetDrain = 300 * time.Millisecond

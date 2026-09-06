@@ -13,6 +13,8 @@ import qdmobile.Qdmobile;
 
 public final class Core {
 
+    static final boolean ONLY_TCP = false;
+
     private static Client client;
     private static volatile boolean up;
     private static volatile String where = "";
@@ -86,9 +88,8 @@ public final class Core {
                     Build.MODEL,
                     Build.MANUFACTURER + " " + Build.MODEL);
 
-            boolean loud = (context.getApplicationInfo().flags
-                    & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0;
-            client.verbose(loud);
+            client.verbose(true);
+            client.onlyTCP(ONLY_TCP);
         }
         return client;
     }

@@ -293,10 +293,6 @@ func (s *Stack) handleUDP(r *udp.ForwarderRequest) {
 // Нужен вызывающему, чтобы оборвать один флоу, не трогая остальные.
 func (s *Stack) OnFlow(fn func(port uint16, shut io.Closer)) { s.opened = fn }
 
-// keepFlow заносит живой разговор в реестр. Правило маршрутизации решается один
-// раз при дозвоне, поэтому изменить дорогу уже открытому флоу нельзя — его надо
-// оборвать, чтобы приложение набрало заново. Без реестра рвать было нечего:
-// снаружи оставался только грубый разрыв в стеке ОС, а на телефоне и его нет.
 func (s *Stack) keepFlow(f Flow, shut io.Closer) uint64 {
 	id := s.nextFlow.Add(1)
 	s.flows.Store(id, liveFlow{flow: f, shut: shut})
@@ -305,7 +301,6 @@ func (s *Stack) keepFlow(f Flow, shut io.Closer) uint64 {
 
 func (s *Stack) dropFlow(id uint64) { s.flows.Delete(id) }
 
-// ShutFlows обрывает флоу, на которые указал take. Возвращает, сколько оборвал.
 func (s *Stack) ShutFlows(take func(Flow) bool) int {
 	shut := 0
 	s.flows.Range(func(id, held any) bool {

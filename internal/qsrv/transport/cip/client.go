@@ -163,6 +163,7 @@ const (
 	tokenHeader  = "Qd-Token"
 	routeHeader  = "Qd-Route"
 	deviceHeader = "Qd-Device"
+	addrHeader   = "Qd-Addr"
 	hereExit     = "here"
 )
 

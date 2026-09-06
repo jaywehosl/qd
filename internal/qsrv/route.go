@@ -8,6 +8,7 @@ const (
 	HeaderSeat   = "Qd-Seat"
 	HeaderProto  = "Qd-Proto"
 	HeaderDevice = "Qd-Device"
+	HeaderAddr   = "Qd-Addr"
 
 	AnyExit  = "egress"
 	HereExit = "here"
@@ -29,19 +30,6 @@ func (n *Node) peers() []Peer {
 		return nil
 	}
 	return n.cfg.Peers()
-}
-
-func (n *Node) pickPeer(tag string) Peer {
-	peers := n.peers()
-	for _, p := range peers {
-		if p.ID == tag || p.Tag == tag {
-			return p
-		}
-	}
-	if tag != AnyExit || len(peers) == 0 {
-		return Peer{}
-	}
-	return peers[int(n.turn.Add(1))%len(peers)]
 }
 
 func settled(route string) string {

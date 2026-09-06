@@ -155,6 +155,11 @@ func pathAnswers(ctx context.Context, live *qcli.Tunnel) bool {
 // migrate просит QUIC переехать на новый путь. Смена сети редко бывает мгновенной:
 // адрес уже другой, а маршрут или DHCP ещё нет, поэтому одной попытки мало.
 func migrate(ctx context.Context, live *qcli.Tunnel) {
+	if !live.CanMigrate() {
+		fmt.Printf("roam     this path does not migrate, bringing the tunnel up again\n")
+		return
+	}
+
 	for try := 1; try <= roamTries; try++ {
 		round, done := context.WithTimeout(ctx, roamWait)
 		err := live.Rebind(round)

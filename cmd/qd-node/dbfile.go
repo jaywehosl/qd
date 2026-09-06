@@ -14,7 +14,6 @@ import (
 	"github.com/jaywehosl/quic-diver/internal/store"
 )
 
-
 func (state *controlState) dbRead(req request) response {
 	var body struct {
 		Offset int64 `json:"offset"`

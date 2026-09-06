@@ -67,17 +67,6 @@ func (a *API) Routes(mux *http.ServeMux) {
 	a.restRoutes(mux)
 }
 
-func (a *API) list(op string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		body, err := a.fleet.Read(op, nil)
-		if err != nil {
-			sendFail(w, err)
-			return
-		}
-		raw(w, body)
-	}
-}
-
 func (a *API) save(op string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var row map[string]any

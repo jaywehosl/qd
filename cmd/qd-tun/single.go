@@ -46,7 +46,7 @@ func answerKnocks(show func(), stop <-chan struct{}) {
 	if err != nil {
 		return
 	}
-	handle, err := windows.CreateEvent(nil, 0, 0, name)
+	handle, _ := windows.CreateEvent(nil, 0, 0, name)
 	if handle == 0 {
 		return
 	}

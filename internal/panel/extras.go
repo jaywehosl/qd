@@ -323,10 +323,6 @@ func emptyObject(w http.ResponseWriter, r *http.Request) {
 	sendOK(w, map[string]any{})
 }
 
-func emptyList(w http.ResponseWriter, r *http.Request) {
-	sendOK(w, []any{})
-}
-
 func (a *API) entrypointsList(w http.ResponseWriter, r *http.Request) {
 	rows, err := a.entrypoints()
 	if err != nil {

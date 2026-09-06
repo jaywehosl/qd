@@ -17,17 +17,42 @@ type pool struct {
 	// заново десятки раз за вечер (переподключение, гонка входов, смена сети), и
 	// без этой памяти каждый раз выдавался бы новый адрес: журнал адресов пух бы
 	// на ровном месте, а один клиент выглядел бы двадцатью.
-	mine map[uint32]netip.Addr
+	mine    map[uint32]netip.Addr
+	streams netip.Prefix
 }
 
 func newPool(prefix netip.Prefix) *pool {
-	first := prefix.Addr().Next()
 	return &pool{
-		base:  prefix,
-		next:  first,
-		taken: map[netip.Addr]struct{}{},
-		mine:  map[uint32]netip.Addr{},
+		base:    prefix,
+		next:    prefix.Addr().Next(),
+		taken:   map[netip.Addr]struct{}{},
+		mine:    map[uint32]netip.Addr{},
+		streams: streamTail(prefix),
 	}
+}
+
+func streamTail(base netip.Prefix) netip.Prefix {
+	if !base.Addr().Is4() || base.Bits() > 24 {
+		return netip.Prefix{}
+	}
+	raw := base.Masked().Addr().As4()
+	first := uint32(raw[0])<<24 | uint32(raw[1])<<16 | uint32(raw[2])<<8 | uint32(raw[3])
+	span := uint32(1)<<uint(32-base.Bits()) - 1
+	top := (first | span) &^ 0xFF
+	return netip.PrefixFrom(netip.AddrFrom4([4]byte{
+		byte(top >> 24), byte(top >> 16), byte(top >> 8), byte(top),
+	}), 24)
+}
+
+func (p *pool) stream(seat uint32) netip.Prefix {
+	if !p.streams.IsValid() {
+		addr := netip.AddrFrom4([4]byte{10, 7, 255, 254})
+		return netip.PrefixFrom(addr, addr.BitLen())
+	}
+	raw := p.streams.Addr().As4()
+	raw[3] = byte(seat%254) + 1
+	addr := netip.AddrFrom4(raw)
+	return netip.PrefixFrom(addr, addr.BitLen())
 }
 
 // take выдаёт адрес сессии: тот же, что и раньше, если он свободен.
@@ -36,7 +61,7 @@ func (p *pool) take(session uint32) (netip.Prefix, error) {
 	defer p.mu.Unlock()
 
 	if was, ok := p.mine[session]; ok {
-		if _, busy := p.taken[was]; !busy {
+		if _, busy := p.taken[was]; !busy && !p.streams.Contains(was) {
 			p.taken[was] = struct{}{}
 			return netip.PrefixFrom(was, was.BitLen()), nil
 		}
@@ -47,6 +72,9 @@ func (p *pool) take(session uint32) (netip.Prefix, error) {
 		p.next = p.next.Next()
 		if !p.base.Contains(addr) {
 			p.next = p.base.Addr().Next()
+			continue
+		}
+		if p.streams.IsValid() && p.streams.Contains(addr) {
 			continue
 		}
 		if _, busy := p.taken[addr]; busy {
@@ -60,14 +88,9 @@ func (p *pool) take(session uint32) (netip.Prefix, error) {
 	}
 	return netip.Prefix{}, ErrPoolFull
 }
+
 func (p *pool) give(prefix netip.Prefix) {
 	p.mu.Lock()
 	delete(p.taken, prefix.Addr())
 	p.mu.Unlock()
-}
-
-func (p *pool) held() int {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return len(p.taken)
 }

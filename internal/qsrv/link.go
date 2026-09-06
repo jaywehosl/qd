@@ -317,6 +317,9 @@ func (ls *links) sweep(quiet time.Duration) {
 		}
 		idle = append(idle, l)
 		delete(ls.held, where)
+		if ls.won[l.seat] == l.endpoint {
+			delete(ls.won, l.seat)
+		}
 	}
 	ls.mu.Unlock()
 
@@ -338,6 +341,7 @@ func (n *Node) sweepLinks(ctx context.Context) {
 			return
 		case <-tick.C:
 			n.links.sweep(linkQuiet)
+			n.sweepStreams(streamQuiet)
 		}
 	}
 }

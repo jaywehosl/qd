@@ -75,22 +75,6 @@ func (state *controlState) deviceLimit(client netstate.Client) int {
 	return 0
 }
 
-func (state *controlState) clientByKey(token string) (netstate.Client, bool) {
-	if token == "" {
-		return netstate.Client{}, false
-	}
-	clients, err := state.db.Clients()
-	if err != nil {
-		return netstate.Client{}, false
-	}
-	for _, c := range clients {
-		if c.UUID == token {
-			return c, true
-		}
-	}
-	return netstate.Client{}, false
-}
-
 func (state *controlState) mayExit(client netstate.Client) bool {
 	if client.AllowExit != netstate.ExitInherit {
 		return client.MayExit(nil)

@@ -45,18 +45,6 @@ type groupView struct {
 	err  error
 }
 
-func (a *API) groupNameByID() (map[int]string, error) {
-	rows, err := a.groups()
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[int]string, len(rows))
-	for _, g := range rows {
-		out[g.ID] = g.Name
-	}
-	return out, nil
-}
-
 func (a *API) groupIDByName() (map[string]int, error) {
 	rows, err := a.groups()
 	if err != nil {

@@ -25,8 +25,6 @@ func (a *API) opsRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/panel/api/server/sync", a.syncNetwork)
 }
 
-// restartAll просит узлы перезапуститься. Оборванный ответ здесь — не отказ:
-// узел закрывает соединение ровно потому, что делает то, о чём попросили.
 func (a *API) restartAll(w http.ResponseWriter, r *http.Request) {
 	results, err := a.write("restart", nil)
 	if len(results) == 0 {
@@ -49,8 +47,6 @@ func (a *API) restartAll(w http.ResponseWriter, r *http.Request) {
 	sendOK(w, map[string]any{"nodes": results})
 }
 
-// brokeOffRestarting — обрыв соединения посреди ответа. Узел уже подменил свой
-// образ, договорить ему нечем, и жаловаться тут не на что.
 func brokeOffRestarting(text string) bool {
 	for _, mark := range []string{
 		"H3_NO_ERROR", "H3x0", "close", "closed", "EOF",

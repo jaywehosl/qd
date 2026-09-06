@@ -567,11 +567,47 @@ Restart=on-failure
 RestartSec=3
 WorkingDirectory=$PREFIX
 LimitMEMLOCK=infinity
+LogRateLimitIntervalSec=0
 
 [Install]
 WantedBy=multi-user.target
 UNITFILE
     systemctl daemon-reload
+}
+
+cap_journal() {
+    mkdir -p /etc/systemd/journald.conf.d
+    cat >/etc/systemd/journald.conf.d/qd.conf <<'JOURNALCONF'
+[Journal]
+SystemMaxUse=200M
+SystemMaxFileSize=20M
+JOURNALCONF
+
+    mkdir -p "/etc/systemd/system/$SERVICE.d"
+    cat >"/etc/systemd/system/$SERVICE.d/journal.conf" <<'UNITJOURNAL'
+[Service]
+LogsDirectoryMode=0750
+UNITJOURNAL
+
+    systemctl restart systemd-journald >/dev/null 2>&1 || true
+    journalctl --vacuum-size=200M >/dev/null 2>&1 || true
+    say "journal capped at 200M"
+}
+
+tune_buffers() {
+    local want=4194304
+    local now
+    now=$(sysctl -n net.core.rmem_max 2>/dev/null || echo 0)
+    if [ "$now" -ge "$want" ]; then
+        return 0
+    fi
+
+    cat >/etc/sysctl.d/99-qd.conf <<SYSCTLCONF
+net.core.rmem_max = $want
+net.core.wmem_max = $want
+SYSCTLCONF
+    sysctl -p /etc/sysctl.d/99-qd.conf >/dev/null 2>&1 || true
+    say "socket buffer ceiling raised from $now to $(sysctl -n net.core.rmem_max 2>/dev/null)"
 }
 
 install_files() {
@@ -743,6 +779,8 @@ do_install() {
     local out; out="$(initialise_database)"
     install_files
     write_unit
+    cap_journal
+    tune_buffers
     open_firewall "$PORT"
 
     step "starting"
@@ -813,6 +851,8 @@ do_update() {
     backup_database
     install_files
     write_unit
+    cap_journal
+    tune_buffers
     systemctl start "$SERVICE" 2>/dev/null || true
 
     if wait_healthy "$port"; then

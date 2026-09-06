@@ -16,8 +16,6 @@ type logRing struct {
 	max   int
 }
 
-var realStderr = os.Stderr
-
 func captureOutput(max int) *logRing {
 	ring := &logRing{max: max}
 
@@ -25,8 +23,7 @@ func captureOutput(max int) *logRing {
 	if err != nil {
 		return ring
 	}
-	real := os.Stdout
-	realStderr = real
+	console := os.Stdout
 	os.Stdout = write
 	os.Stderr = write
 
@@ -35,7 +32,7 @@ func captureOutput(max int) *logRing {
 		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 		for scanner.Scan() {
 			line := scanner.Text()
-			real.WriteString(line + "\n")
+			console.WriteString(line + "\n")
 			ring.add(time.Now().UTC().Format("2006/01/02 15:04:05") + " " + level(line) + " - " + line)
 		}
 	}()

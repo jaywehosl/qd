@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/netip"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	connectip "github.com/quic-go/connect-ip-go"
@@ -183,8 +184,7 @@ func (n *Node) serveConnect(w http.ResponseWriter, r *http.Request) {
 	grant, ok := n.carrier(r)
 	if !ok {
 		n.refused.Add(1)
-		n.cfg.Log("flow      refused a CONNECT to %s: no seat", r.Host)
-		w.WriteHeader(http.StatusProxyAuthRequired)
+		n.site.ServeHTTP(w, r)
 		return
 	}
 
@@ -222,6 +222,7 @@ func (n *Node) serveConnect(w http.ResponseWriter, r *http.Request) {
 
 	dialCtx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	dialer := n.dialerFor(dialCtx, grant, route, hops)
+	s := n.counting(grant, r, route)
 
 	if r.Header.Get(HeaderProto) == "udp" {
 		out, err := dialer.DialUDP(dialCtx, dst)
@@ -230,7 +231,7 @@ func (n *Node) serveConnect(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadGateway)
 			return
 		}
-		n.relayPackets(w, r, out)
+		n.relayPackets(w, r, out, s)
 		return
 	}
 
@@ -251,30 +252,16 @@ func (n *Node) serveConnect(w http.ResponseWriter, r *http.Request) {
 		f.Flush()
 	}
 
-	n.mu.Lock()
-	s := n.held[grant.Seat]
-	n.mu.Unlock()
-	if s == nil {
-		s = n.peerSession(grant)
-	}
-
 	done := make(chan struct{})
 	go func() {
-		written, _ := io.Copy(out, r.Body)
-		if s != nil {
-			s.up.Add(uint64(written))
-			s.lastSeen.Store(time.Now().Unix())
-		}
+		io.Copy(tallied(out, s, upOf), r.Body)
 		if cw, ok := out.(interface{ CloseWrite() error }); ok {
 			cw.CloseWrite()
 		}
 		close(done)
 	}()
 
-	read, _ := io.Copy(flushWriter{w}, out)
-	if s != nil {
-		s.down.Add(uint64(read))
-	}
+	io.Copy(tallied(flushWriter{w}, s, downOf), out)
 	<-done
 }
 
@@ -314,13 +301,19 @@ func (d steered) route(ctx context.Context) string {
 	return d.s.heading()
 }
 
-func (n *Node) relayPackets(w http.ResponseWriter, r *http.Request, out net.Conn) {
+// relayPackets несёт UDP-флоу поверх стрима. Живёт по тишине: настоящий UDP
+// никогда не отдаёт EOF, и без этого срока сокет на выходе оставался открытым до
+// смерти всего соединения — так узел и набирал тысячу висящих сокетов.
+func (n *Node) relayPackets(w http.ResponseWriter, r *http.Request, out net.Conn, s *live) {
 	defer out.Close()
 
 	w.WriteHeader(http.StatusOK)
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
 	}
+
+	var lastOut atomic.Int64
+	lastOut.Store(time.Now().UnixNano())
 
 	done := make(chan struct{})
 	go func() {
@@ -338,14 +331,25 @@ func (n *Node) relayPackets(w http.ResponseWriter, r *http.Request, out net.Conn
 			if _, err := out.Write(buf[:want]); err != nil {
 				return
 			}
+			lastOut.Store(time.Now().UnixNano())
+			if s != nil {
+				s.up.Add(uint64(want))
+				s.pktUp.Add(1)
+				s.lastSeen.Store(time.Now().Unix())
+			}
 		}
 	}()
 
 	var head [2]byte
 	buf := make([]byte, 65535)
 	for {
+		out.SetReadDeadline(time.Now().Add(flowQuiet))
 		read, err := out.Read(buf)
 		if err != nil {
+			if quiet, ok := err.(net.Error); ok && quiet.Timeout() &&
+				time.Since(time.Unix(0, lastOut.Load())) < flowQuiet {
+				continue
+			}
 			break
 		}
 		binary.BigEndian.PutUint16(head[:], uint16(read))
@@ -358,6 +362,41 @@ func (n *Node) relayPackets(w http.ResponseWriter, r *http.Request, out net.Conn
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()
 		}
+		if s != nil {
+			s.down.Add(uint64(read))
+			s.pktDown.Add(1)
+			s.lastSeen.Store(time.Now().Unix())
+		}
 	}
 	<-done
 }
+
+const flowQuiet = 60 * time.Second
+
+// tally считает байты по мере того, как они идут. Раньше счёт приписывался
+// сессии только после конца потока: длинная закачка все свои минуты выглядела
+// нулевой, а сессия — молчащей.
+type tally struct {
+	to   io.Writer
+	sum  *atomic.Uint64
+	seen *atomic.Int64
+}
+
+func (t tally) Write(p []byte) (int, error) {
+	n, err := t.to.Write(p)
+	if n > 0 && t.sum != nil {
+		t.sum.Add(uint64(n))
+		t.seen.Store(time.Now().Unix())
+	}
+	return n, err
+}
+
+func tallied(to io.Writer, s *live, sum func(*live) *atomic.Uint64) io.Writer {
+	if s == nil {
+		return to
+	}
+	return tally{to: to, sum: sum(s), seen: &s.lastSeen}
+}
+
+func upOf(s *live) *atomic.Uint64   { return &s.up }
+func downOf(s *live) *atomic.Uint64 { return &s.down }

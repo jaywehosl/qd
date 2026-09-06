@@ -142,10 +142,6 @@ func (r *procRouter) forgetFlows() {
 
 func (r *procRouter) Active() bool { return r.active.Load() }
 
-// RoleFor отвечает на вопрос обхода и зовётся из потока захвата, на каждый
-// пакет. Ждать здесь нельзя, поэтому решение первого пакета фиксируется как
-// есть: пустить уже начатый разговор другой дорогой значит оборвать его чужим
-// сбросом.
 func (r *procRouter) RoleFor(pkt []byte) string {
 	if held := r.fixed.Load(); held != nil {
 		return *held
@@ -165,13 +161,6 @@ func (r *procRouter) RoleFor(pkt []byte) string {
 	return role
 }
 
-// RoleForFlow отвечает на вопрос выхода и зовётся при дозвоне, в своей горутине.
-// Там можно подождать хозяина: событие сокета и первый пакет идут разными
-// хэндлами драйвера, и порядок между ними не обещан.
-//
-// Кэш у этого вопроса свой. Общий с обходом не годился: поток захвата спрашивал
-// первым и на промахе записывал «не знаю», а дозвон находил готовый ответ и
-// хозяина уже не ждал — ожидание не срабатывало ни разу.
 func (r *procRouter) RoleForFlow(proto uint8, port uint16, dst netip.Addr) string {
 	if held := r.fixed.Load(); held != nil {
 		return *held
@@ -190,8 +179,6 @@ func (r *procRouter) RoleForFlow(proto uint8, port uint16, dst netip.Addr) strin
 	return role
 }
 
-// awaitOwner ждёт хозяина сокета недолго и молча сдаётся: лучше увезти флоу по
-// роли по умолчанию, чем держать дозвон.
 func (r *procRouter) awaitOwner(key portKey) (uint32, bool) {
 	for waited := time.Duration(0); ; waited += ownerStep {
 		if pid, ok := r.pidFor(key); ok {
@@ -340,8 +327,6 @@ func (r *procRouter) watchSockets(ctx context.Context, dll string) {
 	}
 }
 
-// tellMisses называет промахи атрибуции: флоу, чей хозяин так и не нашёлся,
-// уезжает по роли по умолчанию — молча это выглядит как «правило не работает».
 func (r *procRouter) tellMisses(stop <-chan struct{}) {
 	tick := time.NewTicker(30 * time.Second)
 	defer tick.Stop()

@@ -3,7 +3,6 @@ package qsrv
 import (
 	"context"
 	"crypto/tls"
-	"encoding/binary"
 	"fmt"
 	"io"
 	"log"
@@ -19,6 +18,7 @@ import (
 	"github.com/quic-go/quic-go/http3"
 	"github.com/yosida95/uritemplate/v3"
 
+	"github.com/jaywehosl/quic-diver/internal/ippkt"
 	"github.com/jaywehosl/quic-diver/internal/qsrv/server/decoy"
 )
 
@@ -110,9 +110,9 @@ type live struct {
 	conn    *quic.Conn
 	since   int64
 	transit bool
+	stream  bool
 
 	route  atomic.Pointer[string]
-	swap   chan struct{}
 	marks  sync.Map
 	marked atomic.Int64
 	flows  sync.Map
@@ -132,7 +132,6 @@ type Node struct {
 	tmpl  *uritemplate.Template
 	site  http.Handler
 
-	turn     atomic.Uint64
 	exitTag  atomic.Pointer[string]
 	transits atomic.Uint64
 	refused  atomic.Uint64
@@ -355,7 +354,7 @@ func (n *Node) Run(ctx context.Context) error {
 		srv.Close()
 	}()
 
-	go n.serveSite(ctx, srv)
+	go n.serveSite(ctx, srv, handler)
 	go n.sweepLinks(ctx)
 
 	n.cfg.Log("quic      listening on %s, authority %s", n.cfg.Listen, n.cfg.Authority)
@@ -389,17 +388,21 @@ func (n *Node) serveAuth(w http.ResponseWriter, r *http.Request) {
 	sessionOf(r.Context()).steer(route)
 
 	n.mu.Lock()
+	s := n.held[grant.Seat]
+	n.mu.Unlock()
+
 	turned := false
-	if s := n.held[grant.Seat]; s != nil {
+	if s != nil {
+		s.lastSeen.Store(time.Now().Unix())
 		turned = s.steer(route)
 	}
-	n.mu.Unlock()
 
 	if turned {
 		n.cfg.Log("quic      %s now steers to %q", grant.Client, route)
 		n.links.forget(grant.Seat)
 	}
 
+	w.Header().Set(HeaderAddr, n.pool.stream(grant.Seat).String())
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -454,7 +457,7 @@ func (s *live) heading() string {
 }
 
 func (s *live) noteMark(pkt []byte, mark uint64) {
-	port, ok := sourcePort(pkt)
+	port, ok := ippkt.SrcPort(pkt)
 	if !ok {
 		return
 	}
@@ -496,27 +499,6 @@ func (s *live) markOf(port uint16) uint64 {
 	return MarkHere
 }
 
-func sourcePort(pkt []byte) (uint16, bool) {
-	var proto byte
-	var rest []byte
-	switch {
-	case len(pkt) >= 20 && pkt[0]>>4 == 4:
-		head := int(pkt[0]&0x0f) * 4
-		if head < 20 || len(pkt) < head+4 {
-			return 0, false
-		}
-		proto, rest = pkt[9], pkt[head:]
-	case len(pkt) >= 44 && pkt[0]>>4 == 6:
-		proto, rest = pkt[6], pkt[40:]
-	default:
-		return 0, false
-	}
-	if proto != 6 && proto != 17 {
-		return 0, false
-	}
-	return binary.BigEndian.Uint16(rest[0:2]), true
-}
-
 func (s *live) forgetStaleMarks() {
 	s.marks.Range(func(k, _ any) bool {
 		s.marks.Delete(k)
@@ -530,7 +512,7 @@ const markCeiling = 4096
 // serveSite держит на том же порту обычный HTTPS. Узел говорит по QUIC, но порт
 // без TCP выдаёт себя: у настоящего сайта TCP отвечает всегда. Здесь он отдаёт
 // только decoy — служебные пути живут в HTTP/3 и снаружи не видны.
-func (n *Node) serveSite(ctx context.Context, quicSrv *http3.Server) {
+func (n *Node) serveSite(ctx context.Context, quicSrv *http3.Server, served http.Handler) {
 	conf := n.cfg.TLS.Clone()
 	conf.NextProtos = []string{"h2", "http/1.1"}
 
@@ -544,8 +526,11 @@ func (n *Node) serveSite(ctx context.Context, quicSrv *http3.Server) {
 	site := &http.Server{
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			quicSrv.SetQUICHeaders(w.Header())
-			n.site.ServeHTTP(w, r)
+			served.ServeHTTP(w, r)
 		}),
+		ConnContext: func(ctx context.Context, _ net.Conn) context.Context {
+			return newSessionContext(ctx, nil)
+		},
 		ReadHeaderTimeout: 10 * time.Second,
 		// Открытый 443 сканируют круглосуточно: чужой мусор вместо TLS — не наша
 		// ошибка, а в журнале он топит настоящие.

@@ -24,8 +24,6 @@ type dnsStats struct {
 }
 
 type resolver struct {
-	said atomic.Uint64
-
 	conn  *net.UDPConn
 	node  atomic.Pointer[string]
 	token string

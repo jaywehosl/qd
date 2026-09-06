@@ -3,7 +3,6 @@ package qsrv
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/quic-go/quic-go/http3"
@@ -37,19 +36,12 @@ func (n *Node) raceExit(ctx context.Context, route string, seat uint32) (*http3.
 	}
 	line := make(chan finish, len(runners))
 
-	var once sync.Once
-
 	for _, peer := range runners {
 		go func(p Peer) {
 			cc, err := n.links.to(p.Endpoint, seat).connect(round)
 			if err != nil {
 				line <- finish{err: err}
 				return
-			}
-			won := false
-			once.Do(func() { won = true })
-			if won {
-				n.links.chose(seat, p.Endpoint)
 			}
 			line <- finish{cc: cc, endpoint: p.Endpoint}
 		}(peer)
@@ -65,6 +57,10 @@ func (n *Node) raceExit(ctx context.Context, route string, seat uint32) (*http3.
 				last = got.err
 				continue
 			}
+			// Запоминает победителя тот, кто его выбрал. Пока это делала сама
+			// горутина, первой добежавшей до once, флоу мог уехать в другой узел:
+			// в памяти стоял один выход, работал второй.
+			n.links.chose(seat, got.endpoint)
 			return got.cc, got.endpoint, nil
 		}
 	}
