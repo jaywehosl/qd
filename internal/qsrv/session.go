@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"sync"
 	"time"
@@ -123,14 +124,9 @@ func (n *Node) peerSession(grant Grant) *live {
 		return held
 	}
 
-	now := time.Now().Unix()
-	s := &live{
-		grant:   Grant{Client: uuid, AllowExit: grant.AllowExit, Session: grant.Session, Seat: id},
-		peer:    uuid,
-		since:   now,
-		transit: true,
-	}
-	s.lastSeen.Store(now)
+	s := newLive(Grant{Client: uuid, AllowExit: grant.AllowExit,
+		Session: grant.Session, Seat: id}, netip.Prefix{}, uuid, "")
+	s.transit = true
 	n.held[id] = s
 	return s
 }
@@ -195,16 +191,8 @@ func (n *Node) streamSession(grant Grant, r *http.Request, route string) *live {
 		return s
 	}
 
-	now := time.Now().Unix()
-	s := &live{
-		grant:   grant,
-		address: n.pool.stream(grant.Seat),
-		peer:    r.RemoteAddr,
-		since:   now,
-		stream:  true,
-	}
-	s.lastSeen.Store(now)
-	s.route.Store(&route)
+	s := newLive(grant, n.pool.stream(grant.Seat), r.RemoteAddr, route)
+	s.stream = true
 	n.held[grant.Seat] = s
 	return s
 }
@@ -232,3 +220,14 @@ func (n *Node) sweepStreams(quiet time.Duration) {
 }
 
 const streamQuiet = 2 * time.Minute
+
+// newLive заводит сессию. Один конструктор на все три случая — connect-ip,
+// транзит соседа и стримовый клиент: пока их было три, каждый помнил свой набор
+// полей, и забытое lastSeen означало сессию, которую уборка считает молчащей.
+func newLive(grant Grant, address netip.Prefix, peer, route string) *live {
+	now := time.Now().Unix()
+	s := &live{grant: grant, address: address, peer: peer, since: now}
+	s.lastSeen.Store(now)
+	s.route.Store(&route)
+	return s
+}

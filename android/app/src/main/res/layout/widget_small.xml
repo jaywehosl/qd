@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- На двух клетках слово не помещается, поэтому его нет вовсе: остаётся плашка
+     как кнопка подключения и полноразмерный знак выхода. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_pill"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/note_pill_off">
+
+    <TextView
+        android:id="@+id/widget_text"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:visibility="gone" />
+
+    <ImageView
+        android:id="@+id/widget_egress"
+        android:layout_width="50dp"
+        android:layout_height="50dp"
+        android:layout_gravity="end|center_vertical"
+        android:layout_marginEnd="11dp"
+        android:padding="10dp"
+        android:background="@drawable/note_mark"
+        android:src="@drawable/ic_mark_off"
+        android:scaleType="fitCenter"
+        android:contentDescription="egress" />
+</FrameLayout>

@@ -202,7 +202,19 @@ func (c *Client) migrate(ctx context.Context) {
 
 var resolved sync.Map
 
+// lookUp узнаёт адреса узла, чтобы держать их мимо туннеля. Известное отдаётся
+// сразу, а обновляется в стороне: этот вызов стоит на пути дозвона, а системный
+// резолвер сразу после разрыва туннеля лежит и отвечает только по таймауту —
+// три секунды впустую на каждое нажатие.
 func lookUp(host string) []netip.Addr {
+	if held, known := resolved.Load(host); known {
+		go refresh(host)
+		return held.([]netip.Addr)
+	}
+	return refresh(host)
+}
+
+func refresh(host string) []netip.Addr {
 	ctx, stop := context.WithTimeout(context.Background(), lookWait)
 	defer stop()
 

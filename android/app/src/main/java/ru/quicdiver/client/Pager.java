@@ -28,6 +28,7 @@ public class Pager extends HorizontalScrollView {
     private float downX;
     private float downY;
     private boolean claiming;
+    private boolean yielding;
 
     public Pager(Context context) {
         super(context);
@@ -69,6 +70,12 @@ public class Pager extends HorizontalScrollView {
         glide(page);
     }
 
+    // Ширина страницы -- не ширина самого пейджера: по бокам живут отступы под
+    // вырез камеры, и в альбомной ориентации страницы разъезжались ровно на них.
+    private int span() {
+        return Math.max(1, getWidth() - getPaddingLeft() - getPaddingRight());
+    }
+
     public int page() {
         return page;
     }
@@ -79,13 +86,13 @@ public class Pager extends HorizontalScrollView {
         for (int i = 0; i < strip.getChildCount(); i++) {
             View child = strip.getChildAt(i);
             LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) child.getLayoutParams();
-            lp.width = w;
+            lp.width = Math.max(1, w - getPaddingLeft() - getPaddingRight());
             child.setLayoutParams(lp);
         }
         post(new Runnable() {
             @Override
             public void run() {
-                scrollTo(page * getWidth(), 0);
+                scrollTo(page * span(), 0);
             }
         });
     }
@@ -104,14 +111,20 @@ public class Pager extends HorizontalScrollView {
                 downX = event.getX();
                 downY = event.getY();
                 claiming = false;
+                yielding = false;
                 stopSettling();
                 from = nearest();
                 break;
             case MotionEvent.ACTION_MOVE:
-                if (!claiming) {
+                // Палец редко идёт строго вниз, и на первых пикселях боковое
+                // смещение легко обгоняет вертикальное. Как только вертикаль
+                // перевалила порог, жест до конца принадлежит странице.
+                if (!claiming && !yielding) {
                     float dx = Math.abs(event.getX() - downX);
                     float dy = Math.abs(event.getY() - downY);
-                    if (dx > slop && dx > dy * 1.2f) {
+                    if (dy > slop && dy >= dx) {
+                        yielding = true;
+                    } else if (dx > slop && dx > dy * 1.5f) {
                         claiming = true;
                     }
                 }
@@ -119,6 +132,7 @@ public class Pager extends HorizontalScrollView {
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
                 claiming = false;
+                yielding = false;
                 break;
         }
         return claiming || super.onInterceptTouchEvent(event);
@@ -141,8 +155,8 @@ public class Pager extends HorizontalScrollView {
     }
 
     private void settle(int velocity) {
-        int width = getWidth();
-        if (width == 0) {
+        int width = span();
+        if (getWidth() == 0) {
             return;
         }
 
@@ -162,7 +176,7 @@ public class Pager extends HorizontalScrollView {
         stopSettling();
         page = target;
 
-        int to = target * getWidth();
+        int to = target * span();
         if (getScrollX() == to) {
             return;
         }
@@ -181,15 +195,18 @@ public class Pager extends HorizontalScrollView {
     }
 
     private int nearest() {
-        int width = getWidth();
-        return width == 0 ? page : clamp((getScrollX() + width / 2) / width);
+        if (getWidth() == 0) {
+            return page;
+        }
+        int width = span();
+        return clamp((getScrollX() + width / 2) / width);
     }
 
     @Override
     protected void onScrollChanged(int l, int t, int oldl, int oldt) {
         super.onScrollChanged(l, t, oldl, oldt);
-        int width = getWidth();
-        if (width == 0 || onSettle == null) {
+        int width = span();
+        if (getWidth() == 0 || onSettle == null) {
             return;
         }
         if (l % width == 0) {

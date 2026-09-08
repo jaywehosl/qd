@@ -160,9 +160,20 @@
   border-radius: var(--radius-card);
   padding: var(--pad-card);
   box-sizing: border-box;
+  /* Wide and faint: the card should look lifted, not outlined. */
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.07), 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 
-html.is-dark .ds-card { border: 1px solid var(--edge); }
+/* A card that holds cards is a sheet, not a card: its own shadow would pile
+   onto theirs and smear the gap between them. */
+.ds-card:has(.ds-card) { box-shadow: none; }
+
+/* Inside a sheet the wide shadow would spill past its edge and read as the
+   sheet's own. Keep the lift, drop the reach. */
+.ds-card .ds-card { box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05); }
+
+/* On black a shadow has nothing to darken, so the edge carries the shape. */
+html.is-dark .ds-card { border: 1px solid var(--edge); box-shadow: none; }
 
 .ds-divider {
   height: 1px;

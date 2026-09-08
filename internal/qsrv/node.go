@@ -254,34 +254,35 @@ func (n *Node) Sessions() []Session {
 	return out
 }
 
-func (n *Node) Forget(id uint32) {
+// seatsOf собирает сессии, которых касается запрос панели. Идентификатор там
+// один, а значит два: панель знает клиента по подписке, узел держит сессии по
+// местам, и у одной подписки мест столько, сколько у неё устройств.
+func (n *Node) seatsOf(id uint32, drop bool) []*live {
 	n.mu.Lock()
+	defer n.mu.Unlock()
+
 	going := []*live{}
 	for seat, s := range n.held {
-		if seat == id || s.grant.Session == id {
-			going = append(going, s)
+		if seat != id && s.grant.Session != id {
+			continue
+		}
+		going = append(going, s)
+		if drop {
 			delete(n.held, seat)
 		}
 	}
-	n.mu.Unlock()
+	return going
+}
 
-	for _, s := range going {
+func (n *Node) Forget(id uint32) {
+	for _, s := range n.seatsOf(id, true) {
 		n.pool.give(s.address)
 		n.links.forget(s.grant.Seat)
 	}
 }
 
 func (n *Node) Reset(id uint32) {
-	n.mu.Lock()
-	going := []*live{}
-	for seat, s := range n.held {
-		if seat == id || s.grant.Session == id {
-			going = append(going, s)
-		}
-	}
-	n.mu.Unlock()
-
-	for _, s := range going {
+	for _, s := range n.seatsOf(id, false) {
 		s.up.Store(0)
 		s.down.Store(0)
 		s.pktUp.Store(0)
@@ -419,7 +420,7 @@ func (n *Node) ExitTag() string {
 
 func (n *Node) Probe(ctx context.Context, endpoint string) (int, error) {
 	began := time.Now()
-	if _, err := n.links.to(endpoint, 0).connect(ctx); err != nil {
+	if _, err := n.links.to(where{endpoint, 0}).connect(ctx); err != nil {
 		return -1, err
 	}
 	return int(time.Since(began).Milliseconds()), nil

@@ -34,7 +34,11 @@ type stint struct {
 	Checked   int64
 	Client    string
 	Device    string
-	Seen      []address
+	// devices — какие устройства подписки сейчас на связи. Запись присутствия
+	// одна на подписку, а устройств у неё несколько, и прощание одного не
+	// должно уводить в офлайн остальных.
+	devices map[string]int64
+	Seen    []address
 }
 
 type address struct {
@@ -76,19 +80,42 @@ func (p *presence) Joining(id uint32, fingerprint string) {
 	held.LastHeard = now
 	held.Checked = now
 	if fingerprint != "" {
+		if held.devices == nil {
+			held.devices = map[string]int64{}
+		}
+		held.devices[fingerprint] = now
 		held.Device = fingerprint
 	}
 }
 
-func (p *presence) Leaving(id uint32) {
+// Leaving убирает одно устройство. В офлайн подписка уходит, только когда
+// попрощались все: раньше уход любого гасил запись целиком, и отключение с
+// десктопа уводило в офлайн телефон.
+func (p *presence) Leaving(id uint32, fingerprint string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if held := p.stint[id]; held != nil {
-		held.Joined = false
-		held.Since = 0
-		held.LastHeard = time.Now().UnixMilli()
+	held := p.stint[id]
+	if held == nil {
+		return
 	}
+	held.LastHeard = time.Now().UnixMilli()
+
+	if fingerprint != "" && len(held.devices) > 0 {
+		delete(held.devices, fingerprint)
+		if len(held.devices) > 0 {
+			// Кто-то ещё на связи — показываем его.
+			for other := range held.devices {
+				held.Device = other
+				break
+			}
+			return
+		}
+	}
+
+	held.devices = nil
+	held.Joined = false
+	held.Since = 0
 }
 
 func (p *presence) Checked(id uint32, fingerprint string) {

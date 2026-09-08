@@ -21,6 +21,9 @@ const peerDialTimeout = 8 * time.Second
 type link struct {
 	flows atomic.Int64
 	quiet atomic.Int64
+	// won — эта связь выиграла гонку для своего места. Живёт здесь, а не в
+	// карте рядом: умирает вместе со связью и разойтись с ней не может.
+	won atomic.Bool
 
 	mu       sync.Mutex
 	endpoint string
@@ -144,44 +147,49 @@ func greetPeer(ctx context.Context, cc *http3.ClientConn, token, self string, se
 	return nil
 }
 
+// where — куда и для кого связь. Раньше ключом была склеенная строка, и она
+// строилась заново на каждом флоу; здесь склеивать нечего.
+type where struct {
+	endpoint string
+	seat     uint32
+}
+
 type links struct {
 	say   func(string, ...any)
 	mu    sync.Mutex
 	token string
 	self  string
-	held  map[string]*link
-	won   map[uint32]string
-}
-
-func seatKey(endpoint string, seat uint32) string {
-	return endpoint + "#" + strconv.FormatUint(uint64(seat), 10)
+	held  map[where]*link
 }
 
 func newLinks(token, self string, say func(string, ...any)) *links {
-	return &links{token: token, self: self, say: say, held: map[string]*link{}, won: map[uint32]string{}}
+	return &links{token: token, self: self, say: say, held: map[where]*link{}}
 }
 
 // standing отдаёт уже живую связь с одним из кандидатов: сперва ту, что выиграла
 // прошлую гонку для этого места, иначе первую живую по порядку узлов. Порядок
 // стабилен, поэтому выход не скачет от флоу к флоу.
+//
+// Победа — свойство самой связи, а не отдельная карта рядом. Пока она жила
+// отдельно, её приходилось чистить руками вместе со связью, и стоило забыть —
+// память показывала один выход, а трафик шёл в другой.
 func (ls *links) standing(runners []Peer, seat uint32) (*http3.ClientConn, string, bool) {
-	ls.mu.Lock()
-	won := ls.won[seat]
-	ls.mu.Unlock()
-
-	if won != "" {
-		for _, p := range runners {
-			if p.Endpoint != won {
-				continue
-			}
-			if cc, ok := ls.alive(p.Endpoint, seat); ok {
-				return cc, p.Endpoint, true
-			}
+	for _, p := range runners {
+		l := ls.find(where{p.Endpoint, seat})
+		if l == nil || !l.won.Load() {
+			continue
+		}
+		if cc, ok := l.alive(); ok {
+			return cc, p.Endpoint, true
 		}
 	}
 
 	for _, p := range runners {
-		if cc, ok := ls.alive(p.Endpoint, seat); ok {
+		l := ls.find(where{p.Endpoint, seat})
+		if l == nil {
+			continue
+		}
+		if cc, ok := l.alive(); ok {
 			ls.chose(seat, p.Endpoint)
 			return cc, p.Endpoint, true
 		}
@@ -189,14 +197,13 @@ func (ls *links) standing(runners []Peer, seat uint32) (*http3.ClientConn, strin
 	return nil, "", false
 }
 
-func (ls *links) alive(endpoint string, seat uint32) (*http3.ClientConn, bool) {
+func (ls *links) find(at where) *link {
 	ls.mu.Lock()
-	l := ls.held[seatKey(endpoint, seat)]
-	ls.mu.Unlock()
-	if l == nil {
-		return nil, false
-	}
+	defer ls.mu.Unlock()
+	return ls.held[at]
+}
 
+func (l *link) alive() (*http3.ClientConn, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.cc == nil || l.conn == nil {
@@ -210,23 +217,27 @@ func (ls *links) alive(endpoint string, seat uint32) (*http3.ClientConn, bool) {
 	}
 }
 
+// chose помечает победителя и снимает пометку с остальных связей этого места:
+// победитель у места ровно один.
 func (ls *links) chose(seat uint32, endpoint string) {
 	ls.mu.Lock()
-	ls.won[seat] = endpoint
-	ls.mu.Unlock()
+	defer ls.mu.Unlock()
+	for at, l := range ls.held {
+		if at.seat == seat {
+			l.won.Store(at.endpoint == endpoint)
+		}
+	}
 }
 
-func (ls *links) to(endpoint string, seat uint32) *link {
-	key := seatKey(endpoint, seat)
-
+func (ls *links) to(at where) *link {
 	ls.mu.Lock()
 	defer ls.mu.Unlock()
 
-	if l, ok := ls.held[key]; ok {
+	if l, ok := ls.held[at]; ok {
 		return l
 	}
-	l := &link{endpoint: endpoint, seat: seat, token: ls.token, self: ls.self}
-	ls.held[key] = l
+	l := &link{endpoint: at.endpoint, seat: at.seat, token: ls.token, self: ls.self}
+	ls.held[at] = l
 	return l
 }
 
@@ -247,8 +258,7 @@ func (ls *links) closeAll() {
 	for _, l := range ls.held {
 		l.close()
 	}
-	ls.held = map[string]*link{}
-	ls.won = map[uint32]string{}
+	ls.held = map[where]*link{}
 }
 
 func (ls *links) forget(seat uint32) {
@@ -260,7 +270,6 @@ func (ls *links) forget(seat uint32) {
 			delete(ls.held, key)
 		}
 	}
-	delete(ls.won, seat)
 	ls.mu.Unlock()
 
 	for _, l := range going {
@@ -275,21 +284,14 @@ func peerToken(token, self string) string {
 	return token
 }
 
-func (ls *links) hold(key string) {
-	ls.mu.Lock()
-	l := ls.held[key]
-	ls.mu.Unlock()
-
-	if l != nil {
+func (ls *links) hold(at where) {
+	if l := ls.find(at); l != nil {
 		l.flows.Add(1)
 	}
 }
 
-func (ls *links) release(key string) {
-	ls.mu.Lock()
-	l := ls.held[key]
-	ls.mu.Unlock()
-
+func (ls *links) release(at where) {
+	l := ls.find(at)
 	if l == nil {
 		return
 	}
@@ -303,7 +305,7 @@ func (ls *links) sweep(quiet time.Duration) {
 
 	ls.mu.Lock()
 	idle := []*link{}
-	for where, l := range ls.held {
+	for at, l := range ls.held {
 		if l.flows.Load() > 0 {
 			continue
 		}
@@ -316,10 +318,7 @@ func (ls *links) sweep(quiet time.Duration) {
 			continue
 		}
 		idle = append(idle, l)
-		delete(ls.held, where)
-		if ls.won[l.seat] == l.endpoint {
-			delete(ls.won, l.seat)
-		}
+		delete(ls.held, at)
 	}
 	ls.mu.Unlock()
 

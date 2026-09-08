@@ -198,10 +198,11 @@ func handleControl(state *controlState, req request) response {
 	case "bye":
 		var body struct {
 			Token string `json:"token"`
+			deviceClaim
 		}
 		json.Unmarshal(req.Body, &body)
 		if body.Token != "" && state.watch != nil && state.servesClients() {
-			state.watch.Leaving(qdcrypt.SessionID(body.Token))
+			state.watch.Leaving(qdcrypt.SessionID(body.Token), body.Fingerprint)
 		}
 		return reply(req, map[string]bool{"gone": true})
 

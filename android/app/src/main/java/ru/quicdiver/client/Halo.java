@@ -38,6 +38,16 @@ public class Halo extends FrameLayout {
         int pad = skin.dp(12);
         setPadding(pad, pad, pad, pad);
         girth = skin.dp(27);
+
+        setOutlineProvider(new android.view.ViewOutlineProvider() {
+            @Override
+            public void getOutline(android.view.View view, android.graphics.Outline shape) {
+                shape.setRoundRect(view.getPaddingLeft(), view.getPaddingTop(),
+                        view.getWidth() - view.getPaddingRight(),
+                        view.getHeight() - view.getPaddingBottom(), girth);
+            }
+        });
+        setElevation(skin.dpf(6f));
     }
 
     private float girth;

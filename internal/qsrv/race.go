@@ -38,7 +38,7 @@ func (n *Node) raceExit(ctx context.Context, route string, seat uint32) (*http3.
 
 	for _, peer := range runners {
 		go func(p Peer) {
-			cc, err := n.links.to(p.Endpoint, seat).connect(round)
+			cc, err := n.links.to(where{p.Endpoint, seat}).connect(round)
 			if err != nil {
 				line <- finish{err: err}
 				return

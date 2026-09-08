@@ -12,8 +12,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jaywehosl/quic-diver/internal/clientdns"
+	"github.com/jaywehosl/quic-diver/internal/clientrun"
 	"github.com/jaywehosl/quic-diver/internal/qcli"
 	"github.com/jaywehosl/quic-diver/internal/qcli/guard"
+	"github.com/jaywehosl/quic-diver/internal/qcli/packet"
 	windivert "github.com/jaywehosl/quic-diver/internal/qcli/wdsource"
 	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
 )
@@ -46,7 +49,7 @@ type tunnel struct {
 
 	live     *qcli.Tunnel
 	liveStop context.CancelFunc
-	dns      *resolver
+	dns      *clientdns.Resolver
 
 	assigned  netip.Prefix
 	serverIP  string
@@ -108,7 +111,7 @@ func (t *tunnel) noteResult(err error) {
 	t.mu.Unlock()
 }
 
-func (t *tunnel) DNS() *resolver {
+func (t *tunnel) DNS() *clientdns.Resolver {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.dns
@@ -137,36 +140,23 @@ func (t *tunnel) Start(servers []string, sessionID uint32) error {
 	if t.cfg.Key == nil {
 		return fmt.Errorf("no network key yet")
 	}
-	if len(servers) == 0 {
-		return fmt.Errorf("no entrypoint to dial")
-	}
 
 	dll, err := unpackDriver()
 	if err != nil {
 		return err
 	}
 
-	began := time.Now()
-	ctx, cancel := context.WithCancel(context.Background())
-
-	resolverAddr := ""
-	var dns *resolver
-	if t.servesDNS() {
-		dns, err = newResolver("127.0.0.1:0", *t.cfg.Key, servers[0], t.token())
-		if err != nil {
-			cancel()
-			return fmt.Errorf("dns: %w", err)
-		}
-		dns.OnQuery(t.cfg.OnQuery)
-		resolverAddr = dns.Addr()
-	}
-
 	sharp := sharpTimers()
-
 	keepOut := t.peerAddresses()
 
-	dialCtx, dialStop := context.WithTimeout(ctx, 20*time.Second)
-	live, err := qcli.Dial(dialCtx, qcli.Options{
+	var plan clientrun.Plan
+	if t.servesDNS() {
+		plan.DNS = &clientdns.Config{
+			Node: servers[0], Token: t.token(), Ask: nodeTalk.Ask,
+			Blocked: t.cfg.OnQuery,
+		}
+	}
+	plan.Dial = qcli.Options{
 		Endpoints: servers,
 		Token:     t.token(),
 		Device:    deviceOf().ID,
@@ -174,119 +164,81 @@ func (t *tunnel) Start(servers []string, sessionID uint32) error {
 		MTU:       t.cfg.MTU,
 		Brutal:    rateNow(),
 		Workers:   t.cfg.Workers,
-		Resolver:  resolverAddr,
 		Bypass:    keepOut,
 		Fast:      runFast,
 		Exit:      exitFor,
 		Direct:    goesDirect,
 		Loud:      true,
-	})
-	dialStop()
+	}
+	plan.Wait = dialWait
+	plan.Say = func(format string, args ...any) { fmt.Printf(format+"\n", args...) }
+	plan.Lost = func(err error) {
+		t.Stop()
+		t.noteResult(err)
+		if t.cfg.Lost != nil {
+			t.cfg.Lost()
+		}
+	}
+	// Фильтр захвата строится под уже поднятый туннель: в нём должны стоять
+	// адреса узлов, а их называет только выигравший вход.
+	plan.Source = func(ctx context.Context, live *qcli.Tunnel) (packet.Source, error) {
+		filter := windivert.BuildFilter(windivert.CaptureConfig{
+			TCP: true, UDP: true, DNS: t.servesDNS(),
+			Bypass: t.bypass(live, keepOut),
+		})
+		src, err := windivert.Open(dll, filter, 0)
+		if err != nil {
+			return nil, fmt.Errorf("windivert: %w (run as administrator)", err)
+		}
+		if r := routeByProcess.Load(); r != nil {
+			go r.watchSockets(ctx, dll)
+		}
+		return src, nil
+	}
+
+	held, err := clientrun.Carry(context.Background(), plan)
 	if err != nil {
 		sharp()
-		cancel()
 		return err
 	}
 
-	assigned := live.Assigned()
-	if len(assigned) == 0 {
-		sharp()
-		live.Close()
-		cancel()
-		return fmt.Errorf("the node assigned no address")
-	}
-
-	if dns != nil {
-		dns.SetNode(live.Endpoint())
-	}
-
 	serverIP := ""
-	for _, p := range live.Peers() {
+	for _, p := range held.Live.Peers() {
 		if p.Is4() {
 			serverIP = p.String()
 			break
 		}
 	}
 
-	filter := windivert.BuildFilter(windivert.CaptureConfig{TCP: true, UDP: true, DNS: t.servesDNS(), Bypass: t.bypass(live, keepOut)})
-
-	src, err := windivert.Open(dll, filter, 0)
-	if err != nil {
-		sharp()
-		live.Close()
-		cancel()
-		return fmt.Errorf("windivert: %w (run as administrator)", err)
-	}
-
-	if r := routeByProcess.Load(); r != nil {
-		go r.watchSockets(ctx, dll)
-	}
-
-	stop := make(chan struct{})
-
 	t.wg.Add(1)
 	go func() {
 		defer t.wg.Done()
 		defer sharp()
-		defer src.Close()
-		err := live.Run(ctx, src)
-		if ctx.Err() != nil {
-			return
-		}
-		if err == nil {
-			err = errors.New("the data path stopped")
-		}
-		fmt.Printf("carry    stopped: %v\n", err)
-		go func() {
-			t.Stop()
-			t.noteResult(err)
-			if t.cfg.Lost != nil {
-				t.cfg.Lost()
-			}
-		}()
+		<-held.Gone
 	}()
 
 	t.running = true
-	t.stop = stop
-	t.live = live
-	t.liveStop = cancel
-	t.assigned = assigned[0]
+	t.stop = held.Halt
+	t.live = held.Live
+	t.liveStop = held.Quit
+	t.assigned = held.Assigned
 	t.serverIP = serverIP
-	t.endpoint = live.Endpoint()
+	t.endpoint = held.Endpoint
 	t.sessionID = sessionID
 	t.since = time.Now()
 	t.lastErr = nil
-	t.dns = dns
-	liveTunnel.Store(&live)
+	t.dns = held.DNS
+	liveTunnel.Store(&held.Live)
 
-	go roamWatch(ctx, stop, live, func(err error) {
-		fmt.Printf("carry    stopped: %v\n", err)
-		go func() {
-			t.Stop()
-			t.noteResult(err)
-			if t.cfg.Lost != nil {
-				t.cfg.Lost()
-			}
-		}()
-	})
-
-	if dns != nil {
-		t.wg.Add(1)
-		go func() {
-			defer t.wg.Done()
-			dns.Serve(stop)
-		}()
-		go dns.keepWarm(stop)
-		fmt.Printf("dns      answering on %s through the node\n", resolverAddr)
-	}
+	go roamWatch(held.Ctx, held.Halt, held.Live, plan.Lost)
 
 	if t.cfg.Announce != nil {
 		go t.cfg.Announce("join")
 	}
-
-	fmt.Printf("tunnel   up in %d ms, node gave %s\n", time.Since(began).Milliseconds(), t.assigned)
 	return nil
 }
+
+const dialWait = 20 * time.Second
 
 func (t *tunnel) bypass(live *qcli.Tunnel, keepOut []netip.Prefix) []netip.Prefix {
 	out := append([]netip.Prefix(nil), guard.New(nil).Bypasses()...)

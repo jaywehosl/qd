@@ -9,8 +9,10 @@ import (
 
 	"github.com/jaywehosl/quic-diver/internal/adblock"
 	"github.com/jaywehosl/quic-diver/internal/clientapi"
+	"github.com/jaywehosl/quic-diver/internal/clientdns"
 	"github.com/jaywehosl/quic-diver/internal/clientstate"
 	"github.com/jaywehosl/quic-diver/internal/qcli"
+	"github.com/jaywehosl/quic-diver/internal/qcli/packet"
 	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
 	"github.com/jaywehosl/quic-diver/internal/qwire"
 )
@@ -58,9 +60,20 @@ type Client struct {
 	stop     chan struct{}
 	live     *qcli.Tunnel
 	liveStop context.CancelFunc
+	// dialing рвёт дозвон, который ещё не кончился. Без него просьба
+	// отключиться во время дозвона не делала ничего: туннель поднимался уже
+	// после неё, а нажатия всё это время уходили в пустоту.
+	dialing context.CancelFunc
+	// src держим, чтобы гасить устройство сразу: закрытый дескриптор немедленно
+	// возвращает всех, кто на нём висел.
+	src packet.Source
+	// turn держится всё время перехода. Без него подъём и спуск шли внахлёст:
+	// старый туннель ещё разбирался, а новый уже дозванивался, и оба мешали
+	// друг другу по три секунды кряду.
+	turn     sync.Mutex
 	server   string
 	appSplit string
-	dns      *resolver
+	dns      *clientdns.Resolver
 	gone     chan struct{}
 }
 
@@ -228,7 +241,7 @@ func (c *Client) Ping() int {
 	c.mu.Unlock()
 
 	if warm != nil {
-		if ms := warm.rtt(); ms >= 0 {
+		if ms := warm.RTT(); ms >= 0 {
 			return ms
 		}
 	}

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/jaywehosl/quic-diver/internal/clientdns"
 	"github.com/jaywehosl/quic-diver/internal/clientstate"
 	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
 )
@@ -114,15 +115,16 @@ func snapshotStats() counters {
 	}
 }
 
-func snapshotDNS(r *resolver) dnsSnapshot {
+func snapshotDNS(r *clientdns.Resolver) dnsSnapshot {
 	if r == nil {
 		return dnsSnapshot{}
 	}
+	now := r.Stats()
 	return dnsSnapshot{
-		queries:  int64(r.stats.queries.Load()),
-		cached:   int64(r.stats.hits.Load()),
-		upstream: int64(r.stats.upstream.Load()),
-		blocked:  int64(r.stats.blocked.Load()),
+		queries:  int64(now.Queries),
+		cached:   int64(now.Hits),
+		upstream: int64(now.Upstream),
+		blocked:  int64(now.Blocked),
 	}
 }
 

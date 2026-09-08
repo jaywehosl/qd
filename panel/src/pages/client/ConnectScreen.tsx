@@ -175,7 +175,7 @@ export default function ConnectScreen({
   return (
     <div className="cx">
       <section className="cx-card cx-head">
-        <span className="cx-tag">{state.node?.name ?? t('client.connect.idle')}</span>
+        <span className="cx-tag">{state.node?.name ?? ''}</span>
         <span className="cx-refresh-line">
           {untilRefresh !== null && (
             <>

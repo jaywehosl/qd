@@ -25,7 +25,7 @@ export default function DatapathTab({ allSetting, updateSetting }: DatapathTabPr
   });
 
   return (
-    <>
+    <div className="settings-tab">
       <Card title={t('pages.settings.listener')}>
         <SettingListItem
           paddings="small"
@@ -110,6 +110,6 @@ export default function DatapathTab({ allSetting, updateSetting }: DatapathTabPr
           <Input type="number" min={0} max={3600} {...num('statsSeconds', 5)} />
         </SettingListItem>
       </Card>
-    </>
+    </div>
   );
 }

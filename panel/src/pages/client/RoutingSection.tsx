@@ -42,6 +42,15 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
     [t],
   );
 
+  // The default also carries traffic with no process behind it, and the egress
+  // roles only mean something on a rule. Offered here, they read as two more
+  // routing modes while behaving like tunnel.
+  const baseOptions = useMemo(
+    () => roleOptions.filter((o) => o.value === 'direct' || o.value === 'tunnel'
+      || o.value === state?.defaultRole),
+    [roleOptions, state?.defaultRole],
+  );
+
   const existing = useMemo(
     () => new Set((state?.rules ?? []).map((r) => (r.path || r.process).toLowerCase())),
     [state],
@@ -99,7 +108,7 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
           </div>
           <Select
             value={defaultRole}
-            options={roleOptions}
+            options={baseOptions}
             onChange={(v) => void setDefaultRole(v as RoutingRole)}
           />
         </div>

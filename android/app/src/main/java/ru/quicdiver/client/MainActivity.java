@@ -5,14 +5,18 @@ import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Insets;
+import android.graphics.Outline;
 import android.net.Uri;
 import android.net.VpnService;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
+import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewOutlineProvider;
+import android.view.ViewTreeObserver;
 import android.view.WindowInsets;
 import android.widget.FrameLayout;
 
@@ -32,6 +36,9 @@ public class MainActivity extends Activity {
     private Skin skin;
     private FrameLayout shell;
     private Pager pages;
+    private Bar bar;
+    private FrameLayout dock;
+    private Glass glass;
 
     private ConnectPage connectPage;
     private RoutingPage routingPage;
@@ -54,6 +61,11 @@ public class MainActivity extends Activity {
         super.onCreate(saved);
         skin = new Skin(this);
 
+        // Уведомление вешаем сразу: через него подключаются, не открывая
+        // приложения, поэтому висеть оно должно и до первого подключения.
+        Core.readExit(this);
+        Notes.wake(this);
+
         pages = new Pager(this);
         pages.setBackground(skin.backdrop());
 
@@ -73,10 +85,33 @@ public class MainActivity extends Activity {
         pages.onSettle(new Runnable() {
             @Override
             public void run() {
+                bar.show(pages.page());
                 draw();
             }
         });
 
+        bar = new Bar(this, skin, new Bar.Pick() {
+            @Override
+            public void at(int index) {
+                pages.show(index);
+                bar.show(index);
+            }
+        });
+        bar.show(CONNECT);
+
+        dock = new FrameLayout(this);
+        dock.setClipToOutline(true);
+        dock.setElevation(skin.dpf(14f));
+        dock.setOutlineProvider(new ViewOutlineProvider() {
+            @Override
+            public void getOutline(View view, Outline shape) {
+                shape.setRoundRect(0, 0, view.getWidth(), view.getHeight(), skin.dpf(24f));
+            }
+        });
+        glass = new Glass(this, skin, pages);
+        dock.addView(glass, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, 0));
+        dock.addView(bar, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT));
         importPage = new ImportPage(this, skin, new Runnable() {
             @Override
             public void run() {
@@ -85,6 +120,20 @@ public class MainActivity extends Activity {
         });
 
         shell = new FrameLayout(this);
+        shell.getViewTreeObserver().addOnPreDrawListener(
+                new ViewTreeObserver.OnPreDrawListener() {
+                    @Override
+                    public boolean onPreDraw() {
+                        if (glass != null && glass.getHeight() != bar.getHeight()) {
+                            glass.getLayoutParams().height = bar.getHeight();
+                            glass.requestLayout();
+                        }
+                        if (glass != null) {
+                            glass.snap();
+                        }
+                        return true;
+                    }
+                });
         shell.setBackground(skin.backdrop());
         shell.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
             @Override
@@ -112,6 +161,13 @@ public class MainActivity extends Activity {
     }
 
     private void handle(Intent intent) {
+        // Долгий тап по плитке шлёт это действие. Без него система показывает
+        // свои параметры приложения, а человек ждёт настроек клиента.
+        if (intent != null && android.service.quicksettings.TileService
+                .ACTION_QS_TILE_PREFERENCES.equals(intent.getAction())) {
+            pages.show(SETTINGS);
+        }
+
         Uri data = intent == null ? null : intent.getData();
         if (data != null && "qd".equals(data.getScheme())) {
             importPage.build();
@@ -151,15 +207,20 @@ public class MainActivity extends Activity {
         if (pages != null) {
             pages.setPadding(bars.left, 0, bars.right, 0);
         }
+        if (dock != null && dock.getParent() != null) {
+            dock.setLayoutParams(seatBar());
+        }
         for (Sheet held : sheets) {
             rest(held);
         }
     }
 
+    // Снизу оставляем место под плавающую строку перехода: она лежит поверх
+    // страниц, и без запаса накрывала бы их последнюю карточку.
     private void rest(Sheet held) {
         held.view.setPadding(
                 held.view.getPaddingLeft(), held.top + skin.dp(32) + bars.top,
-                held.view.getPaddingRight(), held.bottom + skin.dp(12) + bars.bottom);
+                held.view.getPaddingRight(), held.bottom + skin.dp(108) + bars.bottom);
     }
 
     private void askNotifications() {
@@ -206,9 +267,12 @@ public class MainActivity extends Activity {
         shell.removeAllViews();
         if (imported) {
             shell.addView(pages);
+            shell.addView(dock, seatBar());
             pages.requestApplyInsets();
             pages.show(CONNECT);
+            bar.show(CONNECT);
             draw();
+            warm();
             maybeAutoConnect();
             return;
         }
@@ -222,6 +286,16 @@ public class MainActivity extends Activity {
         screen.requestApplyInsets();
     }
 
+
+    // seatBar сажает строку перехода над системной полосой жестов, а не под неё.
+    private FrameLayout.LayoutParams seatBar() {
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT);
+        lp.gravity = Gravity.BOTTOM;
+        int side = skin.dp(24);
+        lp.setMargins(side + bars.left, 0, side + bars.right, bars.bottom + skin.dp(20));
+        return lp;
+    }
     private void maybeAutoConnect() {
         new Thread(new Runnable() {
             @Override
@@ -314,6 +388,25 @@ public class MainActivity extends Activity {
             default:
                 connectPage.render();
         }
+    }
+
+    // warm заполняет соседние страницы сразу, а не в момент перехода: иначе они
+    // въезжают пустыми и на глазах у пользователя доверстываются под свои данные.
+    private void warm() {
+        routingPage.render();
+        settingsPage.render();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                Snapshot.refreshSettings(MainActivity.this);
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        settingsPage.render();
+                    }
+                });
+            }
+        }).start();
     }
 
     private void entered(int page) {

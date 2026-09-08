@@ -2,6 +2,8 @@ package ru.quicdiver.client;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.res.ColorStateList;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.text.Editable;
 import android.text.InputType;
@@ -12,9 +14,9 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
-import android.widget.Switch;
 import android.widget.TextView;
 
 import org.json.JSONObject;
@@ -34,8 +36,8 @@ public class SettingsPage {
     private final int[] guardWas = {-1, -1, -1, -1};
     private EditText refresh;
     private EditText upload;
-    private Switch connectOnOpen;
-    private Switch adblock;
+    private Toggle connectOnOpen;
+    private Toggle adblock;
     private boolean touched;
     private volatile boolean writing;
 
@@ -77,10 +79,11 @@ public class SettingsPage {
         row.addView(skin.label("Подключаться при запуске", skin.text, 15),
                 new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
-        connectOnOpen = new Switch(host);
+        connectOnOpen = new Toggle(host, skin);
         connectOnOpen.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                connectOnOpen.setChecked(!connectOnOpen.isChecked());
                 patch("manualBehaviour", connectOnOpen.isChecked() ? "connect" : "open");
             }
         });
@@ -94,10 +97,11 @@ public class SettingsPage {
         adRow.addView(skin.label("Блокировать рекламу", skin.text, 15),
                 new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
-        adblock = new Switch(host);
+        adblock = new Toggle(host, skin);
         adblock.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                adblock.setChecked(!adblock.isChecked());
                 flipAdblock(adblock.isChecked());
             }
         });
@@ -120,41 +124,58 @@ public class SettingsPage {
 
         LinearLayout diag = skin.card();
         diag.addView(skin.label("Журнал", skin.text, 17));
-        final TextView told = skin.note("");
-        action(diag, "Выгрузить журнал в Загрузки", skin.good).setOnClickListener(new View.OnClickListener() {
+        final View dump = chip("Выгрузить журнал в Загрузки", skin.good, 0xFFFFFFFF,
+                R.drawable.ic_journal, corners(true, true));
+        dump.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                told.setText(saveJournal());
+                boast(dump, saveJournal());
             }
         });
-        diag.addView(told);
+        LinearLayout.LayoutParams wide = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        wide.topMargin = skin.dp(12);
+        diag.addView(dump, wide);
         page.addView(diag, skin.gap(14));
 
         LinearLayout danger = skin.card();
         danger.addView(skin.label("Сброс", skin.text, 17));
 
-        action(danger, "Сбросить настройки", skin.muted).setOnClickListener(new View.OnClickListener() {
+        LinearLayout pair = new LinearLayout(host);
+        pair.setOrientation(LinearLayout.HORIZONTAL);
+
+        View wipe = chip("Сброс настроек", skin.idle, skin.text,
+                R.drawable.ic_reset, corners(true, false));
+        wipe.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 confirm("Сбросить настройки?", "Подписка останется.", false);
             }
         });
+        pair.addView(wipe, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
-        action(danger, "Отвязать подписку", 0xFFCF4444).setOnClickListener(new View.OnClickListener() {
+        View drop = chip("Отвязать подписку", 0xFFCF4444, 0xFFFFFFFF,
+                R.drawable.ic_unlink, corners(false, true));
+        drop.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 confirm("Отвязать подписку?",
                         "Туннель остановится, ключ и узлы будут забыты.", true);
             }
         });
+        LinearLayout.LayoutParams right = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        right.leftMargin = skin.dp(3);
+        pair.addView(drop, right);
+
+        LinearLayout.LayoutParams seat = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        seat.topMargin = skin.dp(12);
+        danger.addView(pair, seat);
         page.addView(danger, skin.gap(14));
 
-        TextView foot = skin.label("← подключение", skin.muted, 14);
-        foot.setGravity(Gravity.CENTER);
-        foot.setPadding(0, skin.dp(18), 0, skin.dp(8));
-        page.addView(foot);
-
-        ScrollView scroll = new ScrollView(host);
+        Scroller scroll = new Scroller(host, skin);
         scroll.setClipChildren(false);
         scroll.setClipToPadding(false);
         page.setClipChildren(false);
@@ -185,8 +206,8 @@ public class SettingsPage {
                     put(refresh, settings.optInt("refreshMinutes", 60));
                     put(upload, settings.optInt("fixedRate", 0));
                 }
-                connectOnOpen.setChecked("connect".equals(settings.optString("manualBehaviour", "open")));
-                adblock.setChecked(state.optBoolean("adblock"));
+                connectOnOpen.settle("connect".equals(settings.optString("manualBehaviour", "open")));
+                adblock.settle(state.optBoolean("adblock"));
             }
         } catch (Exception e) {
             subLine.setText(String.valueOf(e.getMessage()));
@@ -329,8 +350,11 @@ public class SettingsPage {
 
         final EditText field = new EditText(host);
         field.setInputType(InputType.TYPE_CLASS_NUMBER);
-        field.setTextColor(skin.text);
-        field.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        field.setTextColor(skin.bold);
+        field.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        field.setSingleLine(true);
+        field.setPadding(skin.dp(14), skin.dp(11), skin.dp(14), skin.dp(11));
+        field.setBackground(skin.field());
         field.addTextChangedListener(new TextWatcher() {
             @Override
             public void beforeTextChanged(CharSequence s, int a, int b, int c) {
@@ -441,11 +465,58 @@ public class SettingsPage {
         }
     }
 
-    private TextView action(LinearLayout parent, String caption, int tint) {
-        TextView view = skin.label(caption, tint, 16);
-        view.setPadding(0, skin.dp(14), 0, skin.dp(2));
-        parent.addView(view);
-        return view;
+    // boast говорит о сделанном на самой кнопке: отдельная строка под ней жила
+    // ниже всякого ритма карточки и оставалась там навсегда.
+    private void boast(final View button, String news) {
+        final TextView caps = (TextView) ((LinearLayout) button).getChildAt(1);
+        if (button.getTag() == null) {
+            button.setTag(caps.getText());
+        }
+        final CharSequence was = (CharSequence) button.getTag();
+        caps.setText(news);
+        caps.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                caps.setText(was);
+                button.setTag(null);
+            }
+        }, 10000L);
+    }
+
+    private float[] corners(boolean first, boolean last) {
+        float wide = skin.dpf(14f);
+        float tight = skin.dpf(5f);
+        return new float[]{
+                first ? wide : tight, first ? wide : tight,
+                last ? wide : tight, last ? wide : tight,
+                last ? wide : tight, last ? wide : tight,
+                first ? wide : tight, first ? wide : tight,
+        };
+    }
+
+    private View chip(String caption, int face, int letter, int glyph, float[] radii) {
+        LinearLayout row = new LinearLayout(host);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER);
+        row.setPadding(skin.dp(9), skin.dp(10), skin.dp(9), skin.dp(10));
+
+        ImageView mark = new ImageView(host);
+        mark.setImageResource(glyph);
+        mark.setImageTintList(ColorStateList.valueOf(letter));
+        row.addView(mark, new LinearLayout.LayoutParams(skin.dp(15), skin.dp(15)));
+
+        TextView caps = skin.label(caption, letter, 13);
+        caps.setSingleLine(true);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.leftMargin = skin.dp(6);
+        row.addView(caps, lp);
+
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(face);
+        bg.setCornerRadii(radii);
+        row.setBackground(skin.touchable(bg));
+        return row;
     }
 
     private void toast(String message) {

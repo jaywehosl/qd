@@ -6,6 +6,8 @@ import android.content.Context;
 import android.os.Build;
 import android.provider.Settings;
 
+import org.json.JSONObject;
+
 import qdmobile.Client;
 import qdmobile.Host;
 import qdmobile.Protector;
@@ -20,6 +22,10 @@ public final class Core {
     private static volatile String where = "";
     private static volatile long since;
     private static volatile String woe = "";
+    private static volatile boolean exit;
+    private static volatile boolean mayExit;
+    private static volatile boolean turning;
+    private static volatile boolean ready;
 
     private Core() {
     }
@@ -94,6 +100,35 @@ public final class Core {
         return client;
     }
 
+
+    public static boolean exitOn() {
+        return exit;
+    }
+
+    public static boolean mayExit() {
+        return mayExit;
+    }
+
+    // ready — есть ли подписка. Без неё подключаться нечем, и кнопке остаётся
+    // только открыть клиент.
+    public static boolean ready() {
+        return ready;
+    }
+
+    // readExit спрашивает состояние у самого клиента, а не у кэша экрана: кнопку
+    // в уведомлении жмут и с закрытым приложением, когда кэш пуст или устарел.
+    // Зовётся редко — после подъёма и после переключения, — поэтому обращение к
+    // базе здесь ничего не стоит.
+    public static void readExit(Context context) {
+        try {
+            Client client = client(context);
+            ready = client.imported();
+            JSONObject state = new JSONObject(client.stateJSON());
+            exit = state.optBoolean("egress");
+            mayExit = state.optBoolean("allowExit");
+        } catch (Exception ignored) {
+        }
+    }
     public static boolean up() {
         return up;
     }
@@ -116,6 +151,26 @@ public final class Core {
         return said;
     }
 
+    // turning — идёт переход. Дозвон занимает до двадцати секунд, и без этого
+    // признака кнопка выглядела мёртвой: нажал и ничего.
+    public static boolean turning() {
+        return turning;
+    }
+
+    public static void turning(Context context, boolean on) {
+        turning = on;
+        repaint(context);
+    }
+
+    // repaint — единственное место, где обновляется всё, что показывает
+    // состояние. Пока их было три, вызовы разъезжались: уведомление знало про
+    // выход, а виджет ещё нет.
+    public static void repaint(Context context) {
+        TunnelService.refreshNote(context);
+        TileService.refresh();
+        Widget.refresh(context);
+    }
+
     public static void mark(Context context, boolean running, String label) {
         if (running && !up) {
             since = System.currentTimeMillis();
@@ -126,13 +181,11 @@ public final class Core {
         up = running;
         where = label == null ? "" : label;
 
-        TunnelService.refreshNote();
-
         try {
             android.service.quicksettings.TileService.requestListeningState(
                     context, new ComponentName(context, TileService.class));
         } catch (Exception ignored) {
         }
-        TileService.refresh();
+        repaint(context);
     }
 }

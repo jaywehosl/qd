@@ -80,10 +80,8 @@ func (n *Node) carry(ctx context.Context, conn *connectip.Conn, qc *quic.Conn, g
 		return
 	}
 
-	now := time.Now().Unix()
-	s := &live{grant: grant, address: address, peer: peer, conn: qc, since: now}
-	s.lastSeen.Store(now)
-	s.route.Store(&route)
+	s := newLive(grant, address, peer, route)
+	s.conn = qc
 
 	n.mu.Lock()
 	if was := n.held[grant.Seat]; was != nil {
@@ -315,9 +313,9 @@ func (n *Node) relayPackets(w http.ResponseWriter, r *http.Request, out net.Conn
 	var lastOut atomic.Int64
 	lastOut.Store(time.Now().UnixNano())
 
-	done := make(chan struct{})
 	go func() {
-		defer close(done)
+		// Клиент ушёл — сокет наружу закрываем сразу, не дожидаясь срока тишины.
+		defer out.Close()
 		var size [2]byte
 		buf := make([]byte, 65535)
 		for {
@@ -368,7 +366,9 @@ func (n *Node) relayPackets(w http.ResponseWriter, r *http.Request, out net.Conn
 			s.lastSeen.Store(time.Now().Unix())
 		}
 	}
-	<-done
+	// Писателя не ждём. Он висит на чтении тела запроса, а тело закроется ровно
+	// тогда, когда вернётся обработчик: ожидание здесь означало сокет, живущий
+	// вечно вместе с открытым стримом. Ровно так узел и набирал их сотнями.
 }
 
 const flowQuiet = 60 * time.Second

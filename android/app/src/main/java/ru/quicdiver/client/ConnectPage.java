@@ -56,6 +56,7 @@ public class ConnectPage {
     private boolean busy;
     private volatile boolean flipping;
     private boolean wasUp;
+    private String titleWas = "";
     private String rosterKey = "";
     private boolean beating;
     private boolean fresh = true;
@@ -72,7 +73,7 @@ public class ConnectPage {
         LinearLayout root = skin.column();
         root.setClipChildren(false);
         root.setClipToPadding(false);
-        root.setPadding(skin.dp(24), 0, skin.dp(24), skin.dp(64));
+        root.setPadding(skin.dp(24), 0, skin.dp(24), skin.dp(94));
 
         headCard = head();
         areaCard = area();
@@ -80,7 +81,11 @@ public class ConnectPage {
 
         root.addView(headCard, skin.gap(24));
         root.addView(areaCard, area(1f));
-        root.addView(controlCard, skin.gap(0));
+        LinearLayout.LayoutParams seat = skin.gap(0);
+        int bleed = skin.dp(12);
+        seat.leftMargin = -bleed;
+        seat.rightMargin = -bleed;
+        root.addView(controlCard, seat);
 
         return root;
     }
@@ -111,15 +116,28 @@ public class ConnectPage {
         card.setOrientation(LinearLayout.HORIZONTAL);
         card.setGravity(Gravity.CENTER_VERTICAL);
 
-        title = skin.label("qdiver", skin.bold, 24);
+        // Счётчик держится середины карточки, а не середины того, что осталось от
+        // соседей: иначе он ездит туда-сюда вслед за длиной имени узла. Поэтому
+        // все трое лежат в одном слое, а не в ряд.
+        FrameLayout row = new FrameLayout(host);
+
+        title = skin.label("", skin.bold, 24);
         title.setTypeface(Typeface.DEFAULT_BOLD);
-        card.addView(title);
+        title.setSingleLine(true);
+        FrameLayout.LayoutParams titleAt = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
+        titleAt.gravity = Gravity.START | Gravity.CENTER_VERTICAL;
+        row.addView(title, titleAt);
 
         refreshLine = skin.note("");
         refreshLine.setGravity(Gravity.CENTER);
-        refreshLine.setPadding(skin.dp(10), 0, skin.dp(10), 0);
-        card.addView(refreshLine, new LinearLayout.LayoutParams(0,
-                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        // Табличные цифры: в пропорциональном начертании единица уже семёрки, и
+        // строка дёргается на каждом тике вместе с шириной последнего разряда.
+        refreshLine.setFontFeatureSettings("tnum");
+        FrameLayout.LayoutParams lineAt = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
+        lineAt.gravity = Gravity.CENTER;
+        row.addView(refreshLine, lineAt);
 
         TextView again = skin.label("⟳", 0xFFFFFFFF, 20);
         again.setGravity(Gravity.CENTER);
@@ -146,7 +164,13 @@ public class ConnectPage {
         spark.addView(again, new FrameLayout.LayoutParams(
                 skin.dp(38), skin.dp(38)));
 
-        card.addView(spark, new LinearLayout.LayoutParams(skin.dp(52), skin.dp(52)));
+        FrameLayout.LayoutParams sparkAt = new FrameLayout.LayoutParams(
+                skin.dp(52), skin.dp(52));
+        sparkAt.gravity = Gravity.END | Gravity.CENTER_VERTICAL;
+        row.addView(spark, sparkAt);
+
+        card.addView(row, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         return card;
     }
 
@@ -157,15 +181,22 @@ public class ConnectPage {
         face.setCornerRadius(skin.dp(30));
         face.setStroke(Math.max(1, skin.dp(1) / 2), skin.edge);
         card.setBackground(face);
+        final float round = skin.dpf(30f);
+        card.setOutlineProvider(new android.view.ViewOutlineProvider() {
+            @Override
+            public void getOutline(View view, android.graphics.Outline shape) {
+                shape.setRoundRect(0, 0, view.getWidth(), view.getHeight(), round);
+            }
+        });
         card.setClipToOutline(true);
-        card.setElevation(skin.dp(4));
+        card.setElevation(skin.dpf(14f));
 
         flow = new Flow(host, skin);
         card.addView(flow, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
         roster = skin.column();
-        rosterBox = new ScrollView(host);
+        rosterBox = new Scroller(host, skin);
         rosterBox.setVerticalScrollBarEnabled(false);
         rosterBox.addView(roster);
         rosterBox.setAlpha(0f);
@@ -322,10 +353,10 @@ public class ConnectPage {
         return view;
     }
 
+    // Кнопка идёт без карточки вокруг: она сама себе карточка и занимает ту же
+    // ширину, что и остальные. Переход по страницам живёт в плавающей строке
+    // внизу, поэтому подписи со стрелками отсюда убраны.
     private View controls() {
-        LinearLayout card = skin.card();
-        card.setPadding(skin.dp(6), skin.dp(6), skin.dp(6), skin.dp(12));
-
         halo = new Halo(host, skin);
 
         power = new LinearLayout(host);
@@ -344,7 +375,7 @@ public class ConnectPage {
             }
         });
 
-        powerLabel = skin.label("подключиться", skin.bold, 27);
+        powerLabel = skin.label("подключить", skin.bold, 27);
         powerLabel.setGravity(Gravity.CENTER);
         powerLabel.setTypeface(Typeface.DEFAULT_BOLD);
         power.addView(powerLabel, new LinearLayout.LayoutParams(0,
@@ -366,15 +397,7 @@ public class ConnectPage {
 
         halo.addView(power, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT));
-        card.addView(halo, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-
-        TextView feet = skin.label("←   маршрутизация          настройки   →", skin.muted, 16);
-        feet.setGravity(Gravity.CENTER);
-        feet.setPadding(0, skin.dp(10), 0, skin.dp(2));
-        card.addView(feet);
-
-        return card;
+        return halo;
     }
 
     public void reset() {
@@ -464,10 +487,12 @@ public class ConnectPage {
     public void render() {
         try {
             JSONObject state = Snapshot.state();
-            JSONObject about = Snapshot.about();
 
-            String label = about.optString("label", "");
-            title.setText(label.isEmpty() ? "qdiver" : label);
+            // В шапке имя узла, который выиграл гонку подключений, а не тег
+            // подписки: тег и так виден в настройках, а узел меняется сам. Метка
+            // selected переживает отключение, поэтому спрашиваем ещё и туннель --
+            // иначе на холодном старте в шапке висел бы узел прошлой сессии.
+            name(Core.up() ? carrying() : "");
 
             JSONObject sub = state.optJSONObject("subscription");
             refreshLine.setText("обновится " + nextRefresh(sub));
@@ -496,6 +521,35 @@ public class ConnectPage {
             prevAt = now;
         } catch (Exception ignored) {
         }
+    }
+
+    // Имя не подменяется на месте: узел выбирается посреди гонки, и подстановка
+    // в один кадр читается как сбой отрисовки, а не как смена узла.
+    private void name(String want) {
+        if (want.equals(titleWas)) {
+            return;
+        }
+        titleWas = want;
+        title.animate().cancel();
+        title.animate().alpha(0f).setDuration(110L).withEndAction(new Runnable() {
+            @Override
+            public void run() {
+                title.setText(titleWas);
+                title.setTranslationY(skin.dpf(7f));
+                title.animate().alpha(1f).translationY(0f).setDuration(220L).start();
+            }
+        }).start();
+    }
+
+    private String carrying() {
+        JSONArray rows = Snapshot.nodes();
+        for (int i = 0; i < rows.length(); i++) {
+            JSONObject n = rows.optJSONObject(i);
+            if (n != null && n.optBoolean("selected")) {
+                return n.optString("name", "");
+            }
+        }
+        return "";
     }
 
     private void fillRoster() {
@@ -568,7 +622,7 @@ public class ConnectPage {
         powerFace.setColor(tone);
         halo.setTone(at > Stage.GATE ? LIVE : RED);
 
-        String word = at <= 0.01f ? "подключиться"
+        String word = at <= 0.01f ? "подключить"
                 : at < Stage.GATE + 0.09f ? "подключение"
                 : stage.falling() ? "отключение" : "подключено";
         if (!word.contentEquals(powerLabel.getText())) {
@@ -624,6 +678,10 @@ public class ConnectPage {
                 } catch (Exception ignored) {
                 }
                 Snapshot.refreshState(host);
+                // Уведомление держит своё представление о выходе: без этого оно
+                // показывало бы прошлое состояние, пока не переподключишься.
+                Core.readExit(host);
+                Core.repaint(host);
                 flipping = false;
             }
         }).start();

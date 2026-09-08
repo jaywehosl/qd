@@ -135,6 +135,11 @@ public class ImportPage {
                     Client client = Core.client(host);
                     client.import_(uri);
                     label = client.label();
+                    // Жалоба от прошлой неудачной попытки подключиться живёт до
+                    // первого прочтения. После удачного импорта она врёт.
+                    Core.gaveUp("");
+                    Core.readExit(host);
+                    Core.repaint(host);
                 } catch (Exception e) {
                     problem = e.getMessage();
                 }

@@ -181,9 +181,14 @@ func (s *Source) Close() error {
 	s.closed = true
 	s.mu.Unlock()
 
+	// Дескриптор закрываем ДО ожидания. Чтение и опрос на нём висят без срока, и
+	// ждать читателей, не закрыв устройство, значит ждать вечно: они ждут
+	// устройство, а закрытие ждёт их. Закрытый дескриптор возвращает каждого
+	// немедленно с ошибкой, и они честно выходят.
+	err := unix.Close(s.fd)
 	s.busy.Wait()
 
-	if err := unix.Close(s.fd); err != nil && !errors.Is(err, os.ErrClosed) {
+	if err != nil && !errors.Is(err, os.ErrClosed) {
 		return err
 	}
 	return nil

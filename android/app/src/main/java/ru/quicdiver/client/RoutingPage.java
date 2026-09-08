@@ -2,15 +2,21 @@ package ru.quicdiver.client;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
+import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -21,8 +27,12 @@ import org.json.JSONObject;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class RoutingPage {
 
@@ -42,6 +52,8 @@ public class RoutingPage {
     private String defaultRole = "tunnel";
     private final List<Rule> rules = new ArrayList<>();
     private List<App> catalogue;
+    private final Map<String, Drawable> faces = new HashMap<>();
+    private ExecutorService loaders;
     private boolean loaded;
     private volatile boolean loading;
     private String shownRole = "";
@@ -101,16 +113,7 @@ public class RoutingPage {
         box.addView(list);
         page.addView(box, skin.gap(14));
 
-        page.addView(skin.note(
-                "Для применения правил с маршрутизацией трафика напрямую необходимо "
-                        + "переподключиться на главном экране"));
-
-        TextView foot = skin.label("подключение →", skin.muted, 14);
-        foot.setGravity(Gravity.CENTER);
-        foot.setPadding(0, skin.dp(18), 0, skin.dp(8));
-        page.addView(foot);
-
-        ScrollView scroll = new ScrollView(host);
+        Scroller scroll = new Scroller(host, skin);
         scroll.setClipChildren(false);
         scroll.setClipToPadding(false);
         page.setClipChildren(false);
@@ -203,6 +206,13 @@ public class RoutingPage {
 
     private void redraw() {
         list.removeAllViews();
+        if (rules.isEmpty()) {
+            TextView blank = skin.label("здесь будут ваши правила маршрутизации", skin.muted, 14);
+            blank.setGravity(Gravity.CENTER);
+            blank.setPadding(0, skin.dp(26), 0, skin.dp(10));
+            list.addView(blank);
+            return;
+        }
         for (Rule rule : rules) {
             list.addView(row(rule));
         }
@@ -210,33 +220,45 @@ public class RoutingPage {
 
     private View row(final Rule rule) {
         LinearLayout block = skin.column();
-        block.setPadding(0, skin.dp(16), 0, skin.dp(2));
+        block.setPadding(0, skin.dp(14), 0, skin.dp(2));
 
         LinearLayout line = new LinearLayout(host);
         line.setOrientation(LinearLayout.HORIZONTAL);
         line.setGravity(Gravity.CENTER_VERTICAL);
 
-        LinearLayout names = skin.column();
-        names.addView(skin.label(labelOf(rule.pkg), skin.text, 15));
-        names.addView(skin.label(rule.pkg, skin.muted, 11));
-        line.addView(names, new LinearLayout.LayoutParams(0,
-                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        ImageView face = new ImageView(host);
+        GradientDrawable blank = new GradientDrawable();
+        blank.setColor(skin.idle);
+        blank.setCornerRadius(skin.dp(8));
+        face.setBackground(blank);
+        line.addView(face, new LinearLayout.LayoutParams(skin.dp(32), skin.dp(32)));
+        wear(face, rule.pkg);
 
-        TextView remove = skin.label("✕", skin.muted, 18);
-        remove.setPadding(skin.dp(14), skin.dp(6), skin.dp(4), skin.dp(6));
+        LinearLayout names = skin.column();
+        names.addView(skin.label(labelOf(rule.pkg), skin.bold, 14));
+        TextView pkg = skin.label(rule.pkg, skin.muted, 11);
+        pkg.setTypeface(Typeface.MONOSPACE);
+        names.addView(pkg);
+
+        LinearLayout.LayoutParams namesAt = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        namesAt.leftMargin = skin.dp(12);
+        line.addView(names, namesAt);
+
+        TextView remove = skin.cross(30);
         remove.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 drop(rule);
             }
         });
-        line.addView(remove);
+        line.addView(remove, new LinearLayout.LayoutParams(skin.dp(30), skin.dp(30)));
         block.addView(line);
 
         final LinearLayout picker = skin.column();
         LinearLayout.LayoutParams pickAt = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        pickAt.topMargin = skin.dp(8);
+        pickAt.topMargin = skin.dp(10);
         block.addView(picker, pickAt);
         fill(picker, rule);
 
@@ -272,16 +294,77 @@ public class RoutingPage {
     }
 
     private void drop(final Rule rule) {
-        new AlertDialog.Builder(host, R.style.RoundDialog)
-                .setTitle(labelOf(rule.pkg))
-                .setMessage("Убрать правило?")
-                .setNegativeButton("Отмена", null)
-                .setPositiveButton("Убрать", (dialog, which) -> {
-                    rules.remove(rule);
-                    redraw();
-                    save();
-                })
-                .show();
+        LinearLayout wrap = skin.column();
+        wrap.setPadding(skin.dp(20), skin.dp(20), skin.dp(20), skin.dp(16));
+
+        LinearLayout head = new LinearLayout(host);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+
+        ImageView face = new ImageView(host);
+        GradientDrawable blank = new GradientDrawable();
+        blank.setColor(skin.idle);
+        blank.setCornerRadius(skin.dp(8));
+        face.setBackground(blank);
+        head.addView(face, new LinearLayout.LayoutParams(skin.dp(36), skin.dp(36)));
+        wear(face, rule.pkg);
+
+        LinearLayout names = skin.column();
+        names.addView(skin.label(labelOf(rule.pkg), skin.bold, 16));
+        TextView pkg = skin.label(rule.pkg, skin.muted, 11);
+        pkg.setTypeface(Typeface.MONOSPACE);
+        names.addView(pkg);
+
+        LinearLayout.LayoutParams namesAt = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        namesAt.leftMargin = skin.dp(12);
+        head.addView(names, namesAt);
+        wrap.addView(head);
+
+        TextView ask = skin.label("Удалить правило?", skin.text, 15);
+        LinearLayout.LayoutParams askAt = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        askAt.topMargin = skin.dp(18);
+        wrap.addView(ask, askAt);
+
+        LinearLayout feet = new LinearLayout(host);
+        feet.setOrientation(LinearLayout.HORIZONTAL);
+        feet.setGravity(Gravity.END);
+        LinearLayout.LayoutParams feetAt = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        feetAt.topMargin = skin.dp(20);
+        wrap.addView(feet, feetAt);
+
+        TextView keep = skin.button("Отмена", skin.idle);
+        TextView kill = skin.button("Удалить", 0xFFCF4444);
+        kill.setTextColor(0xFFFFFFFF);
+        LinearLayout.LayoutParams killAt = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        killAt.leftMargin = skin.dp(10);
+        feet.addView(keep);
+        feet.addView(kill, killAt);
+
+        final AlertDialog dialog = new AlertDialog.Builder(host, R.style.RoundDialog)
+                .setView(wrap)
+                .create();
+
+        keep.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+            }
+        });
+        kill.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+                rules.remove(rule);
+                redraw();
+                save();
+            }
+        });
+
+        dialog.show();
     }
 
 
@@ -308,27 +391,53 @@ public class RoutingPage {
 
     private void offer(final List<App> apps) {
         LinearLayout wrap = skin.column();
-        wrap.setPadding(skin.dp(18), skin.dp(8), skin.dp(18), 0);
+        wrap.setPadding(skin.dp(16), skin.dp(6), skin.dp(16), 0);
 
         final EditText search = new EditText(host);
         search.setHint("поиск");
-        search.setTextColor(skin.text);
+        search.setTextColor(skin.bold);
+        search.setHintTextColor(skin.muted);
+        search.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         search.setSingleLine(true);
+        search.setPadding(skin.dp(14), skin.dp(11), skin.dp(14), skin.dp(11));
+
+        GradientDrawable field = new GradientDrawable();
+        field.setColor(skin.ink);
+        field.setCornerRadius(skin.dp(14));
+        field.setStroke(Math.max(1, skin.dp(1) / 2), skin.edge);
+        search.setBackground(field);
         wrap.addView(search);
 
         final LinearLayout found = skin.column();
-        ScrollView scroll = new ScrollView(host);
+        Scroller scroll = new Scroller(host, skin);
         scroll.setClipChildren(false);
         scroll.setClipToPadding(false);
         scroll.addView(found);
-        wrap.addView(scroll, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, skin.dp(380)));
+        LinearLayout.LayoutParams listAt = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, skin.dp(380));
+        listAt.topMargin = skin.dp(10);
+        wrap.addView(scroll, listAt);
+
+        LinearLayout feet = new LinearLayout(host);
+        feet.setOrientation(LinearLayout.HORIZONTAL);
+        feet.setGravity(Gravity.END);
+        feet.setPadding(0, skin.dp(12), 0, skin.dp(14));
+
+        TextView shut = skin.button("Отмена", skin.idle);
+        feet.addView(shut);
+        wrap.addView(feet);
 
         final AlertDialog dialog = new AlertDialog.Builder(host, R.style.RoundDialog)
                 .setTitle("Приложение")
                 .setView(wrap)
-                .setNegativeButton("Отмена", null)
                 .create();
+
+        shut.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+            }
+        });
 
         fill(found, apps, "", dialog);
         search.addTextChangedListener(new TextWatcher() {
@@ -364,19 +473,111 @@ public class RoutingPage {
                 break;
             }
 
-            LinearLayout item = skin.column();
-            item.setPadding(0, skin.dp(10), 0, skin.dp(10));
-            item.addView(skin.label(app.label, skin.text, 15));
-            item.addView(skin.label(app.pkg, skin.muted, 11));
-            item.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    dialog.dismiss();
-                    adopt(app.pkg);
-                }
-            });
-            into.addView(item);
+            final boolean ruled = ruled(app.pkg);
+
+            LinearLayout item = new LinearLayout(host);
+            item.setOrientation(LinearLayout.HORIZONTAL);
+            item.setGravity(Gravity.CENTER_VERTICAL);
+            item.setPadding(skin.dp(8), skin.dp(8), skin.dp(10), skin.dp(8));
+
+            ImageView face = new ImageView(host);
+            GradientDrawable blank = new GradientDrawable();
+            blank.setColor(skin.idle);
+            blank.setCornerRadius(skin.dp(8));
+            face.setBackground(blank);
+            item.addView(face, new LinearLayout.LayoutParams(skin.dp(32), skin.dp(32)));
+            wear(face, app.pkg);
+
+            LinearLayout names = skin.column();
+            names.addView(skin.label(app.label, skin.bold, 14));
+            TextView pkg = skin.label(app.pkg, skin.muted, 11);
+            pkg.setTypeface(Typeface.MONOSPACE);
+            names.addView(pkg);
+
+            LinearLayout.LayoutParams namesAt = new LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+            namesAt.leftMargin = skin.dp(12);
+            item.addView(names, namesAt);
+
+            if (ruled) {
+                TextView tag = skin.label("в правилах", skin.muted, 11);
+                tag.setPadding(skin.dp(9), skin.dp(4), skin.dp(9), skin.dp(4));
+                GradientDrawable badge = new GradientDrawable();
+                badge.setColor(skin.idle);
+                badge.setCornerRadius(skin.dpf(9f));
+                tag.setBackground(badge);
+                item.addView(tag);
+                item.setAlpha(0.45f);
+            }
+
+            GradientDrawable seat = new GradientDrawable();
+            seat.setColor(0x00000000);
+            seat.setCornerRadius(skin.dp(12));
+            item.setBackground(skin.touchable(seat));
+            if (!ruled) {
+                item.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        dialog.dismiss();
+                        adopt(app.pkg);
+                    }
+                });
+            }
+
+            LinearLayout.LayoutParams itemAt = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            itemAt.bottomMargin = skin.dp(2);
+            into.addView(item, itemAt);
         }
+
+        if (shown == 0) {
+            TextView empty = skin.label("ничего не нашлось", skin.muted, 14);
+            empty.setGravity(Gravity.CENTER);
+            empty.setPadding(0, skin.dp(28), 0, skin.dp(28));
+            into.addView(empty);
+        }
+    }
+
+    // wear достаёт иконку приложения не в потоке отрисовки: их сотни, и каждая
+    // распаковывается из чужого apk. Уже добытые лежат в faces, поэтому набор в
+    // поиске перестраивает список без единого обращения к PackageManager.
+    private void wear(final ImageView face, final String pkg) {
+        Drawable known = faces.get(pkg);
+        if (known != null) {
+            face.setImageDrawable(known);
+            return;
+        }
+        if (loaders == null) {
+            loaders = Executors.newFixedThreadPool(2);
+        }
+        loaders.execute(new Runnable() {
+            @Override
+            public void run() {
+                Drawable got;
+                try {
+                    got = host.getPackageManager().getApplicationIcon(pkg);
+                } catch (Exception e) {
+                    return;
+                }
+                final Drawable ready = got;
+                host.runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        faces.put(pkg, ready);
+                        face.setImageDrawable(ready);
+                    }
+                });
+            }
+        });
+    }
+
+    private boolean ruled(String pkg) {
+        for (Rule rule : rules) {
+            if (rule.pkg.equals(pkg)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void adopt(String pkg) {
@@ -439,19 +640,26 @@ public class RoutingPage {
         }).start();
     }
 
-    // Only packages that ask for the internet can be routed anywhere, and that
-    // one condition also sweeps out the resource overlays and firmware services
-    // a plain MATCH_ALL listing drags in.
+    // В списке те, кому есть куда ходить, и те, кого человек видит у себя на
+    // экране. Одного разрешения INTERNET мало: Gemini, например, его не просит
+    // вовсе, потому что сам в сеть не ходит, — а правило для него всё равно
+    // нужно. Одного значка тоже мало: фоновые службы ходят в сеть без значка.
+    // Вместе эти два условия оставляют снаружи ровно мусор — оверлеи ресурсов
+    // и прошивочные службы, у которых нет ни того, ни другого.
     private List<App> installed() {
         if (catalogue != null) {
             return catalogue;
         }
 
         PackageManager packages = host.getPackageManager();
+        Set<String> launchable = launchable(packages);
         List<App> out = new ArrayList<>();
 
         for (PackageInfo info : packages.getInstalledPackages(PackageManager.GET_PERMISSIONS)) {
-            if (info.applicationInfo == null || !networked(info)) {
+            if (info.applicationInfo == null) {
+                continue;
+            }
+            if (!networked(info) && !launchable.contains(info.packageName)) {
                 continue;
             }
             if (info.packageName.equals(host.getPackageName())) {
@@ -474,6 +682,19 @@ public class RoutingPage {
         });
 
         catalogue = out;
+        return out;
+    }
+
+    // Одним запросом, а не вопросом про каждый пакет: их на телефоне сотни, и
+    // каждый такой вопрос — обращение к системе.
+    private static Set<String> launchable(PackageManager packages) {
+        Set<String> out = new HashSet<>();
+        Intent home = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
+        for (ResolveInfo found : packages.queryIntentActivities(home, 0)) {
+            if (found.activityInfo != null) {
+                out.add(found.activityInfo.packageName);
+            }
+        }
         return out;
     }
 

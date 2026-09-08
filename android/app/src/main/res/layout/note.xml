@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Уведомление — это сама кнопка подключения, как на экране клиента.
+     Обёртка нужна затем, что отрицательные отступы у корня система не
+     применяет: она сама задаёт ему размеры. У вложенного применяет наш же
+     контейнер, и так плашка дотягивается до краёв карточки. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:clipChildren="false"
+    android:clipToPadding="false">
+
+    <FrameLayout
+        android:id="@+id/note_pill"
+        android:layout_width="match_parent"
+        android:layout_height="72dp">
+
+        <TextView
+            android:id="@+id/note_text"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:textSize="18sp"
+            android:singleLine="true"
+            android:ellipsize="end" />
+
+        <ImageView
+            android:id="@+id/note_egress"
+            android:layout_width="50dp"
+            android:layout_height="50dp"
+            android:layout_gravity="end|center_vertical"
+            android:layout_marginEnd="11dp"
+            android:padding="10dp"
+            android:scaleType="fitCenter"
+            android:contentDescription="egress" />
+    </FrameLayout>
+</FrameLayout>

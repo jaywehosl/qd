@@ -23,7 +23,7 @@ type chained struct {
 	hops     int
 }
 
-func (c chained) key() string { return seatKey(c.endpoint, c.seat) }
+func (c chained) at() where { return where{c.endpoint, c.seat} }
 
 // open просит соседа взять флоу и отдаёт готовый стрим. Освобождение связи
 // привязано к закрытию стрима: пока хоть один флоу жив, сборщик связь не тронет.
@@ -72,9 +72,9 @@ func (c chained) open(ctx context.Context, dst netip.AddrPort, udp bool) (io.Rea
 			got.rsp.Body.Close()
 			return give(fmt.Errorf("%s refused the flow: %s", c.endpoint, got.rsp.Status))
 		}
-		key := c.key()
-		c.ls.hold(key)
-		return got.rsp.Body, pw, scancel, func() { c.ls.release(key) }, nil
+		at := c.at()
+		c.ls.hold(at)
+		return got.rsp.Body, pw, scancel, func() { c.ls.release(at) }, nil
 	}
 }
 

@@ -11,7 +11,8 @@ import android.view.View;
 
 public class Mark extends View {
 
-    private static final float SLIDE = 0.26f;
+    private static final float SLIDE = 195f;
+    private static final float BACK = 1.70158f;
 
     private final Paint line = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint rail = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -22,8 +23,9 @@ public class Mark extends View {
 
     private final float round;
     private float shown;
+    private float base;
     private float aim;
-    private long beat;
+    private long began;
 
     public Mark(Context host, Skin skin) {
         super(host);
@@ -53,13 +55,17 @@ public class Mark extends View {
         if (want == aim) {
             return;
         }
+        base = shown;
         aim = want;
+        began = SystemClock.elapsedRealtime();
         postInvalidateOnAnimation();
     }
 
     public void settle(boolean on) {
         aim = on ? 1f : 0f;
+        base = aim;
         shown = aim;
+        began = 0L;
         invalidate();
     }
 
@@ -71,14 +77,18 @@ public class Mark extends View {
             return;
         }
 
-        long now = SystemClock.elapsedRealtime();
-        long gap = beat == 0L ? 0L : now - beat;
-        beat = now;
-        if (shown != aim && gap > 0L && gap < 250L) {
-            float pace = gap / 1000f / SLIDE;
-            shown = aim > shown
-                    ? Math.min(aim, shown + pace)
-                    : Math.max(aim, shown - pace);
+        boolean moving = false;
+        if (began != 0L) {
+            float t = (SystemClock.elapsedRealtime() - began) / SLIDE;
+            if (t >= 1f) {
+                shown = aim;
+                began = 0L;
+            } else {
+                float p = t - 1f;
+                float eased = 1f + (BACK + 1f) * p * p * p + BACK * p * p;
+                shown = base + (aim - base) * eased;
+                moving = true;
+            }
         }
 
         box.set(0f, 0f, w, h);
@@ -91,7 +101,7 @@ public class Mark extends View {
         face(canvas, true, (1f - shown) * w, w, h);
         canvas.restore();
 
-        if (shown != aim) {
+        if (moving) {
             postInvalidateOnAnimation();
         }
     }

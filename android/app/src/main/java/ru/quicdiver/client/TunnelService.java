@@ -3,6 +3,7 @@ package ru.quicdiver.client;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.graphics.drawable.Icon;
 import android.app.PendingIntent;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
@@ -32,17 +33,22 @@ public class TunnelService extends VpnService {
 
     public static final String ACTION_START = "ru.quicdiver.client.START";
     public static final String ACTION_STOP = "ru.quicdiver.client.STOP";
+    // ACTION_IDLE поднимает службу без туннеля: она держит уведомление, через
+    // которое туннель и поднимают. Иначе оно жило бы только вместе с ним.
+    public static final String ACTION_IDLE = "ru.quicdiver.client.IDLE";
 
     static final String TAG = "quicdiver";
 
-    private static final String CHANNEL = "tunnel";
-    private static final int NOTE_ID = 1;
 
 
     private static volatile TunnelService live;
 
     private ParcelFileDescriptor held;
-    private Thread worker;
+    // turns — единственный поток, где случаются подъём и спуск. Пока каждый
+    // заводил свой, быстрые нажатия по виджету накладывались друг на друга:
+    // connect и disconnect шли одновременно, и клиент оставался ни жив ни мёртв.
+    private final java.util.concurrent.ExecutorService turns =
+            java.util.concurrent.Executors.newSingleThreadExecutor();
     private volatile Thread watch;
     private ConnectivityManager.NetworkCallback watcher;
     private volatile Network carrier;
@@ -138,11 +144,27 @@ public class TunnelService extends VpnService {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        String action = intent == null ? ACTION_START : intent.getAction();
+        // intent пуст, когда службу перезапустила сама система: тогда поднимаем
+        // только уведомление. Молча включать туннель за спиной незачем.
+        String action = intent == null ? ACTION_IDLE : intent.getAction();
+
+        if (ACTION_IDLE.equals(action)) {
+            showNote();
+            // Флаг выхода лежит в базе, и открыть её на главном потоке нельзя.
+            // Без этого после перезагрузки кнопки выхода нет до запуска клиента.
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    Core.readExit(TunnelService.this);
+                    Core.repaint(TunnelService.this);
+                }
+            }).start();
+            return START_STICKY;
+        }
 
         if (ACTION_STOP.equals(action)) {
             bringDown();
-            return START_NOT_STICKY;
+            return START_STICKY;
         }
 
         showNote();
@@ -348,41 +370,34 @@ public class TunnelService extends VpnService {
         }
     }
 
-    private synchronized void bringUp() {
-        if (worker != null) {
-            return;
-        }
-
-        worker = new Thread(new Runnable() {
+    private void bringUp() {
+        turns.execute(new Runnable() {
             @Override
             public void run() {
+                // Пока стояли в очереди, состояние могло стать нужным.
+                if (Core.up()) {
+                    return;
+                }
+                Core.turning(TunnelService.this, true);
                 try {
                     Client client = Core.client(TunnelService.this);
                     client.connect();
+                    Core.readExit(TunnelService.this);
                     Core.mark(TunnelService.this, true, client.node());
                     startWatch();
                 } catch (Exception e) {
                     Log.e(TAG, "bring up", e);
-                    try {
-                        Thread.sleep(900);
-                        Client again = Core.client(TunnelService.this);
-                        again.connect();
-                        Core.mark(TunnelService.this, true, again.node());
-                        startWatch();
-                        return;
-                    } catch (Exception twice) {
-                        Log.e(TAG, "bring up again", twice);
-                    }
                     Core.gaveUp(String.valueOf(e.getMessage()));
                     Core.mark(TunnelService.this, false, "");
                     update("Не удалось: " + e.getMessage());
-                    stopSelf();
+                    // Службу не гасим: она держит уведомление, из которого дозвон
+                    // и повторяют.
+                    showNote();
                 } finally {
-                    worker = null;
+                    Core.turning(TunnelService.this, false);
                 }
             }
         });
-        worker.start();
     }
 
     private void startWatch() {
@@ -435,7 +450,7 @@ public class TunnelService extends VpnService {
                 : String.format("%.1f %s", v, units[i]);
     }
 
-    private synchronized void bringDown() {
+    private void bringDown() {
         Thread ticking = watch;
         if (ticking != null) {
             ticking.interrupt();
@@ -444,17 +459,23 @@ public class TunnelService extends VpnService {
 
         Core.mark(this, false, "");
         held = null;
-        stopForeground(STOP_FOREGROUND_REMOVE);
+        // Служба остаётся жить с опущенным туннелем и держит уведомление: через
+        // него туннель и поднимают обратно, не открывая приложения.
+        showNote();
 
+        // Не через очередь: за ней может стоять двадцатисекундный дозвон, а
+        // отключение должно оборвать его сразу, а не дождаться конца.
         new Thread(new Runnable() {
             @Override
             public void run() {
+                Core.turning(TunnelService.this, true);
                 try {
                     Core.client(TunnelService.this).disconnect();
                 } catch (Exception e) {
                     Log.e(TAG, "stopping", e);
+                } finally {
+                    Core.turning(TunnelService.this, false);
                 }
-                stopSelf();
             }
         }).start();
     }
@@ -466,37 +487,22 @@ public class TunnelService extends VpnService {
         }
     }
 
-    private void showNote() {
-        NotificationManager manager = getSystemService(NotificationManager.class);
-        if (manager == null) {
+    static void refreshNote(android.content.Context context) {
+        TunnelService running = live;
+        if (running != null) {
+            running.showNote();
             return;
         }
-        if (manager.getNotificationChannel(CHANNEL) == null) {
-            NotificationChannel channel = new NotificationChannel(
-                    CHANNEL, "Туннель", NotificationManager.IMPORTANCE_LOW);
-            channel.setShowBadge(false);
-            channel.setSound(null, null);
-            manager.createNotificationChannel(channel);
-        }
+        Notes.post(context);
+    }
 
-        String where = Core.where();
-        String text = Core.up()
-                ? (where.isEmpty() ? "Подключён" : "Подключён через " + where)
-                : "Подключаюсь";
-
-        Notification note = new Notification.Builder(this, CHANNEL)
-                .setSmallIcon(R.drawable.ic_tile)
-                .setContentTitle("qd")
-                .setContentText(text)
-                .setOngoing(true)
-                .setContentIntent(openIntent())
-                .build();
-
+    private void showNote() {
         try {
             if (Build.VERSION.SDK_INT >= 34) {
-                startForeground(NOTE_ID, note, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+                startForeground(Notes.ID, Notes.build(this),
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
             } else {
-                startForeground(NOTE_ID, note);
+                startForeground(Notes.ID, Notes.build(this));
             }
         } catch (Exception e) {
             Log.e(TAG, "foreground", e);

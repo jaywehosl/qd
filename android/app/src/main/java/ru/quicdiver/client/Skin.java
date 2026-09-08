@@ -1,9 +1,13 @@
 package ru.quicdiver.client;
 
 import android.content.Context;
+import android.graphics.Color;
+import android.graphics.Outline;
 import android.graphics.drawable.GradientDrawable;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.View;
+import android.view.ViewOutlineProvider;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -34,6 +38,14 @@ public final class Skin {
         card = host.getColor(R.color.ink_card);
         edge = host.getColor(R.color.ink_edge);
         press = host.getColor(R.color.ink_press);
+    }
+
+    public int solid(int over) {
+        float a = Color.alpha(over) / 255f;
+        return Color.argb(255,
+                Math.round(Color.red(over) * a + Color.red(ink) * (1f - a)),
+                Math.round(Color.green(over) * a + Color.green(ink) * (1f - a)),
+                Math.round(Color.blue(over) * a + Color.blue(ink) * (1f - a)));
     }
 
     public GradientDrawable backdrop() {
@@ -70,7 +82,17 @@ public final class Skin {
         bg.setCornerRadius(dp(30));
         bg.setStroke(Math.max(1, dp(1) / 2), edge);
         box.setBackground(bg);
-        box.setElevation(dp(4));
+        // Свой контур: GradientDrawable отдаёт системе outline с нулевой альфой,
+        // если обводка полупрозрачна, а тень рисуется ровно по этой альфе. С edge
+        // на карточках тени не было вовсе, сколько ни поднимай elevation.
+        final float round = dpf(30f);
+        box.setOutlineProvider(new ViewOutlineProvider() {
+            @Override
+            public void getOutline(View view, Outline shape) {
+                shape.setRoundRect(0, 0, view.getWidth(), view.getHeight(), round);
+            }
+        });
+        box.setElevation(dpf(14f));
         return box;
     }
 
@@ -152,6 +174,28 @@ public final class Skin {
                 first ? wide : tight, first ? wide : tight,
         });
         return bg;
+    }
+
+    public GradientDrawable field() {
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(ink);
+        bg.setCornerRadius(dp(14));
+        bg.setStroke(Math.max(1, dp(1) / 2), edge);
+        return bg;
+    }
+
+    public TextView cross(int size) {
+        TextView shut = label("✕", muted, 15);
+        shut.setGravity(Gravity.CENTER);
+
+        GradientDrawable bg = new GradientDrawable();
+        bg.setShape(GradientDrawable.OVAL);
+        bg.setColor(card);
+        bg.setStroke(Math.max(1, dp(1) / 2), edge);
+        shut.setBackground(touchable(bg));
+        shut.setMinWidth(dp(size));
+        shut.setMinHeight(dp(size));
+        return shut;
     }
 
     public TextView button(String caption, int tone) {
