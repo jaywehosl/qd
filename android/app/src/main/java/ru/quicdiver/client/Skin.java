@@ -2,6 +2,7 @@ package ru.quicdiver.client;
 
 import android.content.Context;
 import android.graphics.Color;
+import android.graphics.Typeface;
 import android.graphics.Outline;
 import android.graphics.drawable.GradientDrawable;
 import android.util.TypedValue;
@@ -21,6 +22,7 @@ public final class Skin {
     public final int bad;
     public final int idle;
     public final int card;
+    public final int field;
     public final int edge;
     public final int press;
 
@@ -36,8 +38,24 @@ public final class Skin {
         bad = host.getColor(R.color.ink_bad);
         idle = host.getColor(R.color.ink_idle);
         card = host.getColor(R.color.ink_card);
+        field = host.getColor(R.color.ink_field);
         edge = host.getColor(R.color.ink_edge);
         press = host.getColor(R.color.ink_press);
+    }
+
+    // Обратная задача к solid: какой цвет положить с этой прозрачностью, чтобы
+    // поверх основания вышел ровно нужный. Полупрозрачная строка навигации иначе
+    // садится на пару единиц темнее карточек.
+    public int over(int want, int alpha) {
+        float a = alpha / 255f;
+        return Color.argb(alpha,
+                back(Color.red(want), Color.red(ink), a),
+                back(Color.green(want), Color.green(ink), a),
+                back(Color.blue(want), Color.blue(ink), a));
+    }
+
+    private static int back(int want, int under, float a) {
+        return Math.max(0, Math.min(255, Math.round((want - (1f - a) * under) / a)));
     }
 
     public int solid(int over) {
@@ -82,9 +100,9 @@ public final class Skin {
         bg.setCornerRadius(dp(30));
         bg.setStroke(Math.max(1, dp(1) / 2), edge);
         box.setBackground(bg);
+
         // Свой контур: GradientDrawable отдаёт системе outline с нулевой альфой,
-        // если обводка полупрозрачна, а тень рисуется ровно по этой альфе. С edge
-        // на карточках тени не было вовсе, сколько ни поднимай elevation.
+        // если обводка полупрозрачна, а тень рисуется ровно по этой альфе.
         final float round = dpf(30f);
         box.setOutlineProvider(new ViewOutlineProvider() {
             @Override
@@ -92,7 +110,11 @@ public final class Skin {
                 shape.setRoundRect(0, 0, view.getWidth(), view.getHeight(), round);
             }
         });
-        box.setElevation(dpf(14f));
+        // Широкая и мягкая: высоту даёт размытие, а не плотность. Цвет система
+        // домножает на свою альфу, поэтому треть здесь -- треть плотности.
+        box.setOutlineSpotShadowColor(0x4D000000);
+        box.setOutlineAmbientShadowColor(0x4D000000);
+        box.setElevation(dpf(20f));
         return box;
     }
 
@@ -111,6 +133,15 @@ public final class Skin {
         view.setMaxLines(1);
         view.setAutoSizeTextTypeUniformWithConfiguration(
                 least, most, 1, TypedValue.COMPLEX_UNIT_SP);
+    }
+
+    // Заголовок карточки говорит тем же голосом, что имя узла в шапке: тот
+    // жирный и контрастный, а остальные сидели приглушённым текстовым цветом.
+    public TextView title(String value) {
+        TextView view = label(value, bold, 17);
+        view.setTypeface(Typeface.DEFAULT_BOLD);
+        view.setPadding(0, 0, 0, dp(10));
+        return view;
     }
 
     public TextView head(String value) {
@@ -188,7 +219,7 @@ public final class Skin {
 
     public GradientDrawable field() {
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(ink);
+        bg.setColor(field);
         bg.setCornerRadius(dp(14));
         bg.setStroke(Math.max(1, dp(1) / 2), edge);
         return bg;

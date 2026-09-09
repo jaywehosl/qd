@@ -47,7 +47,9 @@ public class Halo extends FrameLayout {
                         view.getHeight() - view.getPaddingBottom(), girth);
             }
         });
-        setElevation(skin.dpf(6f));
+        setOutlineSpotShadowColor(0x4D000000);
+        setOutlineAmbientShadowColor(0x4D000000);
+        setElevation(skin.dpf(12f));
     }
 
     private float girth;

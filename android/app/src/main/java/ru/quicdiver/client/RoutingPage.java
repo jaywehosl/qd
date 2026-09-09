@@ -80,7 +80,7 @@ public class RoutingPage {
         page.setPadding(skin.dp(24), 0, skin.dp(24), 0);
 
         LinearLayout everything = skin.card();
-        everything.addView(skin.label("Захват всего трафика по умолчанию", skin.text, 17));
+        everything.addView(skin.title("Захват всего трафика по умолчанию"));
         everything.addView(skin.note(
                 "Как захватывается и маршрутизируется трафик приложений без своего правила "
                         + "и трафик самой системы"));
@@ -96,7 +96,7 @@ public class RoutingPage {
         LinearLayout bar = new LinearLayout(host);
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setGravity(Gravity.CENTER_VERTICAL);
-        bar.addView(skin.label("Правила", skin.text, 17),
+        bar.addView(skin.title("Правила"),
                 new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
         TextView add = skin.button("Выбрать приложение", skin.good);
@@ -336,7 +336,7 @@ public class RoutingPage {
         wrap.addView(feet, feetAt);
 
         TextView keep = skin.button("Отмена", skin.idle);
-        TextView kill = skin.button("Удалить", 0xFFCF4444);
+        TextView kill = skin.button("Удалить", skin.bad);
         kill.setTextColor(0xFFFFFFFF);
         LinearLayout.LayoutParams killAt = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
@@ -403,7 +403,7 @@ public class RoutingPage {
         search.setPadding(skin.dp(14), skin.dp(11), skin.dp(14), skin.dp(11));
 
         GradientDrawable field = new GradientDrawable();
-        field.setColor(skin.ink);
+        field.setColor(skin.field);
         field.setCornerRadius(skin.dp(14));
         field.setStroke(Math.max(1, skin.dp(1) / 2), skin.edge);
         search.setBackground(field);

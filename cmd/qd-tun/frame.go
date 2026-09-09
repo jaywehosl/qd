@@ -12,6 +12,13 @@ import (
 const (
 	wmNCCalcSize = 0x0083
 	wmNCHitTest  = 0x0084
+	wmSize       = 0x0005
+	wmDpiChanged = 0x02E0
+
+	rdwInvalidate  = 0x0001
+	rdwErase       = 0x0004
+	rdwAllChildren = 0x0080
+	rdwUpdateNow   = 0x0100
 
 	htClient      = 1
 	htCaption     = 2
@@ -44,6 +51,7 @@ var (
 	isZoomedCall     = user32.NewProc("IsZoomed")
 	getSystemMetrics = user32.NewProc("GetSystemMetrics")
 	setWindowPos     = user32.NewProc("SetWindowPos")
+	redrawWindow     = user32.NewProc("RedrawWindow")
 )
 
 type rect struct{ Left, Top, Right, Bottom int32 }
@@ -138,18 +146,43 @@ func chromeProc(handle uintptr, message uint32, wParam, lParam uintptr) uintptr 
 
 	case wmNCHitTest:
 		return chrome.hit(handle, lParam)
+
+	// Смена масштаба экрана приходит вместе с готовым прямоугольником: манифест
+	// объявляет per-monitor v2, и подогнать окно под новый масштаб должно само
+	// приложение. Без этого окно остаётся прежних размеров, а webview внутри
+	// перерисовывается кусками -- отсюда и прямоугольные лоскуты.
+	case wmDpiChanged:
+		box := (*rect)(unsafe.Pointer(lParam))
+		setWindowPos.Call(handle, 0,
+			uintptr(box.Left), uintptr(box.Top),
+			uintptr(box.Right-box.Left), uintptr(box.Bottom-box.Top),
+			uintptr(swpNoZOrder|swpNoActivate))
+		repaint(handle)
+		return 0
 	}
 
 	chrome.mu.Lock()
 	prev := chrome.prev
 	chrome.mu.Unlock()
 
+	var result uintptr
 	if prev != 0 {
-		result, _, _ := callWindowProc.Call(prev, handle, uintptr(message), wParam, lParam)
-		return result
+		result, _, _ = callWindowProc.Call(prev, handle, uintptr(message), wParam, lParam)
+	} else {
+		result, _, _ = defWindowProc.Call(handle, uintptr(message), wParam, lParam)
 	}
-	result, _, _ := defWindowProc.Call(handle, uintptr(message), wParam, lParam)
+
+	// Размер webview меняет уже сама библиотека; чего она не делает -- так это
+	// не просит перерисовать то, что оказалось за прежними границами.
+	if message == wmSize {
+		repaint(handle)
+	}
 	return result
+}
+
+func repaint(handle uintptr) {
+	redrawWindow.Call(handle, 0, 0,
+		uintptr(rdwInvalidate|rdwErase|rdwAllChildren|rdwUpdateNow))
 }
 
 func (f *frame) hit(handle uintptr, lParam uintptr) uintptr {

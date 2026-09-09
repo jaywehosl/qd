@@ -30,10 +30,12 @@ public class SettingsPage {
     private final Runnable onUnlinked;
 
     private TextView subLine;
-    private final int[] guardWhat = {Guard.BATTERY, Guard.VPN, Guard.NOTIFY, Guard.AUTOSTART};
-    private final TextView[] guardDot = new TextView[4];
-    private final TextView[] guardSaid = new TextView[4];
-    private final int[] guardWas = {-1, -1, -1, -1};
+    // Уведомления сюда не входят: туннель переживает и сон, и очистку памяти с
+    // отозванным разрешением на них -- служба остаётся передней и без показа.
+    private final int[] guardWhat = {Guard.BATTERY, Guard.VPN, Guard.AUTOSTART};
+    private final TextView[] guardDot = new TextView[3];
+    private final TextView[] guardSaid = new TextView[3];
+    private final int[] guardWas = {-1, -1, -1};
     private EditText refresh;
     private EditText upload;
     private Toggle connectOnOpen;
@@ -61,13 +63,13 @@ public class SettingsPage {
         page.setPadding(skin.dp(24), 0, skin.dp(24), 0);
 
         LinearLayout sub = skin.card();
-        sub.addView(skin.label("Подписка", skin.text, 17));
+        sub.addView(skin.title("Подписка"));
         subLine = skin.note("");
         sub.addView(subLine);
         page.addView(sub, skin.gap(14));
 
         LinearLayout local = skin.card();
-        local.addView(skin.label("На этом устройстве", skin.text, 17));
+        local.addView(skin.title("На этом устройстве"));
 
         refresh = number(local, "Обновлять подписку, минут");
         upload = number(local, "Ограничение отдачи, Мбит/с (0 — без)");
@@ -112,7 +114,7 @@ public class SettingsPage {
 
 
         LinearLayout guard = skin.card();
-        guard.addView(skin.label("Устойчивость фонового сервиса", skin.text, 17));
+        guard.addView(skin.title("Устойчивость фонового сервиса"));
 
         for (int i = 0; i < guardWhat.length; i++) {
             if (guardWhat[i] == Guard.AUTOSTART && Guard.rom() == Guard.ROM_STOCK) {
@@ -123,7 +125,7 @@ public class SettingsPage {
         page.addView(guard, skin.gap(14));
 
         LinearLayout diag = skin.card();
-        diag.addView(skin.label("Журнал", skin.text, 17));
+        diag.addView(skin.title("Журнал"));
         final View dump = chip("Выгрузить журнал в Загрузки", skin.good, 0xFFFFFFFF,
                 R.drawable.ic_journal, corners(true, true));
         dump.setOnClickListener(new View.OnClickListener() {
@@ -139,7 +141,7 @@ public class SettingsPage {
         page.addView(diag, skin.gap(14));
 
         LinearLayout danger = skin.card();
-        danger.addView(skin.label("Сброс", skin.text, 17));
+        danger.addView(skin.title("Сброс"));
 
         LinearLayout pair = new LinearLayout(host);
         pair.setOrientation(LinearLayout.HORIZONTAL);
@@ -155,7 +157,7 @@ public class SettingsPage {
         pair.addView(wipe, new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
-        View drop = chip("Отвязать подписку", 0xFFCF4444, 0xFFFFFFFF,
+        View drop = chip("Отвязать подписку", skin.bad, 0xFFFFFFFF,
                 R.drawable.ic_unlink, corners(false, true));
         drop.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -514,6 +516,11 @@ public class SettingsPage {
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
         lp.leftMargin = skin.dp(6);
         row.addView(caps, lp);
+
+        // Пустая распорка справа шириной со значок: без неё текст считает своей
+        // серединой всё, что осталось от значка, и уезжает вправо.
+        row.addView(new View(host), new LinearLayout.LayoutParams(
+                skin.dp(15) + skin.dp(6), skin.dp(1)));
 
         GradientDrawable bg = new GradientDrawable();
         bg.setColor(face);

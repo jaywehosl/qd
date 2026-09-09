@@ -42,7 +42,7 @@ public class Bar extends LinearLayout {
     public Bar(Context host, Skin skin, final Pick pick) {
         super(host);
         this.skin = skin;
-        this.round = skin.dpf(18f);
+        this.round = skin.dpf(22f);
 
         setOrientation(HORIZONTAL);
         setGravity(Gravity.CENTER);
@@ -52,9 +52,9 @@ public class Bar extends LinearLayout {
         fill.setColor(skin.idle);
 
         GradientDrawable tray = new GradientDrawable();
-        tray.setColor((skin.solid(skin.card) & 0x00FFFFFF) | 0xD9000000);
-        tray.setCornerRadius(skin.dp(24));
+        tray.setColor(skin.over(skin.solid(skin.card), 0xD9));
         tray.setStroke(Math.max(1, skin.dp(1) / 2), skin.edge);
+        tray.setCornerRadius(skin.dp(30));
         setBackground(tray);
 
         // Подключение посередине: это то, ради чего клиент открывают, и рука
@@ -73,7 +73,7 @@ public class Bar extends LinearLayout {
             LinearLayout chip = new LinearLayout(host);
             chip.setOrientation(HORIZONTAL);
             chip.setGravity(Gravity.CENTER);
-            chip.setPadding(skin.dp(9), skin.dp(19), skin.dp(9), skin.dp(19));
+            chip.setPadding(skin.dp(9), skin.dp(17), skin.dp(9), skin.dp(17));
             chip.setBackground(skin.touchable(new GradientDrawable()));
             chip.setOnClickListener(new View.OnClickListener() {
                 @Override

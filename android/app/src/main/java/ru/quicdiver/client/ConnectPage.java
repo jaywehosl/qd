@@ -73,7 +73,7 @@ public class ConnectPage {
         LinearLayout root = skin.column();
         root.setClipChildren(false);
         root.setClipToPadding(false);
-        root.setPadding(skin.dp(24), 0, skin.dp(24), skin.dp(94));
+        root.setPadding(skin.dp(24), 0, skin.dp(24), skin.dp(84));
 
         headCard = head();
         areaCard = area();
@@ -161,6 +161,9 @@ public class ConnectPage {
         spark.setGirth(skin.dpf(19f));
         spark.setWeight(skin.dpf(3f), skin.dpf(4f));
         spark.setTone(skin.good);
+        // Тень тут ни к чему: кнопка сидит внутри карточки, а слой Halo рисуется
+        // программно и на таком размере проступает светлым прямоугольником.
+        spark.setElevation(0f);
         spark.addView(again, new FrameLayout.LayoutParams(
                 skin.dp(38), skin.dp(38)));
 
@@ -189,7 +192,9 @@ public class ConnectPage {
             }
         });
         card.setClipToOutline(true);
-        card.setElevation(skin.dpf(14f));
+        card.setOutlineSpotShadowColor(0x4D000000);
+        card.setOutlineAmbientShadowColor(0x4D000000);
+        card.setElevation(skin.dpf(20f));
 
         flow = new Flow(host, skin);
         card.addView(flow, new FrameLayout.LayoutParams(

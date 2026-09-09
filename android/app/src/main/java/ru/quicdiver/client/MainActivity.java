@@ -1,11 +1,9 @@
 package ru.quicdiver.client;
 
-import android.Manifest;
 import android.app.Activity;
 import android.content.Context;
 import android.content.res.Configuration;
 import android.content.Intent;
-import android.content.pm.PackageManager;
 import android.graphics.Insets;
 import android.graphics.Outline;
 import android.net.Uri;
@@ -28,7 +26,6 @@ import org.json.JSONObject;
 
 public class MainActivity extends Activity {
 
-    private static final int NOTIFY = 1;
     private static final int CONSENT = 2;
 
     private static final int ROUTING = 0;
@@ -117,11 +114,13 @@ public class MainActivity extends Activity {
 
         dock = new FrameLayout(this);
         dock.setClipToOutline(true);
-        dock.setElevation(skin.dpf(14f));
+        dock.setOutlineSpotShadowColor(0x4D000000);
+        dock.setOutlineAmbientShadowColor(0x4D000000);
+        dock.setElevation(skin.dpf(20f));
         dock.setOutlineProvider(new ViewOutlineProvider() {
             @Override
             public void getOutline(View view, Outline shape) {
-                shape.setRoundRect(0, 0, view.getWidth(), view.getHeight(), skin.dpf(24f));
+                shape.setRoundRect(0, 0, view.getWidth(), view.getHeight(), skin.dpf(30f));
             }
         });
         glass = new Glass(this, skin, pages);
@@ -166,7 +165,6 @@ public class MainActivity extends Activity {
 
         handle(getIntent());
         surface();
-        askNotifications();
     }
 
     @Override
@@ -236,14 +234,7 @@ public class MainActivity extends Activity {
     private void rest(Sheet held) {
         held.view.setPadding(
                 held.view.getPaddingLeft(), held.top + skin.dp(32) + bars.top,
-                held.view.getPaddingRight(), held.bottom + skin.dp(108) + bars.bottom);
-    }
-
-    private void askNotifications() {
-        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, NOTIFY);
-        }
+                held.view.getPaddingRight(), held.bottom + skin.dp(98) + bars.bottom);
     }
 
     private void surface() {
