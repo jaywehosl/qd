@@ -1,14 +1,18 @@
 package ru.quicdiver.client;
 
 import android.content.Context;
+import android.content.res.ColorStateList;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.RectF;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.os.SystemClock;
+import android.text.TextPaint;
+import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -23,8 +27,9 @@ public class Bar extends LinearLayout {
     private static final float SLIDE = 260f;
 
     private final Skin skin;
-    private final TextView[] chips;
-    private final Drawable[] glyphs;
+    private final View[] chips;
+    private final TextView[] caps;
+    private final ImageView[] glyphs;
     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF slot = new RectF();
     private final RectF was = new RectF();
@@ -32,6 +37,7 @@ public class Bar extends LinearLayout {
     private final float round;
     private int chosen = -1;
     private long began;
+    private int room = -1;
 
     public Bar(Context host, Skin skin, final Pick pick) {
         super(host);
@@ -57,23 +63,17 @@ public class Bar extends LinearLayout {
         int[] icons = {R.drawable.ic_routing, R.drawable.ic_connect, R.drawable.ic_settings};
         int[] pages = {0, 1, 2};
 
-        chips = new TextView[names.length];
-        glyphs = new Drawable[names.length];
+        chips = new View[names.length];
+        caps = new TextView[names.length];
+        glyphs = new ImageView[names.length];
 
         for (int i = 0; i < names.length; i++) {
             final int at = pages[i];
 
-            Drawable glyph = host.getResources().getDrawable(icons[i]).mutate();
-            glyph.setBounds(0, 0, skin.dp(17), skin.dp(17));
-            glyph.setTint(skin.muted);
-            glyphs[i] = glyph;
-
-            TextView chip = skin.label(names[i], skin.muted, 12);
+            LinearLayout chip = new LinearLayout(host);
+            chip.setOrientation(HORIZONTAL);
             chip.setGravity(Gravity.CENTER);
-            chip.setSingleLine(true);
-            chip.setPadding(skin.dp(11), skin.dp(19), skin.dp(11), skin.dp(19));
-            chip.setCompoundDrawables(glyph, null, null, null);
-            chip.setCompoundDrawablePadding(skin.dp(5));
+            chip.setPadding(skin.dp(9), skin.dp(19), skin.dp(9), skin.dp(19));
             chip.setBackground(skin.touchable(new GradientDrawable()));
             chip.setOnClickListener(new View.OnClickListener() {
                 @Override
@@ -82,11 +82,67 @@ public class Bar extends LinearLayout {
                 }
             });
 
-            LayoutParams lp = new LayoutParams(
-                    LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, 1f);
-            addView(chip, lp);
+            // Иконка отдельной вью, а не значком при тексте: подбор размера
+            // считает свободное место без значка и на узком экране уверенно
+            // оставляет надпись обрезанной.
+            ImageView glyph = new ImageView(host);
+            glyph.setImageResource(icons[i]);
+            glyph.setImageTintList(ColorStateList.valueOf(skin.muted));
+            chip.addView(glyph, new LayoutParams(skin.dp(16), skin.dp(16)));
+            glyphs[i] = glyph;
+
+            TextView name = skin.label(names[i], skin.muted, 12);
+            name.setGravity(Gravity.CENTER);
+            name.setMaxLines(1);
+            LayoutParams nameAt = new LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f);
+            nameAt.leftMargin = skin.dp(5);
+            chip.addView(name, nameAt);
+            caps[i] = name;
+
+            addView(chip, new LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f));
             chips[i] = chip;
         }
+    }
+
+    // Подписи ужимаются под ширину экрана вручную: встроенный подбор размера
+    // отмеряет текст до того, как вес растянет ячейку, и оставляет максимум.
+    // Ширина в dp у соседних по диагонали телефонов разнится на десятую часть,
+    // а системный масштаб шрифта добавляет ещё столько же.
+    private void measureCaps(int wide) {
+        int free = (wide - getPaddingLeft() - getPaddingRight()) / chips.length
+                - skin.dp(9) * 2 - skin.dp(16) - skin.dp(5);
+        if (free <= 0 || free == room) {
+            return;
+        }
+        room = free;
+
+        float best = 8f;
+        for (float sp = 12f; sp >= 8f; sp -= 0.5f) {
+            float px = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, sp,
+                    getResources().getDisplayMetrics());
+            boolean fits = true;
+            for (TextView cap : caps) {
+                TextPaint ink = new TextPaint(cap.getPaint());
+                ink.setTextSize(px);
+                if (ink.measureText(cap.getText().toString()) > free) {
+                    fits = false;
+                    break;
+                }
+            }
+            if (fits) {
+                best = sp;
+                break;
+            }
+        }
+        for (TextView cap : caps) {
+            cap.setTextSize(TypedValue.COMPLEX_UNIT_SP, best);
+        }
+    }
+
+    @Override
+    protected void onMeasure(int wide, int tall) {
+        measureCaps(MeasureSpec.getSize(wide));
+        super.onMeasure(wide, tall);
     }
 
     public void show(int page) {
@@ -97,8 +153,8 @@ public class Bar extends LinearLayout {
 
         for (int i = 0; i < chips.length; i++) {
             boolean on = i == page;
-            chips[i].setTextColor(on ? skin.bold : skin.muted);
-            glyphs[i].setTint(on ? skin.bold : skin.muted);
+            caps[i].setTextColor(on ? skin.bold : skin.muted);
+            glyphs[i].setImageTintList(ColorStateList.valueOf(on ? skin.bold : skin.muted));
         }
 
         if (getWidth() <= 0) {
@@ -116,8 +172,7 @@ public class Bar extends LinearLayout {
 
     private RectF seat(int page) {
         View chip = chips[page];
-        RectF at = new RectF(chip.getLeft(), chip.getTop(), chip.getRight(), chip.getBottom());
-        return at;
+        return new RectF(chip.getLeft(), chip.getTop(), chip.getRight(), chip.getBottom());
     }
 
     @Override

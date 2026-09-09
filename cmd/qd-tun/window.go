@@ -81,6 +81,7 @@ func (s *shell) carry(url string) {
 	s.mu.Unlock()
 
 	handle := uintptr(view.Window())
+	fit(handle, 1280, 860)
 	dress(handle, false)
 	chrome.take(handle)
 
@@ -176,4 +177,66 @@ func front(view webview2.WebView) {
 		showWindowCall.Call(handle, swRestore)
 	}
 	setForegroundWin.Call(handle)
+}
+
+var (
+	getDpiForWindow = user32.NewProc("GetDpiForWindow")
+	monitorFromWin  = user32.NewProc("MonitorFromWindow")
+	getMonitorInfo  = user32.NewProc("GetMonitorInfoW")
+)
+
+const (
+	monitorNearest = 2
+	swpNoActivate  = 0x0010
+)
+
+type monitorInfo struct {
+	Size    uint32
+	Monitor rect
+	Work    rect
+	Flags   uint32
+}
+
+// Манифест объявляет per-monitor v2, и Windows окно не масштабирует: заказанные
+// 1280x860 остаются пикселями при любом масштабе, тогда как содержимое WebView2
+// растёт вместе с ним. На 4К со 150% окно выходило втрое меньше своей вёрстки.
+func fit(handle uintptr, wide, tall int32) {
+	if handle == 0 {
+		return
+	}
+
+	dpi := uintptr(96)
+	if got, _, _ := getDpiForWindow.Call(handle); got != 0 {
+		dpi = got
+	}
+	w := wide * int32(dpi) / 96
+	h := tall * int32(dpi) / 96
+
+	mon, _, _ := monitorFromWin.Call(handle, monitorNearest)
+	if mon == 0 {
+		setWindowPos.Call(handle, 0, 0, 0, uintptr(w), uintptr(h),
+			uintptr(swpNoMove|swpNoZOrder|swpNoActivate))
+		return
+	}
+
+	var info monitorInfo
+	info.Size = uint32(unsafe.Sizeof(info))
+	if ok, _, _ := getMonitorInfo.Call(mon, uintptr(unsafe.Pointer(&info))); ok == 0 {
+		setWindowPos.Call(handle, 0, 0, 0, uintptr(w), uintptr(h),
+			uintptr(swpNoMove|swpNoZOrder|swpNoActivate))
+		return
+	}
+
+	room := info.Work
+	if wide := (room.Right - room.Left) * 92 / 100; w > wide {
+		w = wide
+	}
+	if tall := (room.Bottom - room.Top) * 92 / 100; h > tall {
+		h = tall
+	}
+
+	x := room.Left + (room.Right-room.Left-w)/2
+	y := room.Top + (room.Bottom-room.Top-h)/2
+	setWindowPos.Call(handle, 0, uintptr(x), uintptr(y), uintptr(w), uintptr(h),
+		uintptr(swpNoZOrder|swpNoActivate))
 }

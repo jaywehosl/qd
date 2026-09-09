@@ -77,7 +77,7 @@ public class RoutingPage {
 
     public View build() {
         LinearLayout page = skin.column();
-        page.setPadding(skin.dp(22), 0, skin.dp(22), 0);
+        page.setPadding(skin.dp(24), 0, skin.dp(24), 0);
 
         LinearLayout everything = skin.card();
         everything.addView(skin.label("Захват всего трафика по умолчанию", skin.text, 17));
@@ -365,6 +365,7 @@ public class RoutingPage {
         });
 
         dialog.show();
+        skin.frame(dialog);
     }
 
 
@@ -456,6 +457,7 @@ public class RoutingPage {
         });
 
         dialog.show();
+        skin.frame(dialog);
     }
 
     private void fill(LinearLayout into, List<App> apps, String needle, final AlertDialog dialog) {
@@ -478,7 +480,9 @@ public class RoutingPage {
             LinearLayout item = new LinearLayout(host);
             item.setOrientation(LinearLayout.HORIZONTAL);
             item.setGravity(Gravity.CENTER_VERTICAL);
-            item.setPadding(skin.dp(8), skin.dp(8), skin.dp(10), skin.dp(8));
+            // Справа место под рельсу прокрутки: она выезжает поверх ряда и иначе
+            // ложится прямо на отметку о правиле.
+            item.setPadding(skin.dp(8), skin.dp(8), skin.dp(18), skin.dp(8));
 
             ImageView face = new ImageView(host);
             GradientDrawable blank = new GradientDrawable();

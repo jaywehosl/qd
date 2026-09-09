@@ -58,7 +58,7 @@ public class SettingsPage {
 
     public View build() {
         LinearLayout page = skin.column();
-        page.setPadding(skin.dp(22), 0, skin.dp(22), 0);
+        page.setPadding(skin.dp(24), 0, skin.dp(24), 0);
 
         LinearLayout sub = skin.card();
         sub.addView(skin.label("Подписка", skin.text, 17));
@@ -308,12 +308,14 @@ public class SettingsPage {
     }
 
     private void confirm(String heading, String body, final boolean subscription) {
-        new AlertDialog.Builder(host, R.style.RoundDialog)
+        AlertDialog box = new AlertDialog.Builder(host, R.style.RoundDialog)
                 .setTitle(heading)
                 .setMessage(body)
                 .setNegativeButton("Отмена", null)
                 .setPositiveButton("Да", (dialog, which) -> reset(subscription))
-                .show();
+                .create();
+        box.show();
+        skin.frame(box);
     }
 
     private void reset(final boolean subscription) {
@@ -506,9 +508,10 @@ public class SettingsPage {
         row.addView(mark, new LinearLayout.LayoutParams(skin.dp(15), skin.dp(15)));
 
         TextView caps = skin.label(caption, letter, 13);
-        caps.setSingleLine(true);
+        caps.setGravity(Gravity.CENTER);
+        skin.shrink(caps, 10, 13);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
         lp.leftMargin = skin.dp(6);
         row.addView(caps, lp);
 

@@ -104,6 +104,15 @@ public final class Skin {
         return view;
     }
 
+    // Разрешаем надписи ужаться. Ширина экрана в dp у соседних по диагонали
+    // телефонов разнится на десятую часть, а системный масштаб шрифта добавляет
+    // ещё столько же: то, что на одном влезает впритык, на другом обрезается.
+    public void shrink(TextView view, int least, int most) {
+        view.setMaxLines(1);
+        view.setAutoSizeTextTypeUniformWithConfiguration(
+                least, most, 1, TypedValue.COMPLEX_UNIT_SP);
+    }
+
     public TextView head(String value) {
         TextView view = label(value, text, 26);
         view.setPadding(0, 0, 0, dp(16));
@@ -142,6 +151,7 @@ public final class Skin {
 
             TextView cell = label(names[i], picked ? 0xFFFFFFFF : muted, 13);
             cell.setGravity(Gravity.CENTER);
+            shrink(cell, 9, 13);
             cell.setPadding(dp(2), dp(10), dp(2), dp(10));
             cell.setBackground(touchable(pill(picked, i == 0, i == names.length - 1)));
             cell.setOnClickListener(new android.view.View.OnClickListener() {
@@ -182,6 +192,18 @@ public final class Skin {
         bg.setCornerRadius(dp(14));
         bg.setStroke(Math.max(1, dp(1) / 2), edge);
         return bg;
+    }
+
+    // Диалог по умолчанию шире карточек под ним и живёт со своим радиусом. И то,
+    // и другое выбивается из ряда, стоит ему открыться поверх страницы.
+    public void frame(android.app.Dialog box) {
+        android.view.Window pane = box.getWindow();
+        if (pane == null) {
+            return;
+        }
+        pane.setLayout(
+                host.getResources().getDisplayMetrics().widthPixels - dp(24) * 2,
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
     }
 
     public TextView cross(int size) {

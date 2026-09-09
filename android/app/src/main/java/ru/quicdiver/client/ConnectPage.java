@@ -123,7 +123,7 @@ public class ConnectPage {
 
         title = skin.label("", skin.bold, 24);
         title.setTypeface(Typeface.DEFAULT_BOLD);
-        title.setSingleLine(true);
+        skin.shrink(title, 15, 24);
         FrameLayout.LayoutParams titleAt = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
         titleAt.gravity = Gravity.START | Gravity.CENTER_VERTICAL;
@@ -377,6 +377,7 @@ public class ConnectPage {
 
         powerLabel = skin.label("подключить", skin.bold, 27);
         powerLabel.setGravity(Gravity.CENTER);
+        skin.shrink(powerLabel, 17, 27);
         powerLabel.setTypeface(Typeface.DEFAULT_BOLD);
         power.addView(powerLabel, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));

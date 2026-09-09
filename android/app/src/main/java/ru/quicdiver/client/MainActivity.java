@@ -2,6 +2,8 @@ package ru.quicdiver.client;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.Context;
+import android.content.res.Configuration;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Insets;
@@ -55,6 +57,20 @@ public class MainActivity extends Activity {
             ticker.postDelayed(this, 1000);
         }
     };
+
+    // Системный масштаб шрифта множит каждую надпись, а вёрстка здесь плотная:
+    // при полуторном заголовки карточек уезжают в две строки, подписи под ними
+    // выталкивают кнопки, и экран рассыпается. Крупный шрифт уважаем, но до
+    // эталона, на который она нарисована. Мельче системного -- пожалуйста.
+    @Override
+    protected void attachBaseContext(Context base) {
+        Configuration cfg = new Configuration(base.getResources().getConfiguration());
+        if (cfg.fontScale > 1f) {
+            cfg.fontScale = 1f;
+            base = base.createConfigurationContext(cfg);
+        }
+        super.attachBaseContext(base);
+    }
 
     @Override
     protected void onCreate(Bundle saved) {
