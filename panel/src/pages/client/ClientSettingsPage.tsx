@@ -9,6 +9,7 @@ import { SettingListItem, Spin, VerticalTabs } from '@/components/ui';
 import { HttpUtil, SizeFormatter } from '@/utils';
 import { useClientState } from '@/hooks/useClientState';
 import { useClientSettings } from '@/layouts/ClientSettingsController';
+import { resetAll } from '@/stores/notificationStore';
 
 const TAB_SLUGS = ['preferences', 'about'];
 
@@ -59,6 +60,7 @@ export default function ClientSettingsPage() {
 
   const doReset = useCallback(async (withSubscription: boolean) => {
     await reset(withSubscription);
+    if (withSubscription) resetAll();
     // A reset moves the stored preferences, so the draft has to be re-forked
     // from what the daemon now holds.
     await queryClient.invalidateQueries({ queryKey: ['client', 'settings'] });

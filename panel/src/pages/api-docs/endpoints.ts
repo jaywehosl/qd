@@ -475,8 +475,10 @@ export const sections: readonly Section[] = [
           { name: 'entrypointIds', in: 'body (json)', type: 'integer[]', desc: 'Entrypoint IDs that make up the group.' },
           { name: 'deviceLimit', in: 'body (json)', type: 'integer', desc: 'How many devices each client in this group may use. 0 leaves them unlimited; a limit set on the client itself overrides this one.' },
           { name: 'allowExit', in: 'body (json)', type: 'boolean', desc: 'Whether clients in this group may route through an exit node. Off by default; a client may override it either way.' },
+          { name: 'relayEnable', in: 'body (json)', type: 'boolean', optional: true, desc: 'Whether clients in this group fall back to the document-cursor relay when no ingress answers directly.' },
+          { name: 'relays', in: 'body (json)', type: 'object[]', optional: true, desc: 'One public document link per ingress node: [{ "nodeId": 3, "weblink": "SkqX/..." }]. Each link is one coauthoring room, carried by exactly one ingress.' },
         ],
-        body: '{\n  "name": "russia-in",\n  "entrypointIds": [1, 2]\n}',
+        body: '{\n  "name": "russia-in",\n  "entrypointIds": [1, 2],\n  "relayEnable": true,\n  "relays": [{ "nodeId": 3, "weblink": "SkqX/bvsLtDZ3g" }]\n}',
         response: '{\n  "success": true,\n  "obj": {\n    "affected": 2\n  }\n}',
       },
       {

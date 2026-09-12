@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jaywehosl/quic-diver/internal/clientstate"
+	"github.com/jaywehosl/quic-diver/internal/qcli"
 	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
 )
 
@@ -32,6 +33,7 @@ type API struct {
 	selected int
 	netKey   *qdcrypt.Key
 	peers    []string
+	relays   []qcli.RelayLink
 }
 
 func New(db *clientstate.DB, platform Platform, seen *Visits, key *qdcrypt.Key) *API {
@@ -178,6 +180,17 @@ func (a *API) Import(uri string) error {
 	}
 	if err := a.db.ReplaceNodes(nodes); err != nil {
 		return err
+	}
+
+	links := make([]qcli.RelayLink, 0, len(link.Relays))
+	for _, r := range link.Relays {
+		links = append(links, qcli.RelayLink{Weblink: r.Weblink, Authority: r.Authority})
+	}
+	a.mu.Lock()
+	a.relays = links
+	a.mu.Unlock()
+	if len(links) > 0 {
+		fmt.Printf("relay    link carries %d relay(s), first via %s\n", len(links), links[0].Authority)
 	}
 
 	if link.NetworkKey != "" {
@@ -394,8 +407,41 @@ func (a *API) adoptNetworkDefaults(answer Standing) {
 	a.adoptExit(answer)
 	a.adoptRefresh(answer)
 	a.adoptEntrypoints(answer)
+	a.adoptRelays(answer)
 	a.adoptPeers(answer)
 	a.adoptAdmin(answer)
+}
+
+func (a *API) adoptRelays(answer Standing) {
+	links := make([]qcli.RelayLink, 0, len(answer.Relays))
+	for _, r := range answer.Relays {
+		if r.Weblink == "" || r.Authority == "" {
+			continue
+		}
+		links = append(links, qcli.RelayLink{Weblink: r.Weblink, Authority: r.Authority})
+	}
+	a.mu.Lock()
+	changed := len(links) != len(a.relays)
+	a.relays = links
+	a.mu.Unlock()
+	if changed && len(links) > 0 {
+		fmt.Printf("relay    subscription carries %d relay(s), first via %s\n", len(links), links[0].Authority)
+	}
+}
+
+func (a *API) currentRelays() []qcli.RelayLink {
+	a.mu.Lock()
+	held := append([]qcli.RelayLink{}, a.relays...)
+	a.mu.Unlock()
+	if len(held) > 0 {
+		return held
+	}
+	relays := a.db.RelayLinks()
+	out := make([]qcli.RelayLink, 0, len(relays))
+	for _, r := range relays {
+		out = append(out, qcli.RelayLink{Weblink: r.Weblink, Authority: r.Authority})
+	}
+	return out
 }
 
 func (a *API) adoptAdmin(answer Standing) {
@@ -628,7 +674,7 @@ func (a *API) Connect() error {
 		a.platform.SetExit(settings.Egress && sub.AllowExit)
 	}
 
-	if err := a.platform.Start(lane, session); err != nil {
+	if err := a.platform.Start(lane, a.currentRelays(), session); err != nil {
 		a.db.Notify("warning", "Could not bring the tunnel up: "+err.Error(), time.Now().UnixMilli())
 		return err
 	}

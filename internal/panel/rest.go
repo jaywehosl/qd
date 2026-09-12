@@ -455,6 +455,11 @@ func (a *API) groupEntrypoints(w http.ResponseWriter, r *http.Request) {
 		EntrypointIDs []int  `json:"entrypointIds"`
 		DeviceLimit   int    `json:"deviceLimit"`
 		AllowExit     bool   `json:"allowExit"`
+		RelayEnable   bool   `json:"relayEnable"`
+		Relays        []struct {
+			NodeID  int    `json:"nodeId"`
+			Weblink string `json:"weblink"`
+		} `json:"relays"`
 	}
 	if err := bindBody(r, &body); err != nil {
 		sendFail(w, err)
@@ -465,6 +470,12 @@ func (a *API) groupEntrypoints(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.EntrypointIDs == nil {
 		body.EntrypointIDs = []int{}
+	}
+	if body.Relays == nil {
+		body.Relays = []struct {
+			NodeID  int    `json:"nodeId"`
+			Weblink string `json:"weblink"`
+		}{}
 	}
 
 	groups, err := a.groups()
@@ -479,11 +490,13 @@ func (a *API) groupEntrypoints(w http.ResponseWriter, r *http.Request) {
 		results, err := a.write("groups.save", map[string]any{
 			"id": g.ID, "name": g.Name, "entrypointIds": body.EntrypointIDs,
 			"deviceLimit": body.DeviceLimit, "allowExit": body.AllowExit,
+			"relayEnable": body.RelayEnable, "relays": body.Relays,
 		})
 		if err != nil {
 			sendFailWith(w, err, results)
 			return
 		}
+		a.cache.forget()
 		sendOK(w, map[string]any{"nodes": results})
 		return
 	}

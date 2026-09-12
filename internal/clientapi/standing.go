@@ -16,6 +16,11 @@ type Entrypoint struct {
 	Port    int    `json:"port"`
 }
 
+type RelayLink struct {
+	Weblink   string `json:"weblink"`
+	Authority string `json:"authority"`
+}
+
 type Standing struct {
 	Known          bool         `json:"known"`
 	Carried        bool         `json:"carried"`
@@ -26,6 +31,7 @@ type Standing struct {
 	RefreshMinutes int          `json:"refreshMinutes"`
 	Denied         string       `json:"refused"`
 	Entrypoints    []Entrypoint `json:"entrypoints"`
+	Relays         []RelayLink  `json:"relays"`
 	Admin          bool         `json:"admin"`
 	FixedRate      int          `json:"fixedRate"`
 	Peers          []string     `json:"peers"`

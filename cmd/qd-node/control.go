@@ -571,6 +571,40 @@ func (state *controlState) reachableBy(c netstate.Client) []map[string]any {
 	return out
 }
 
+func (state *controlState) relaysFor(c netstate.Client) []map[string]any {
+	out := []map[string]any{}
+	network, err := state.db.LoadState()
+	if err != nil {
+		return out
+	}
+	var g *netstate.Group
+	for i := range network.Groups {
+		if network.Groups[i].ID == c.GroupID {
+			g = &network.Groups[i]
+			break
+		}
+	}
+	if g == nil || !g.RelayEnable {
+		return out
+	}
+	nodes := map[int]netstate.Node{}
+	for _, n := range network.Nodes {
+		nodes[n.ID] = n
+	}
+	for _, r := range g.Relays {
+		n, ok := nodes[r.NodeID]
+		if !ok || !n.Enable || r.Weblink == "" {
+			continue
+		}
+		authority := n.Authority
+		if authority == "" {
+			authority = fmt.Sprintf("%s:%d", n.Address, n.Port)
+		}
+		out = append(out, map[string]any{"weblink": r.Weblink, "authority": authority})
+	}
+	return out
+}
+
 func (state *controlState) whoami(token string, claim deviceClaim) map[string]any {
 	if token == "" {
 		return map[string]any{"admin": false}
@@ -605,6 +639,7 @@ func (state *controlState) whoami(token string, claim deviceClaim) map[string]an
 			"carried":        c.Enable && !expired && state.enable && state.servesClients() && state.carries(c),
 		}
 		answer["entrypoints"] = state.reachableBy(c)
+		answer["relays"] = state.relaysFor(c)
 		if c.Admin && c.Enable {
 			answer["peers"] = state.peerAddresses()
 		}
@@ -637,7 +672,15 @@ func (state *controlState) wrote(answer response, self bool) response {
 		state.applySelf()
 	}
 	state.syncSessions()
+	state.applyRelays()
 	return answer
+}
+
+func (state *controlState) applyRelays() {
+	if state.node == nil {
+		return
+	}
+	state.node.SetRelays(relaysForNode(state.db, state.id))
 }
 
 func (state *controlState) selfRow() (netstate.Node, bool) {

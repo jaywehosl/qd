@@ -48,6 +48,8 @@ CREATE TABLE IF NOT EXISTS groups (
     tag          TEXT    NOT NULL UNIQUE,
     allow_exit   INTEGER NOT NULL DEFAULT 0,
     device_limit INTEGER NOT NULL DEFAULT 0,
+    relay_enable INTEGER NOT NULL DEFAULT 0,
+    relays       TEXT    NOT NULL DEFAULT '',
     created_at   INTEGER NOT NULL
 );
 

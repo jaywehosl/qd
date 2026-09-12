@@ -163,6 +163,11 @@ export const ActiveInboundsByNodeSchema = z
   .nullable()
   .transform((v) => v ?? {});
 
+export const GroupRelaySchema = z.object({
+  nodeId: z.number(),
+  weblink: z.string(),
+}).loose();
+
 export const GroupSummarySchema = z.object({
   id: z.number().optional(),
   name: z.string(),
@@ -170,6 +175,8 @@ export const GroupSummarySchema = z.object({
   entrypointIds: nullableNumberArray.optional(),
   deviceLimit: z.number().optional(),
   allowExit: z.boolean().optional(),
+  relayEnable: z.boolean().optional(),
+  relays: z.array(GroupRelaySchema).nullable().transform((v) => v ?? []).optional(),
 }).loose();
 
 export const GroupSummaryListSchema = z.array(GroupSummarySchema).nullable().transform((v) => v ?? []);

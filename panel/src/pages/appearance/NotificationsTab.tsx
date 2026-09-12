@@ -41,7 +41,6 @@ const SEVERITY_ICON: Record<Severity, ReactNode> = {
 const CATEGORY_LABELS: { key: AlertCategory; label: string; hint: string }[] = [
   { key: 'security', label: 'Security warnings', hint: 'Default port / base path / HTTP exposure alerts' },
   { key: 'xray', label: 'Node reachability', hint: 'A node stopped answering the panel' },
-  { key: 'restart', label: 'Restart reminders', hint: 'Panel / core restart pending after a save' },
 ];
 
 function formatTime(ts: number): string {

@@ -37,7 +37,6 @@ public class MainActivity extends Activity {
     private Pager pages;
     private Bar bar;
     private FrameLayout dock;
-    private Glass glass;
 
     private ConnectPage connectPage;
     private RoutingPage routingPage;
@@ -123,8 +122,6 @@ public class MainActivity extends Activity {
                 shape.setRoundRect(0, 0, view.getWidth(), view.getHeight(), skin.dpf(30f));
             }
         });
-        glass = new Glass(this, skin, pages);
-        dock.addView(glass, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, 0));
         dock.addView(bar, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT));
         importPage = new ImportPage(this, skin, new Runnable() {
@@ -135,20 +132,6 @@ public class MainActivity extends Activity {
         });
 
         shell = new FrameLayout(this);
-        shell.getViewTreeObserver().addOnPreDrawListener(
-                new ViewTreeObserver.OnPreDrawListener() {
-                    @Override
-                    public boolean onPreDraw() {
-                        if (glass != null && glass.getHeight() != bar.getHeight()) {
-                            glass.getLayoutParams().height = bar.getHeight();
-                            glass.requestLayout();
-                        }
-                        if (glass != null) {
-                            glass.snap();
-                        }
-                        return true;
-                    }
-                });
         shell.setBackground(skin.backdrop());
         shell.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
             @Override

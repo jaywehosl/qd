@@ -23,6 +23,11 @@ type groupRow struct {
 	EntrypointIDs []int  `json:"entrypointIds"`
 	DeviceLimit   int    `json:"deviceLimit"`
 	AllowExit     bool   `json:"allowExit"`
+	RelayEnable   bool   `json:"relayEnable"`
+	Relays        []struct {
+		NodeID  int    `json:"nodeId"`
+		Weblink string `json:"weblink"`
+	} `json:"relays"`
 }
 
 func (a *API) groups() ([]groupRow, error) {
@@ -95,6 +100,28 @@ func (a *API) buildClients() ([]map[string]any, []string, error) {
 		tags = append(tags, g.Name)
 	}
 
+	nodeAuthority := map[int]string{}
+	if nodes, err := a.nodeRows(); err == nil {
+		for _, n := range nodes {
+			id := int(numberOf(n["id"]))
+			addr := textOf(n["address"])
+			port := int(numberOf(n["port"]))
+			if addr != "" && port > 0 {
+				nodeAuthority[id] = net.JoinHostPort(addr, strconv.Itoa(port))
+			}
+		}
+	}
+	relayByGroup := make(map[int][]clientstate.LinkRelay, len(groups))
+	for _, g := range groups {
+		for _, r := range g.Relays {
+			auth := nodeAuthority[r.NodeID]
+			if auth == "" || r.Weblink == "" {
+				continue
+			}
+			relayByGroup[g.ID] = append(relayByGroup[g.ID], clientstate.LinkRelay{Authority: auth, Weblink: r.Weblink})
+		}
+	}
+
 	where := a.entrypointAddresses()
 	key := hex.EncodeToString(a.fleet.key[:])
 	live := a.sessions()
@@ -138,6 +165,7 @@ func (a *API) buildClients() ([]map[string]any, []string, error) {
 				tag, _ := row["email"].(string)
 				row["uri"] = clientstate.Link{
 					Key: uuid, Label: tag, NetworkKey: key, Endpoints: reachable,
+					Relays: relayByGroup[group],
 				}.String()
 			}
 		}
@@ -639,6 +667,7 @@ func (a *API) groupsList(w http.ResponseWriter, r *http.Request) {
 			"id": g.ID, "name": g.Name, "clientCount": counts[g.ID],
 			"entrypointIds": g.EntrypointIDs, "deviceLimit": g.DeviceLimit,
 			"allowExit": g.AllowExit,
+			"relayEnable": g.RelayEnable, "relays": g.Relays,
 		})
 	}
 	sendOK(w, out)

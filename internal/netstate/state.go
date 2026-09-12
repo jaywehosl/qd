@@ -48,11 +48,18 @@ type Entrypoint struct {
 }
 
 type Group struct {
-	ID            int    `json:"id"`
-	Tag           string `json:"name"`
-	AllowExit     bool   `json:"allowExit"`
-	DeviceLimit   int    `json:"deviceLimit"`
-	EntrypointIDs []int  `json:"entrypointIds"`
+	ID            int          `json:"id"`
+	Tag           string       `json:"name"`
+	AllowExit     bool         `json:"allowExit"`
+	DeviceLimit   int          `json:"deviceLimit"`
+	EntrypointIDs []int        `json:"entrypointIds"`
+	RelayEnable   bool         `json:"relayEnable"`
+	Relays        []GroupRelay `json:"relays"`
+}
+
+type GroupRelay struct {
+	NodeID  int    `json:"nodeId"`
+	Weblink string `json:"weblink"`
 }
 
 type Client struct {

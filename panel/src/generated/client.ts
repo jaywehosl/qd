@@ -257,7 +257,7 @@ export const clientsApi = {
   },
 
   /** Replace the entrypoint set of a group. These become the only entrypoints its clients can reach and the only ones encoded into their connection URI. An empty set leaves the group granting nothing. Draft edit. */
-  groupsEntrypoints<T = unknown>(body: { name: string; entrypointIds: number[]; deviceLimit: number; allowExit: boolean }, options?: HttpOptions): Promise<Msg<T>> {
+  groupsEntrypoints<T = unknown>(body: { name: string; entrypointIds: number[]; deviceLimit: number; allowExit: boolean; relayEnable?: boolean; relays?: unknown[] }, options?: HttpOptions): Promise<Msg<T>> {
     return HttpUtil.post<T>('/panel/api/clients/groups/entrypoints', body, { ...JSON_HEADERS, ...options });
   },
 

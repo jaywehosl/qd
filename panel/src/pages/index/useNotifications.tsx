@@ -32,8 +32,7 @@ export interface NotificationRow {
  */
 export function useNotifications(): NotificationRow[] {
   const { t } = useTranslation();
-  const { fetched: settingsFetched, restartNeeded } = useSettingsController();
-  const xrayRestartNeeded = false;
+  const { fetched: settingsFetched } = useSettingsController();
   const { status, fetched: statusFetched } = useStatusQuery();
 
   // The dismissed set + per-category prefs + sensor config live in the store.
@@ -64,15 +63,7 @@ export function useNotifications(): NotificationRow[] {
     // 2) Security warnings — same checks as SettingsPage confAlerts. STABLE ids
     //    (per-check, not positional) so a dismissal sticks to the right alert.
 
-    // 3) Restart reminders.
-    if (prefs.restart && restartNeeded) {
-      rows.push({ id: 'restart-panel', category: 'restart', severity: 'warning', text: t('pages.index.notifyRestartPanel') });
-    }
-    if (prefs.restart && xrayRestartNeeded) {
-      rows.push({ id: 'restart-xray', category: 'restart', severity: 'warning', text: t('pages.index.notifyRestartXray') });
-    }
-
-    // 4) Status sensors (CPU/RAM/disk/sockets/uptime) — LIVE conditions: a row
+    // 3) Status sensors (CPU/RAM/disk/sockets/uptime) — LIVE conditions: a row
     //    shows the current value while over threshold, updates every poll, and
     //    auto-clears when it drops back. Dismissed-for-this-episode rows are
     //    hidden (re-armed by SensorWatcher once the value drops). Never logged
@@ -87,5 +78,5 @@ export function useNotifications(): NotificationRow[] {
 
     // Drop anything the user has X-ed away (it lives in history now).
     return rows.filter((r) => !dismissed.includes(r.id));
-  }, [t, settingsFetched, statusFetched, status, restartNeeded, xrayRestartNeeded, dismissed, prefs, sensors, sensorAcked]);
+  }, [t, settingsFetched, statusFetched, status, dismissed, prefs, sensors, sensorAcked]);
 }

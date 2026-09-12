@@ -111,8 +111,10 @@ func DialAuth(ctx context.Context, endpoint string, tmpl *uritemplate.Template, 
 	if err != nil {
 		return nil, nil, err
 	}
-	qc := qcAny.(*quicconn.Conn)
+	return DialAuthConn(ctx, qcAny.(*quicconn.Conn), tmpl, token, device, route, authURL)
+}
 
+func DialAuthConn(ctx context.Context, qc *quicconn.Conn, tmpl *uritemplate.Template, token, device, route, authURL string) (*Client, *http.Response, error) {
 	h3tr := &http3.Transport{EnableDatagrams: true}
 	cc := h3tr.NewClientConn(qc.QUIC())
 

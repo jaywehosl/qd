@@ -73,6 +73,18 @@ func (d *DB) Subscription() (Subscription, error) {
 	return s, nil
 }
 
+func (d *DB) RelayLinks() []LinkRelay {
+	sub, err := d.Subscription()
+	if err != nil || sub.URI == "" {
+		return nil
+	}
+	link, err := ParseLink(sub.URI)
+	if err != nil {
+		return nil
+	}
+	return link.Relays
+}
+
 func (d *DB) SaveSubscription(s Subscription) error {
 	_, err := d.sql.Exec(`
 		INSERT INTO subscription (id, uri, key, label, tag, admin, allow_exit, expires_at, created_at, last_refresh)

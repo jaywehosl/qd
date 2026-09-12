@@ -21,6 +21,7 @@ import (
 	"github.com/jaywehosl/quic-diver/internal/netstate"
 	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
 	"github.com/jaywehosl/quic-diver/internal/qsrv"
+	"github.com/jaywehosl/quic-diver/internal/qsrv/uplink/relay"
 	"github.com/jaywehosl/quic-diver/internal/store"
 )
 
@@ -216,6 +217,8 @@ func main() {
 	admission := newGate()
 	admission.setNetwork(key)
 
+	relays := relaysForNode(db, self.ID)
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -229,6 +232,7 @@ func main() {
 		Pool:      poolOf(settings.Pool),
 		TLS:       tlsConf,
 		Token:     key,
+		Relays:    relays,
 		Verify:    admission.verify,
 		Peers:     peersFrom(db, self.ID),
 		Tune:      func() qsrv.Tunables { return tunablesFrom(mustSettings(db)) },
@@ -319,6 +323,25 @@ func main() {
 	<-ctx.Done()
 	fmt.Println("\nstopping")
 	printStats(node)
+}
+
+func relaysForNode(db *store.DB, selfID int) []relay.Config {
+	groups, err := db.Groups()
+	if err != nil {
+		return nil
+	}
+	var out []relay.Config
+	for _, g := range groups {
+		if !g.RelayEnable {
+			continue
+		}
+		for _, r := range g.Relays {
+			if r.NodeID == selfID && r.Weblink != "" {
+				out = append(out, relay.Config{Public: r.Weblink})
+			}
+		}
+	}
+	return out
 }
 
 func mustSettings(db *store.DB) store.NetworkSettings {

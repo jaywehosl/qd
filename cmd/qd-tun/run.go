@@ -156,8 +156,10 @@ func runClient(opts runOptions) error {
 	admin = newAdminUI(key, db)
 	api.OnImport = func() {
 		admin.SetKey(api.Key())
+		syncRelays(db)
 		go api.Greet()
 	}
+	syncRelays(db)
 	go api.Greet()
 
 	ui, err := startLocalUI(opts.UIHost, opts.UIPort, api.Routes(), admin, func() bool {

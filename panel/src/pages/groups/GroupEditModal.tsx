@@ -43,10 +43,27 @@ export default function GroupEditModal({
   const [emails, setEmails] = useState<string[]>([]);
   const [deviceLimit, setDeviceLimit] = useState(0);
   const [allowExit, setAllowExit] = useState(false);
+  const [relayEnable, setRelayEnable] = useState(false);
+  const [relays, setRelays] = useState<Record<number, string>>({});
   const [saving, setSaving] = useState(false);
   const [touched, setTouched] = useState(false);
 
   const activeInbounds = useMemo(() => inbounds.filter((i) => i.enable !== false), [inbounds]);
+
+  const nodeOf = useMemo(() => {
+    const m = new Map<number, number>();
+    inbounds.forEach((ib) => { if (ib.nodeId != null) m.set(ib.id, ib.nodeId); });
+    return m;
+  }, [inbounds]);
+  const relayNodes = useMemo(() => {
+    const set = new Set<number>();
+    entrypointIds.forEach((id) => { const n = nodeOf.get(id); if (n != null) set.add(n); });
+    return [...set];
+  }, [entrypointIds, nodeOf]);
+  const nodeLabel = (nid: number) => {
+    const ib = inbounds.find((i) => i.nodeId === nid);
+    return ib ? entryLabel(ib) : `#${nid}`;
+  };
   const originalEmails = useMemo(
     () => clients.filter((c) => c.group === group?.name).map((c) => c.email),
     [clients, group?.name],
@@ -59,6 +76,11 @@ export default function GroupEditModal({
     setEmails(clients.filter((c) => c.group === group.name).map((c) => c.email));
     setDeviceLimit(Number((group as { deviceLimit?: number }).deviceLimit) || 0);
     setAllowExit(!!(group as { allowExit?: boolean }).allowExit);
+    setRelayEnable(!!(group as { relayEnable?: boolean }).relayEnable);
+    const seed: Record<number, string> = {};
+    ((group as { relays?: { nodeId: number; weblink: string }[] }).relays ?? [])
+      .forEach((r) => { seed[r.nodeId] = r.weblink; });
+    setRelays(seed);
     setTouched(false);
   });
 
@@ -95,11 +117,21 @@ export default function GroupEditModal({
         if (!msg?.success) { message.error(msg?.msg || t('somethingWentWrong')); return; }
       }
 
+      const relayList = relayNodes
+        .map((nid) => ({ nodeId: nid, weblink: (relays[nid] || '').trim() }))
+        .filter((r) => r.weblink !== '');
+      const origRelays = (group as { relays?: { nodeId: number; weblink: string }[] }).relays ?? [];
+      const byNode = (a: { nodeId: number }, b: { nodeId: number }) => a.nodeId - b.nodeId;
+      const relaysDiffer = JSON.stringify([...relayList].sort(byNode))
+        !== JSON.stringify([...origRelays].sort(byNode));
+
       if (!sameSet(entrypointIds, group.entrypointIds ?? [])
           || deviceLimit !== (Number((group as { deviceLimit?: number }).deviceLimit) || 0)
-          || allowExit !== !!(group as { allowExit?: boolean }).allowExit) {
+          || allowExit !== !!(group as { allowExit?: boolean }).allowExit
+          || relayEnable !== !!(group as { relayEnable?: boolean }).relayEnable
+          || relaysDiffer) {
         const msg = await clientsApi.groupsEntrypoints(
-          { name: nextName, entrypointIds, deviceLimit, allowExit }, { silent: true });
+          { name: nextName, entrypointIds, deviceLimit, allowExit, relayEnable, relays: relayList }, { silent: true });
         if (!msg?.success) { message.error(msg?.msg || t('somethingWentWrong')); return; }
       }
 
@@ -169,6 +201,35 @@ export default function GroupEditModal({
           aria-label={t('pages.groups.allowExit', { defaultValue: 'Allow exit nodes' })}
         />
       </div>
+
+      <div className="ge-toggle">
+        <span className="ge-toggle__label">
+          {t('pages.groups.relayEnable', { defaultValue: 'Relay fallback (via document cursor)' })}
+        </span>
+        <Switch
+          checked={relayEnable}
+          onChange={setRelayEnable}
+          aria-label={t('pages.groups.relayEnable', { defaultValue: 'Relay fallback' })}
+        />
+      </div>
+
+      {relayEnable && (
+        relayNodes.length === 0 ? (
+          <div className="ge-empty">{t('pages.groups.relayNoNodes', { defaultValue: 'Pick inbounds first — one relay link per ingress.' })}</div>
+        ) : (
+          <div className="ge-relays">
+            {relayNodes.map((nid) => (
+              <Field key={nid} label={nodeLabel(nid)}>
+                <Input
+                  value={relays[nid] ?? ''}
+                  onChange={(e) => setRelays((prev) => ({ ...prev, [nid]: e.target.value }))}
+                  placeholder={t('pages.groups.relayLink', { defaultValue: 'public document link id' })}
+                />
+              </Field>
+            ))}
+          </div>
+        )
+      )}
 
       <Divider>{t('pages.groups.inboundsInGroup', { defaultValue: 'Inbounds in group' })}</Divider>
       {activeInbounds.length === 0 ? (

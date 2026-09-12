@@ -9,6 +9,7 @@ import (
 
 	"github.com/jaywehosl/quic-diver/internal/clientapi"
 	"github.com/jaywehosl/quic-diver/internal/clientstate"
+	"github.com/jaywehosl/quic-diver/internal/qcli"
 	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
 )
 
@@ -18,11 +19,11 @@ type platform struct {
 
 func (p platform) Running() bool { return p.c.Running() }
 
-func (p platform) Start(servers []string, session uint32) error {
+func (p platform) Start(servers []string, relays []qcli.RelayLink, session uint32) error {
 	if len(servers) == 0 {
 		return fmt.Errorf("no entrypoint to dial")
 	}
-	return p.c.carry(servers, session)
+	return p.c.carry(servers, relays, session)
 }
 
 func (p platform) Stop() error {

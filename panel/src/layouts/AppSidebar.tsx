@@ -124,23 +124,16 @@ export default function AppSidebar() {
         </div>
 
         <div className="header-right">
-          {headerActions && (headerActions.dirty || headerActions.restartNeeded) && (
+          {headerActions && headerActions.dirty && (
             <div className="header-save-actions">
-              {headerActions.dirty && headerActions.onDiscard && (
+              {headerActions.onDiscard && (
                 <Button danger disabled={headerActions.busy} onClick={headerActions.onDiscard}>
                   {headerActions.discardText}
                 </Button>
               )}
-              {headerActions.dirty && (
-                <Button variant="primary" loading={headerActions.busy} onClick={headerActions.onSave}>
-                  {headerActions.saveText}
-                </Button>
-              )}
-              {headerActions.restartNeeded && !headerActions.dirty && (
-                <Button variant="primary" danger loading={headerActions.busy} onClick={headerActions.onRestart}>
-                  {headerActions.restartText}
-                </Button>
-              )}
+              <Button variant="primary" loading={headerActions.busy} onClick={headerActions.onSave}>
+                {headerActions.saveText}
+              </Button>
             </div>
           )}
           <div className="win-tray" data-drag="off">

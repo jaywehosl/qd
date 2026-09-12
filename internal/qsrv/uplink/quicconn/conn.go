@@ -261,6 +261,18 @@ const headStart = 250 * time.Millisecond
 
 var _ uplink.Dialer = Dialer{}
 
+func DialPacketConn(ctx context.Context, pc net.PacketConn, raddr net.Addr, tlsConf *tls.Config, quicConf *quic.Config) (*Conn, error) {
+	tr := &quic.Transport{Conn: pc}
+	qc, err := tr.Dial(ctx, raddr, ensureALPN(tlsConf), configOrDefault(quicConf))
+	if err != nil {
+		tr.Close()
+		return nil, err
+	}
+	c := &Conn{qc: qc, tr: tr, pc: pc, remote: raddr}
+	c.maxDgram.Store(defaultMaxDatagram)
+	return c, nil
+}
+
 // DefaultConfig — базовый quic.Config для QUIC Diver.
 //
 // Окна — чуть выше BDP и НЕ больше: BDP пути ≈ 768 Мбит × 14 мс ≈ 1.3 МБ.

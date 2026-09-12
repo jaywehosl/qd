@@ -19,6 +19,7 @@ import (
 	"github.com/jaywehosl/quic-diver/internal/qcli/packet"
 	windivert "github.com/jaywehosl/quic-diver/internal/qcli/wdsource"
 	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
+	"github.com/jaywehosl/quic-diver/internal/qwire"
 )
 
 type tunnelConfig struct {
@@ -130,7 +131,7 @@ func (t *tunnel) token() string {
 	return hex.EncodeToString(t.cfg.Key[:])
 }
 
-func (t *tunnel) Start(servers []string, sessionID uint32) error {
+func (t *tunnel) Start(servers []string, relays []qcli.RelayLink, sessionID uint32) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -140,6 +141,12 @@ func (t *tunnel) Start(servers []string, sessionID uint32) error {
 	if t.cfg.Key == nil {
 		return fmt.Errorf("no network key yet")
 	}
+
+	wr := make([]qwire.RelayLink, 0, len(relays))
+	for _, r := range relays {
+		wr = append(wr, qwire.RelayLink{Weblink: r.Weblink, Authority: r.Authority})
+	}
+	nodeTalk.SetRelays(wr)
 
 	dll, err := unpackDriver()
 	if err != nil {
@@ -158,6 +165,7 @@ func (t *tunnel) Start(servers []string, sessionID uint32) error {
 	}
 	plan.Dial = qcli.Options{
 		Endpoints: servers,
+		Relays:    relays,
 		Token:     t.token(),
 		Device:    deviceOf().ID,
 		Route:     routeTag(),
@@ -243,6 +251,9 @@ const dialWait = 20 * time.Second
 func (t *tunnel) bypass(live *qcli.Tunnel, keepOut []netip.Prefix) []netip.Prefix {
 	out := append([]netip.Prefix(nil), guard.New(nil).Bypasses()...)
 	for _, p := range live.Peers() {
+		out = append(out, netip.PrefixFrom(p, p.BitLen()))
+	}
+	for _, p := range live.RelayPeers() {
 		out = append(out, netip.PrefixFrom(p, p.BitLen()))
 	}
 	return append(out, keepOut...)

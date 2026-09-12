@@ -303,8 +303,8 @@ func restoreConfig(tx *sql.Tx, s *netstate.State) error {
 	}
 	for _, g := range s.Groups {
 		if _, err := tx.Exec(
-			`INSERT INTO groups (id, tag, allow_exit, created_at) VALUES (?, ?, ?, 0)`,
-			g.ID, g.Tag, g.AllowExit,
+			`INSERT INTO groups (id, tag, allow_exit, relay_enable, relays, created_at) VALUES (?, ?, ?, ?, ?, 0)`,
+			g.ID, g.Tag, g.AllowExit, g.RelayEnable, marshalRelays(g.Relays),
 		); err != nil {
 			return fmt.Errorf("store: restoring group %d: %w", g.ID, err)
 		}

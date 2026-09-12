@@ -26,16 +26,10 @@ export interface EditorDescriptor {
   id: string;
   /** unsaved edits exist */
   dirty: boolean;
-  /** a save succeeded and a restart is now appropriate */
-  restartNeeded: boolean;
   /** an action is in flight */
   busy: boolean;
   saveLabel: string;
-  restartLabel: string;
-  /** 'panel' reloads the whole frontend (superset); 'xray' restarts core only */
-  restartKind: 'panel' | 'xray';
   save: () => void | Promise<void>;
-  restart: () => void | Promise<void>;
   /** Optional secondary action rendered left of Save — throws the edits away
    *  instead of persisting them. Only editors whose draft outlives the page
    *  need it. */
@@ -46,13 +40,10 @@ export interface EditorDescriptor {
 /** The aggregate the header consumes (shape kept stable for AppSidebar). */
 export interface HeaderActionsState {
   dirty: boolean;
-  restartNeeded: boolean;
   busy: boolean;
   saveText: string;
-  restartText: string;
   discardText: string;
   onSave: () => void;
-  onRestart: () => void;
   onDiscard: (() => void) | null;
 }
 
@@ -73,13 +64,9 @@ export function HeaderActionsProvider({ children }: { children: ReactNode }) {
       if (
         ex
         && ex.dirty === d.dirty
-        && ex.restartNeeded === d.restartNeeded
         && ex.busy === d.busy
         && ex.saveLabel === d.saveLabel
-        && ex.restartLabel === d.restartLabel
-        && ex.restartKind === d.restartKind
         && ex.save === d.save
-        && ex.restart === d.restart
       ) {
         return prev; // no-op: avoids a re-render storm
       }
@@ -119,22 +106,15 @@ export function useHeaderActions(): HeaderActionsState | null {
   return useMemo(() => {
     const list = Object.values(editors);
     const dirtyEditors = list.filter((e) => e.dirty);
-    const restartEditors = list.filter((e) => e.restartNeeded);
-    if (dirtyEditors.length === 0 && restartEditors.length === 0) return null;
-
-    // Prefer a 'panel' restart — it's the superset (reloads frontend + core).
-    const target = restartEditors.find((e) => e.restartKind === 'panel') ?? restartEditors[0];
+    if (dirtyEditors.length === 0) return null;
 
     return {
       dirty: dirtyEditors.length > 0,
-      restartNeeded: restartEditors.length > 0,
       busy: list.some((e) => e.busy),
       saveText: dirtyEditors[0]?.saveLabel ?? '',
-      restartText: target?.restartLabel ?? '',
       discardText: dirtyEditors.find((e) => e.discard)?.discardLabel ?? '',
       // One Save click persists EVERY dirty editor (all pages' changes).
       onSave: () => { dirtyEditors.forEach((e) => { void e.save(); }); },
-      onRestart: () => { void target?.restart(); },
       onDiscard: dirtyEditors.some((e) => e.discard)
         ? () => { dirtyEditors.forEach((e) => { void e.discard?.(); }); }
         : null,
@@ -156,18 +136,16 @@ export function useRegisterEditor(desc: EditorDescriptor): void {
   ref.current = desc;
 
   const save = useCallback(() => ref.current.save(), []);
-  const restart = useCallback(() => ref.current.restart(), []);
   const discard = useCallback(() => ref.current.discard?.(), []);
   const hasDiscard = !!desc.discard;
 
-  const { id, dirty, restartNeeded, busy, saveLabel, restartLabel, restartKind, discardLabel } = desc;
+  const { id, dirty, busy, saveLabel, discardLabel } = desc;
   useEffect(() => {
     register({
-      id, dirty, restartNeeded, busy, saveLabel, restartLabel, restartKind, save, restart,
+      id, dirty, busy, saveLabel, save,
       discardLabel, discard: hasDiscard ? discard : undefined,
     });
-  }, [register, id, dirty, restartNeeded, busy, saveLabel, restartLabel, restartKind,
-      save, restart, discardLabel, hasDiscard, discard]);
+  }, [register, id, dirty, busy, saveLabel, save, discardLabel, hasDiscard, discard]);
 
   // clear on unmount only
   useEffect(() => () => unregister(id), [unregister, id]);

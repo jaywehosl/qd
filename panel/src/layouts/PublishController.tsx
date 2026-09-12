@@ -70,14 +70,10 @@ export function PublishControllerProvider({ children }: { children: ReactNode })
   useRegisterEditor({
     id: 'publish',
     dirty,
-    restartNeeded: false,
     busy,
     saveLabel: t('publish.publish'),
-    restartLabel: '',
-    restartKind: 'panel',
     discardLabel: t('publish.discard'),
     save: () => setOpen(true),
-    restart: () => {},
     discard,
   });
 

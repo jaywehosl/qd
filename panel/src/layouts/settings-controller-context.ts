@@ -14,12 +14,8 @@ export interface SettingsControllerValue {
   saveDisabled: boolean;
   /** convenience: there are unsaved edits */
   dirty: boolean;
-  /** a save just succeeded → a panel restart is appropriate to apply it */
-  restartNeeded: boolean;
   /** validate the draft, then save (or open the diff modal if enabled) */
   requestSave: () => void;
-  /** restart the panel immediately (no confirm) */
-  requestRestart: () => void;
 }
 
 // Kept in a component-free module on purpose: the context object must keep a

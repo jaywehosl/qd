@@ -148,7 +148,7 @@ func connectNow(db *clientstate.DB, tun *tunnel, sub clientstate.Subscription, k
 	if len(lane) == 0 {
 		return fmt.Errorf("no entrypoint to dial")
 	}
-	if err := tun.Start(lane, session); err != nil {
+	if err := tun.Start(lane, nil, session); err != nil {
 		return err
 	}
 

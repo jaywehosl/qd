@@ -39,6 +39,8 @@ func Open(path string) (*DB, error) {
 		`ALTER TABLE devices ADD COLUMN kind TEXT NOT NULL DEFAULT 'desktop'`,
 		`ALTER TABLE devices ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE groups ADD COLUMN device_limit INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE groups ADD COLUMN relay_enable INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE groups ADD COLUMN relays TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE clients ADD COLUMN allow_exit INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE network ADD COLUMN refresh_minutes INTEGER NOT NULL DEFAULT 480`,
 		`ALTER TABLE nodes ADD COLUMN uuid TEXT NOT NULL DEFAULT ''`,
@@ -145,12 +147,14 @@ func (d *DB) LoadState() (*netstate.State, error) {
 		return nil, err
 	}
 
-	if err := scan(d.sql, `SELECT id, tag, allow_exit, device_limit FROM groups ORDER BY id`,
+	if err := scan(d.sql, `SELECT id, tag, allow_exit, device_limit, relay_enable, relays FROM groups ORDER BY id`,
 		func(r *sql.Rows) error {
 			var g netstate.Group
-			if err := r.Scan(&g.ID, &g.Tag, &g.AllowExit, &g.DeviceLimit); err != nil {
+			var relays string
+			if err := r.Scan(&g.ID, &g.Tag, &g.AllowExit, &g.DeviceLimit, &g.RelayEnable, &relays); err != nil {
 				return err
 			}
+			g.Relays = parseRelays(relays)
 			g.EntrypointIDs = byGroup[g.ID]
 			s.Groups = append(s.Groups, g)
 			return nil

@@ -30,7 +30,6 @@ func (a *API) extraRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/panel/setting/all", a.settings)
 	mux.HandleFunc("/panel/setting/defaultSettings", a.settings)
 	mux.HandleFunc("/panel/setting/update", a.settings)
-	mux.HandleFunc("/panel/setting/restartPanel", a.restartAll)
 
 	a.dnsRoutes(mux)
 	a.themeRoutes(mux)

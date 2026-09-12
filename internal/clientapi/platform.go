@@ -1,6 +1,7 @@
 package clientapi
 
 import (
+	"github.com/jaywehosl/quic-diver/internal/qcli"
 	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
 )
 
@@ -22,7 +23,7 @@ type Process struct {
 
 type Platform interface {
 	Running() bool
-	Start(servers []string, session uint32) error
+	Start(servers []string, relays []qcli.RelayLink, session uint32) error
 	ServerName() string
 	Stop() error
 	SetKey(key *qdcrypt.Key)

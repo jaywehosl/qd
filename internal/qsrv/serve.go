@@ -82,28 +82,30 @@ func (n *Node) carry(ctx context.Context, conn *connectip.Conn, qc *quic.Conn, g
 
 	s := newLive(grant, address, peer, route)
 	s.conn = qc
+	defer conn.Close()
 
+	n.runStack(ctx, s, counted{conn: conn, s: s})
+}
+
+func (n *Node) runStack(ctx context.Context, s *live, tun netstack.Tunnel) {
 	n.mu.Lock()
-	if was := n.held[grant.Seat]; was != nil {
+	if was := n.held[s.grant.Seat]; was != nil {
 		n.pool.give(was.address)
 	}
-	n.held[grant.Seat] = s
+	n.held[s.grant.Seat] = s
 	n.mu.Unlock()
 
 	defer func() {
 		n.mu.Lock()
-		if n.held[grant.Seat] == s {
-			delete(n.held, grant.Seat)
+		if n.held[s.grant.Seat] == s {
+			delete(n.held, s.grant.Seat)
 		}
 		n.mu.Unlock()
-		n.pool.give(address)
-		conn.Close()
-		n.links.forget(grant.Seat)
+		n.pool.give(s.address)
+		n.links.forget(s.grant.Seat)
 	}()
 
-	tun := counted{conn: conn, s: s}
-
-	stack, err := netstack.NewWithMTU(steered{node: n, grant: grant, s: s, hops: defaultHops}, n.Tunables().MTU)
+	stack, err := netstack.NewWithMTU(steered{node: n, grant: s.grant, s: s, hops: defaultHops}, n.Tunables().MTU)
 	if err != nil {
 		return
 	}
@@ -114,6 +116,102 @@ func (n *Node) carry(ctx context.Context, conn *connectip.Conn, qc *quic.Conn, g
 }
 
 const exitDrain = 200 * time.Millisecond
+
+type streamTun struct {
+	r io.Reader
+	w io.Writer
+}
+
+func (t *streamTun) ReadPacket(b []byte) (int, error) {
+	var hdr [2]byte
+	if _, err := io.ReadFull(t.r, hdr[:]); err != nil {
+		return 0, err
+	}
+	n := int(binary.BigEndian.Uint16(hdr[:]))
+	if n > len(b) {
+		return 0, fmt.Errorf("stream tun: packet %d over buffer %d", n, len(b))
+	}
+	if _, err := io.ReadFull(t.r, b[:n]); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+func (t *streamTun) WritePacket(b []byte) ([]byte, error) {
+	var hdr [2]byte
+	binary.BigEndian.PutUint16(hdr[:], uint16(len(b)))
+	if _, err := t.w.Write(hdr[:]); err != nil {
+		return nil, err
+	}
+	if _, err := t.w.Write(b); err != nil {
+		return nil, err
+	}
+	if f, ok := t.w.(http.Flusher); ok {
+		f.Flush()
+	}
+	return nil, nil
+}
+
+type countedTun struct {
+	tun netstack.Tunnel
+	s   *live
+}
+
+func (c countedTun) ReadPacket(b []byte) (int, error) {
+	n, err := c.tun.ReadPacket(b)
+	if err == nil {
+		c.s.up.Add(uint64(n))
+		c.s.pktUp.Add(1)
+		c.s.lastSeen.Store(time.Now().Unix())
+	}
+	return n, err
+}
+
+func (c countedTun) WritePacket(b []byte) ([]byte, error) {
+	icmp, err := c.tun.WritePacket(b)
+	if err == nil {
+		c.s.down.Add(uint64(len(b)))
+		c.s.pktDown.Add(1)
+	}
+	return icmp, err
+}
+
+func (n *Node) serveIPOverTCP(ctx context.Context) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		grant, ok := n.carrier(r)
+		if !ok {
+			n.refused.Add(1)
+			n.site.ServeHTTP(w, r)
+			return
+		}
+		route := routeOf(r)
+		if route == "" {
+			route = sessionOf(r.Context()).heading()
+		}
+		peer := ""
+		if addr, ok := r.Context().Value(remoteKey{}).(string); ok {
+			peer = addr
+		}
+
+		w.WriteHeader(http.StatusOK)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		n.carryStream(ctx, &streamTun{r: r.Body, w: flushWriter{w}}, grant, peer, settled(route))
+	}
+}
+
+func (n *Node) carryStream(ctx context.Context, tun netstack.Tunnel, grant Grant, peer, route string) {
+	address, err := n.pool.take(grant.Seat)
+	if err != nil {
+		return
+	}
+
+	s := newLive(grant, address, peer, route)
+	s.stream = true
+
+	n.runStack(ctx, s, countedTun{tun: tun, s: s})
+}
 
 type counted struct {
 	conn *connectip.Conn

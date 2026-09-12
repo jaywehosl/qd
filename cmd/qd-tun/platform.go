@@ -5,6 +5,7 @@ package main
 import (
 	"github.com/jaywehosl/quic-diver/internal/clientapi"
 	"github.com/jaywehosl/quic-diver/internal/clientstate"
+	"github.com/jaywehosl/quic-diver/internal/qcli"
 	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
 )
 
@@ -15,8 +16,8 @@ type winPlatform struct {
 
 func (p winPlatform) Running() bool { return p.tun.Running() }
 
-func (p winPlatform) Start(servers []string, session uint32) error {
-	return p.tun.Start(servers, session)
+func (p winPlatform) Start(servers []string, relays []qcli.RelayLink, session uint32) error {
+	return p.tun.Start(servers, relays, session)
 }
 
 func (p winPlatform) Stop() error { return p.tun.Stop() }

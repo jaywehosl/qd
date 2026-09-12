@@ -2,17 +2,23 @@ package cip
 
 import (
 	"context"
-	"crypto/tls"
+	"encoding/binary"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/netip"
+	"sync"
 	"sync/atomic"
+
+	"crypto/tls"
 
 	"golang.org/x/net/http2"
 
 	"github.com/jaywehosl/quic-diver/internal/roads"
 )
+
+const ipOverTCPPath = "/qd/ipt"
 
 type Over struct {
 	conn   net.Conn
@@ -21,6 +27,10 @@ type Over struct {
 	token  string
 	device string
 	given  atomic.Pointer[netip.Prefix]
+
+	dgramMu sync.Mutex
+	dgramW  *io.PipeWriter
+	dgramR  io.ReadCloser
 }
 
 func DialOver(ctx context.Context, endpoint string, tlsConf *tls.Config, token, device, route, authURL string) (*Over, error) {
@@ -61,7 +71,42 @@ func DialOver(ctx context.Context, endpoint string, tlsConf *tls.Config, token, 
 			return nil, err
 		}
 	}
+	if err := over.openDatagram(endpoint, route); err != nil {
+		over.Close()
+		return nil, err
+	}
 	return over, nil
+}
+
+func (o *Over) openDatagram(endpoint, route string) error {
+	pr, pw := io.Pipe()
+	req, err := http.NewRequest(http.MethodPost, "https://"+endpoint+ipOverTCPPath, pr)
+	if err != nil {
+		pw.Close()
+		return err
+	}
+	req.Header.Set(tokenHeader, o.token)
+	if o.device != "" {
+		req.Header.Set(deviceHeader, o.device)
+	}
+	if route == "" {
+		route = hereExit
+	}
+	req.Header.Set(routeHeader, route)
+
+	resp, err := o.cc.RoundTrip(req)
+	if err != nil {
+		pw.Close()
+		return fmt.Errorf("datagram channel: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		pw.Close()
+		return fmt.Errorf("datagram channel refused: %d", resp.StatusCode)
+	}
+	o.dgramW = pw
+	o.dgramR = resp.Body
+	return nil
 }
 
 func (o *Over) greet(ctx context.Context, route string) error {
@@ -113,7 +158,15 @@ func (o *Over) Ask(ctx context.Context, route string) error {
 
 func (o *Over) Alive() bool { return o.cc != nil && o.cc.CanTakeNewRequest() }
 
-func (o *Over) Close() error { return o.conn.Close() }
+func (o *Over) Close() error {
+	if o.dgramW != nil {
+		o.dgramW.Close()
+	}
+	if o.dgramR != nil {
+		o.dgramR.Close()
+	}
+	return o.conn.Close()
+}
 
 func (o *Over) LocalPrefixes(context.Context) ([]netip.Prefix, error) {
 	if held := o.given.Load(); held != nil {
@@ -123,14 +176,37 @@ func (o *Over) LocalPrefixes(context.Context) ([]netip.Prefix, error) {
 }
 
 func (o *Over) ReadPacket(b []byte) (int, error) {
-	return 0, fmt.Errorf("no datagrams over tcp")
+	if o.dgramR == nil {
+		return 0, fmt.Errorf("no datagram channel")
+	}
+	var hdr [2]byte
+	if _, err := io.ReadFull(o.dgramR, hdr[:]); err != nil {
+		return 0, err
+	}
+	n := int(binary.BigEndian.Uint16(hdr[:]))
+	if n > len(b) {
+		return 0, fmt.Errorf("packet %d over buffer %d", n, len(b))
+	}
+	if _, err := io.ReadFull(o.dgramR, b[:n]); err != nil {
+		return 0, err
+	}
+	return n, nil
 }
 
 func (o *Over) WritePacket(b []byte) ([]byte, error) {
-	return nil, fmt.Errorf("no datagrams over tcp")
+	if o.dgramW == nil {
+		return nil, fmt.Errorf("no datagram channel")
+	}
+	frame := make([]byte, 2+len(b))
+	binary.BigEndian.PutUint16(frame, uint16(len(b)))
+	copy(frame[2:], b)
+	o.dgramMu.Lock()
+	_, err := o.dgramW.Write(frame)
+	o.dgramMu.Unlock()
+	return nil, err
 }
 
-func (o *Over) DatagramLimit() int { return 0 }
+func (o *Over) DatagramLimit() int { return 1280 }
 
 func (o *Over) Migrate(ctx context.Context, laddr *net.UDPAddr) error {
 	return fmt.Errorf("a tcp path does not migrate")

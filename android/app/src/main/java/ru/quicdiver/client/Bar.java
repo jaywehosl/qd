@@ -52,7 +52,7 @@ public class Bar extends LinearLayout {
         fill.setColor(skin.idle);
 
         GradientDrawable tray = new GradientDrawable();
-        tray.setColor(skin.over(skin.solid(skin.card), 0xD9));
+        tray.setColor(skin.card);
         tray.setStroke(Math.max(1, skin.dp(1) / 2), skin.edge);
         tray.setCornerRadius(skin.dp(30));
         setBackground(tray);

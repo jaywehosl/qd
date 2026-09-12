@@ -19,7 +19,7 @@ import (
 // carry поднимает туннель тем же порядком, что и клиент под Windows: сам
 // порядок живёт в clientrun, здесь остаётся только то, чем телефон отличается —
 // устройство от VpnService вместо драйвера захвата.
-func (c *Client) carry(servers []string, session uint32) error {
+func (c *Client) carry(servers []string, relays []qcli.RelayLink, session uint32) error {
 	c.turn.Lock()
 	defer c.turn.Unlock()
 
@@ -62,6 +62,7 @@ func (c *Client) carry(servers []string, session uint32) error {
 	held, err := clientrun.Carry(round, clientrun.Plan{
 		Dial: qcli.Options{
 			Endpoints: servers,
+			Relays:    relays,
 			Token:     c.token(),
 			Device:    c.device.ID,
 			Route:     c.route(),
@@ -158,6 +159,7 @@ func (c *Client) stopCarry() {
 	if live == nil {
 		return
 	}
+	live.StopRelay()
 
 	// Ждём конца датапути в стороне: держать на этом замок перехода значит
 	// заставить следующее нажатие ждать три секунды впустую.

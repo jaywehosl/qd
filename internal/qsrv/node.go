@@ -20,11 +20,13 @@ import (
 
 	"github.com/jaywehosl/quic-diver/internal/ippkt"
 	"github.com/jaywehosl/quic-diver/internal/qsrv/server/decoy"
+	"github.com/jaywehosl/quic-diver/internal/qsrv/uplink/relay"
 )
 
 const (
 	AuthPath      = "/qd/hello"
 	ConnectIPPath = "/qd/ip"
+	IPOverTCPPath = "/qd/ipt"
 	// RPCPath — управление одним запросом: путь несёт операцию, тело — её данные,
 	// ответ — её результат. Никакого своего кадрирования и шифрования поверх TLS:
 	// это осталось от UDP-датаграмм XDP-эпохи, где иначе было нельзя.
@@ -75,8 +77,9 @@ type Config struct {
 	SelfTag   string
 	Pool      netip.Prefix
 
-	TLS   *tls.Config
-	Token string
+	TLS    *tls.Config
+	Token  string
+	Relays []relay.Config
 
 	Verify func(raw string) (Grant, bool)
 	Peers  func() []Peer
@@ -138,6 +141,10 @@ type Node struct {
 
 	mu   sync.Mutex
 	held map[uint32]*live
+
+	srv           *http3.Server
+	relayMu       sync.Mutex
+	relaySessions map[string]*relay.Session
 }
 
 func New(cfg Config) *Node {
@@ -157,6 +164,8 @@ func New(cfg Config) *Node {
 		tmpl:  Template(cfg.Authority, ConnectIPPath),
 		site:  decoy.Handler(),
 		held:  map[uint32]*live{},
+
+		relaySessions: map[string]*relay.Session{},
 	}
 	n.Retune(n.tunables())
 	return n
@@ -327,6 +336,7 @@ func (n *Node) Run(ctx context.Context) error {
 	mux.Handle("/", n.site)
 	mux.HandleFunc(AuthPath, n.serveAuth)
 	mux.HandleFunc(ConnectIPPath, n.serveConnectIP(ctx))
+	mux.HandleFunc(IPOverTCPPath, n.serveIPOverTCP(ctx))
 	mux.HandleFunc(RPCPath, n.serveRPC)
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -358,8 +368,62 @@ func (n *Node) Run(ctx context.Context) error {
 	go n.serveSite(ctx, srv, handler)
 	go n.sweepLinks(ctx)
 
+	n.srv = srv
+	n.SetRelays(n.cfg.Relays)
+	defer n.stopRelays()
+
 	n.cfg.Log("quic      listening on %s, authority %s", n.cfg.Listen, n.cfg.Authority)
 	return srv.Serve(udp)
+}
+
+func (n *Node) SetRelays(cfgs []relay.Config) {
+	n.relayMu.Lock()
+	defer n.relayMu.Unlock()
+	if n.srv == nil {
+		return
+	}
+
+	want := map[string]relay.Config{}
+	for _, c := range cfgs {
+		if c.Public != "" {
+			want[c.Public] = c
+		}
+	}
+
+	for pub, sess := range n.relaySessions {
+		if _, ok := want[pub]; !ok {
+			sess.Stop()
+			delete(n.relaySessions, pub)
+			n.cfg.Log("relay     dropped %s", pub)
+		}
+	}
+
+	for pub, c := range want {
+		if _, ok := n.relaySessions[pub]; ok {
+			continue
+		}
+		sess := relay.New(c)
+		sess.Log = n.cfg.Log
+		pc := relay.NewPacketConn(sess)
+		if err := sess.Start(); err != nil {
+			n.cfg.Log("relay     %s will not start: %v", pub, err)
+			continue
+		}
+		n.relaySessions[pub] = sess
+		go func(pub string, pc net.PacketConn) {
+			n.cfg.Log("relay     %s carries quic over a cursor-relay", pub)
+			n.srv.Serve(pc)
+		}(pub, pc)
+	}
+}
+
+func (n *Node) stopRelays() {
+	n.relayMu.Lock()
+	defer n.relayMu.Unlock()
+	for pub, sess := range n.relaySessions {
+		sess.Stop()
+		delete(n.relaySessions, pub)
+	}
 }
 
 func (n *Node) admit(r *http.Request) (Grant, bool) {

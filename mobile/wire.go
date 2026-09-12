@@ -43,7 +43,23 @@ func (c *Client) wire() *qwire.Dialer {
 	held = c.talk
 	c.mu.Unlock()
 
+	c.syncRelays()
 	return held
+}
+
+func (c *Client) syncRelays() {
+	c.mu.Lock()
+	held := c.talk
+	c.mu.Unlock()
+	if held == nil {
+		return
+	}
+	relays := c.db.RelayLinks()
+	wr := make([]qwire.RelayLink, 0, len(relays))
+	for _, r := range relays {
+		wr = append(wr, qwire.RelayLink{Weblink: r.Weblink, Authority: r.Authority})
+	}
+	held.SetRelays(wr)
 }
 
 func (p platform) Wire() clientapi.Asker { return p.c.wire() }
@@ -69,4 +85,5 @@ func (c *Client) tellWire() {
 	if held != nil {
 		held.SetToken(c.netKeyHex())
 	}
+	c.syncRelays()
 }

@@ -22,8 +22,9 @@ import (
 const QUICHeadStart = 300 * time.Millisecond
 
 var (
-	only atomic.Bool
-	seen sync.Map
+	only      atomic.Bool
+	seen      sync.Map
+	relayMode atomic.Bool
 )
 
 // Only заставляет ходить только стримами. Нужно для отладки: обычно путь
@@ -34,6 +35,12 @@ func OnlyTCP() bool { return only.Load() }
 
 func Remember(endpoint string, overTCP bool) { seen.Store(endpoint, overTCP) }
 
+// SetRelay помнит, что прямой путь к узлу мёртв и добрались только релеем: дальше
+// дозвон идёт сразу в релей, без пятисекундного ожидания прямого таймаута.
+func SetRelay(on bool) { relayMode.Store(on) }
+
+func RelayMode() bool { return relayMode.Load() }
+
 // Forget сбрасывает память о путях: после смены сети прежний ответ ничего не
 // значит, UDP мог и открыться, и закрыться.
 func Forget() {
@@ -41,6 +48,7 @@ func Forget() {
 		seen.Delete(k)
 		return true
 	})
+	relayMode.Store(false)
 }
 
 // HeadStart — сколько ждать перед попыткой по TCP. Ноль, если этот узел уже

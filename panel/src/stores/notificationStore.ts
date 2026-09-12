@@ -20,7 +20,7 @@ export type Severity = 'danger' | 'warning' | 'info';
 export type NotifSource = 'toast' | 'alert' | 'event';
 
 /** Live-alert categories that can be toggled on/off in the Notifications tab. */
-export type AlertCategory = 'security' | 'xray' | 'restart';
+export type AlertCategory = 'security' | 'xray';
 
 export interface NotifRecord {
   id: string;
@@ -36,7 +36,6 @@ export interface NotifRecord {
 export interface AlertPrefs {
   security: boolean;
   xray: boolean;
-  restart: boolean;
 }
 
 /** Threshold sensors evaluated against the polled server `status` (Phase 2).
@@ -93,7 +92,7 @@ const DEFAULT_MAINTENANCE: MaintenancePrefs = {
   lastBackupAt: 0,
 };
 
-const DEFAULT_PREFS: AlertPrefs = { security: true, xray: true, restart: true };
+const DEFAULT_PREFS: AlertPrefs = { security: true, xray: true };
 
 // Community Panel default sensor profile (all live-condition sensors on).
 const DEFAULT_SENSORS: SensorPrefs = {
@@ -350,4 +349,20 @@ export function markBackupDone(): void {
 export function dismissEventByKey(key: string): void {
   if (!state.active.some((r) => r.key === key)) return;
   commit({ ...state, active: state.active.filter((r) => r.key !== key) });
+}
+
+export function resetAll(): void {
+  try {
+    localStorage.removeItem('uup.notifications.lastUpdateCheck');
+  } catch { /* ignore */ }
+  commit({
+    history: [],
+    active: [],
+    dismissed: [],
+    sensorAcked: [],
+    prefs: { ...DEFAULT_PREFS },
+    sensors: structuredClone(DEFAULT_SENSORS),
+    logWatch: { ...DEFAULT_LOGWATCH },
+    maintenance: { ...DEFAULT_MAINTENANCE },
+  });
 }

@@ -16,11 +16,17 @@ type Endpoint struct {
 	Port    int
 }
 
+type LinkRelay struct {
+	Authority string
+	Weblink   string
+}
+
 type Link struct {
 	Key        string
 	Label      string
 	NetworkKey string
 	Endpoints  []Endpoint
+	Relays     []LinkRelay
 }
 
 var ErrNotALink = errors.New("that is not a qd:// link")
@@ -58,6 +64,12 @@ func ParseLink(raw string) (Link, error) {
 		}
 		link.Endpoints = append(link.Endpoints, e)
 	}
+	for _, r := range u.Query()["relay"] {
+		authority, weblink, ok := strings.Cut(r, "|")
+		if ok && authority != "" && weblink != "" {
+			link.Relays = append(link.Relays, LinkRelay{Authority: authority, Weblink: weblink})
+		}
+	}
 	return link, nil
 }
 
@@ -92,6 +104,11 @@ func (l Link) String() string {
 	}
 	if l.NetworkKey != "" {
 		q.Set("k", l.NetworkKey)
+	}
+	for _, r := range l.Relays {
+		if r.Authority != "" && r.Weblink != "" {
+			q.Add("relay", r.Authority+"|"+r.Weblink)
+		}
 	}
 	if len(q) > 0 {
 		u.RawQuery = q.Encode()

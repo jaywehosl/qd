@@ -125,7 +125,8 @@ func diffGroups(old, cur *State) []Change {
 		delete(was, g.Tag)
 
 		membershipMoved := !sameInts(prev.EntrypointIDs, g.EntrypointIDs)
-		fieldsMoved := prev.ID != g.ID || prev.AllowExit != g.AllowExit
+		fieldsMoved := prev.ID != g.ID || prev.AllowExit != g.AllowExit ||
+			prev.RelayEnable != g.RelayEnable || !sameRelays(prev.Relays, g.Relays)
 		switch {
 		case fieldsMoved:
 			out = append(out, Change{"group", g.Tag, ActionUpdated})
@@ -178,6 +179,26 @@ func short(key string) string {
 		return key
 	}
 	return key[:12] + "…"
+}
+
+func sameRelays(a, b []GroupRelay) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	key := func(r GroupRelay) string { return fmt.Sprintf("%d/%s", r.NodeID, r.Weblink) }
+	seen := map[string]int{}
+	for _, r := range a {
+		seen[key(r)]++
+	}
+	for _, r := range b {
+		seen[key(r)]--
+	}
+	for _, n := range seen {
+		if n != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func sameInts(a, b []int) bool {

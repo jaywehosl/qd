@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -308,14 +309,38 @@ func (d *DB) DeleteClient(id int) error {
 	return nil
 }
 
+func marshalRelays(rs []netstate.GroupRelay) string {
+	if len(rs) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(rs)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+func parseRelays(s string) []netstate.GroupRelay {
+	if s == "" {
+		return nil
+	}
+	var out []netstate.GroupRelay
+	if json.Unmarshal([]byte(s), &out) != nil {
+		return nil
+	}
+	return out
+}
+
 func (d *DB) Groups() ([]netstate.Group, error) {
 	out := []netstate.Group{}
-	err := scan(d.sql, `SELECT id, tag, allow_exit, device_limit FROM groups ORDER BY id`,
+	err := scan(d.sql, `SELECT id, tag, allow_exit, device_limit, relay_enable, relays FROM groups ORDER BY id`,
 		func(r *sql.Rows) error {
 			var g netstate.Group
-			if err := r.Scan(&g.ID, &g.Tag, &g.AllowExit, &g.DeviceLimit); err != nil {
+			var relays string
+			if err := r.Scan(&g.ID, &g.Tag, &g.AllowExit, &g.DeviceLimit, &g.RelayEnable, &relays); err != nil {
 				return err
 			}
+			g.Relays = parseRelays(relays)
 			out = append(out, g)
 			return nil
 		})
@@ -355,8 +380,8 @@ func (d *DB) SaveGroup(g netstate.Group, now int64) (int, error) {
 	id := g.ID
 	if id == 0 {
 		res, err := tx.Exec(
-			`INSERT INTO groups (tag, allow_exit, device_limit, created_at) VALUES (?, ?, ?, ?)`,
-			g.Tag, g.AllowExit, g.DeviceLimit, now)
+			`INSERT INTO groups (tag, allow_exit, device_limit, relay_enable, relays, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+			g.Tag, g.AllowExit, g.DeviceLimit, g.RelayEnable, marshalRelays(g.Relays), now)
 		if err != nil {
 			return 0, err
 		}
@@ -366,7 +391,8 @@ func (d *DB) SaveGroup(g netstate.Group, now int64) (int, error) {
 		}
 		id = int(newID)
 	} else {
-		res, err := tx.Exec(`UPDATE groups SET tag = ?, allow_exit = ?, device_limit = ? WHERE id = ?`, g.Tag, g.AllowExit, g.DeviceLimit, id)
+		res, err := tx.Exec(`UPDATE groups SET tag = ?, allow_exit = ?, device_limit = ?, relay_enable = ?, relays = ? WHERE id = ?`,
+			g.Tag, g.AllowExit, g.DeviceLimit, g.RelayEnable, marshalRelays(g.Relays), id)
 		if err != nil {
 			return 0, err
 		}
