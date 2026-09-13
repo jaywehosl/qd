@@ -35,5 +35,4 @@ type Platform interface {
 	Processes() []Process
 	RulesChanged()
 	HoldAutostart(on bool) error
-	AutostartHeld() bool
 }

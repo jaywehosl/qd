@@ -110,7 +110,9 @@
       "importDatabaseError": "An error occurred while importing the database.",
       "backupPostgresNote": "This panel runs on PostgreSQL. Back Up downloads a pg_dump archive (.dump) and Restore loads it back with pg_restore. The server needs the PostgreSQL client tools (pg_dump and pg_restore) installed.",
       "exportDatabasePgDesc": "Click to download a PostgreSQL dump (.dump) of your current database to your device.",
-      "importDatabasePgDesc": "Click to select and upload a .dump file to restore your PostgreSQL database. This replaces all current data."
+      "importDatabasePgDesc": "Click to select and upload a .dump file to restore your PostgreSQL database. This replaces all current data.",
+      "notifyNodesNone": "No node is online — traffic has nowhere to go.",
+      "notifyNodesPartial": "{missing} of {total} nodes are not answering."
     },
     "inbounds": {
       "totalDownUp": "Total Sent/Received",
@@ -310,6 +312,12 @@
       "justNow": "just now",
       "deleteConfirmTitle": "Delete node \"{name}\"?",
       "deleteConfirmContent": "This stops monitoring the node. The remote panel itself is unaffected.",
+      "statusValues": {
+        "online": "Online",
+        "offline": "Offline",
+        "waiting": "Waiting for connection",
+        "unknown": "Unknown"
+      },
       "toasts": {
         "delete": "Delete node",
         "deleted": "Node deleted",
@@ -393,7 +401,26 @@
     "retry": "Retry {count} failed",
     "revision": "revision {n}",
     "attempts": "{n} attempts",
-    "skippedHint": "Nodes without a control channel are skipped — they pick this revision up when they reconnect."
+    "skippedHint": "Nodes without a control channel are skipped — they pick this revision up when they reconnect.",
+    "phase": {
+      "plan": "Plan",
+      "push": "Upload",
+      "apply": "Apply"
+    },
+    "hint": {
+      "plan": "Building each node’s configuration from the draft.",
+      "push": "Uploading. Nothing is live yet — a node stores the revision until it is told to apply it.",
+      "apply": "Switching the nodes onto the new revision. Established sessions are kept."
+    },
+    "state": {
+      "planned": "ready",
+      "pushing": "uploading",
+      "staged": "uploaded",
+      "applying": "applying",
+      "applied": "applied",
+      "failed": "failed",
+      "skipped": "skipped"
+    }
   },
   "client": {
     "menu": {

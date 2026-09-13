@@ -145,8 +145,6 @@ func (c *Client) appLists() (direct []string, allowed []string, carveOut bool) {
 
 func (p platform) HoldAutostart(on bool) error { return nil }
 
-func (p platform) AutostartHeld() bool { return false }
-
 func (c *Client) hold(assigned netip.Prefix, mtu int) (int, error) {
 	direct, allowed, carveOut := c.appLists()
 

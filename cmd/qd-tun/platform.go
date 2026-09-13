@@ -38,8 +38,6 @@ func (p winPlatform) Identify() clientapi.Device { return deviceOf() }
 
 func (p winPlatform) HoldAutostart(on bool) error { return holdAutostart(on) }
 
-func (p winPlatform) AutostartHeld() bool { return autostartHeld() }
-
 func (p winPlatform) Processes() []clientapi.Process {
 	running := runningProcesses()
 	out := make([]clientapi.Process, 0, len(running))
