@@ -12,32 +12,16 @@ type List struct {
 	blocked map[string]struct{}
 }
 
-func New() *List {
-	return &List{blocked: make(map[string]struct{})}
-}
-
 func Default() *List {
-	l := New()
-	l.Add(defaultList)
-	return l
-}
-
-func (l *List) Add(text string) int {
-	added := 0
-	for _, field := range strings.FieldsFunc(text, func(r rune) bool {
+	l := &List{blocked: map[string]struct{}{}}
+	for _, field := range strings.FieldsFunc(defaultList, func(r rune) bool {
 		return r == ',' || r == '\n' || r == '\r'
 	}) {
-		name := normalize(field)
-		if name == "" {
-			continue
+		if name := normalize(field); name != "" {
+			l.blocked[name] = struct{}{}
 		}
-		if _, seen := l.blocked[name]; seen {
-			continue
-		}
-		l.blocked[name] = struct{}{}
-		added++
 	}
-	return added
+	return l
 }
 
 func (l *List) Blocked(name string) bool {
@@ -56,13 +40,6 @@ func (l *List) Blocked(name string) bool {
 		name = name[dot+1:]
 	}
 	return false
-}
-
-func (l *List) Len() int {
-	if l == nil {
-		return 0
-	}
-	return len(l.blocked)
 }
 
 func normalize(name string) string {

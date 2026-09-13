@@ -51,8 +51,6 @@ html.is-dark .cset-about .cset-grid { border: 1px solid var(--edge); }
 
 .rt-rule + .rt-rule { border-top: 1px solid var(--edge); }
 
-/* The name is as wide as it reads; the path takes what is left, so it starts
-   right after the name instead of being pushed across the row. */
 .rt-rule__name {
   flex: 0 0 auto;
   min-width: 0;
@@ -74,8 +72,6 @@ html.is-dark .cset-about .cset-grid { border: 1px solid var(--edge); }
   white-space: nowrap;
 }
 
-/* The name and path take the free space, so the role picker and the delete
-   button sit at the row's right edge instead of trailing the text. */
 .rt-rule__id {
   flex: 1;
   min-width: 0;
@@ -115,8 +111,6 @@ html.is-dark .cset-about .cset-grid { border: 1px solid var(--edge); }
   font-weight: 500;
 }
 
-/* The pill is taller than one line of prose, so the text drops by half the
-   difference and its first line sits on the pill's centre. */
 .rt-legend__row > :last-child { padding-top: 3px; }
 
 .rt-note,

@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"strconv"
@@ -12,15 +13,9 @@ import (
 	"time"
 
 	"github.com/jaywehosl/quic-diver/internal/clientstate"
-	"github.com/jaywehosl/quic-diver/internal/qcli"
 	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
+	"github.com/jaywehosl/quic-diver/internal/qsrv/uplink/relay"
 )
-
-const probeTimeout = 1500 * time.Millisecond
-
-const ProbeTimeout = probeTimeout
-
-func PickNode(nodes []clientstate.Node) *clientstate.Node { return pickNode(nodes) }
 
 type API struct {
 	db       *clientstate.DB
@@ -29,11 +24,10 @@ type API struct {
 
 	OnImport func()
 
-	mu       sync.Mutex
-	selected int
-	netKey   *qdcrypt.Key
-	peers    []string
-	relays   []qcli.RelayLink
+	mu     sync.Mutex
+	netKey *qdcrypt.Key
+	peers  []string
+	relays []relay.Link
 }
 
 func New(db *clientstate.DB, platform Platform, seen *Visits, key *qdcrypt.Key) *API {
@@ -82,24 +76,22 @@ func (a *API) statePayload() (map[string]any, error) {
 		return nil, err
 	}
 
+	running := a.platform.Running()
 	reachable := 0
 	var current map[string]any
 	for _, n := range nodes {
 		if n.Reachable {
 			reachable++
 		}
-		if n.Selected {
+		if n.Selected && running {
 			current = nodeView(n)
 		}
-	}
-	if !a.platform.Running() {
-		current = nil
 	}
 
 	return map[string]any{
 		"imported":  sub.Imported,
 		"admin":     sub.Admin,
-		"connected": a.platform.Running(),
+		"connected": running,
 		"node":      current,
 		"nodes":     map[string]any{"total": len(nodes), "reachable": reachable},
 		"egress":    settings.Egress,
@@ -124,16 +116,19 @@ func nodeView(n clientstate.Node) map[string]any {
 	return v
 }
 
-func (a *API) state(w http.ResponseWriter, r *http.Request) {
-	payload, err := a.statePayload()
+func (a *API) nodeViews() ([]map[string]any, error) {
+	nodes, err := a.db.Nodes()
 	if err != nil {
-		fail(w, err)
-		return
+		return nil, err
 	}
-	ok(w, payload)
+	out := make([]map[string]any, 0, len(nodes))
+	for _, n := range nodes {
+		out = append(out, nodeView(n))
+	}
+	return out, nil
 }
 
-func (a *API) replyState(w http.ResponseWriter) {
+func (a *API) state(w http.ResponseWriter, r *http.Request) {
 	payload, err := a.statePayload()
 	if err != nil {
 		fail(w, err)
@@ -153,7 +148,7 @@ func (a *API) importLink(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	a.replyState(w)
+	a.state(w, r)
 }
 
 func (a *API) Import(uri string) error {
@@ -162,7 +157,6 @@ func (a *API) Import(uri string) error {
 		return err
 	}
 
-	now := time.Now().UnixMilli()
 	nodes := make([]clientstate.Node, 0, len(link.Endpoints))
 	for i, e := range link.Endpoints {
 		nodes = append(nodes, clientstate.Node{
@@ -173,7 +167,7 @@ func (a *API) Import(uri string) error {
 
 	sub := clientstate.Subscription{
 		URI: link.String(), Key: link.Key, Label: link.Label,
-		Tag: link.Label, CreatedAt: now,
+		Tag: link.Label, CreatedAt: time.Now().UnixMilli(),
 	}
 	if err := a.db.SaveSubscription(sub); err != nil {
 		return err
@@ -182,15 +176,11 @@ func (a *API) Import(uri string) error {
 		return err
 	}
 
-	links := make([]qcli.RelayLink, 0, len(link.Relays))
-	for _, r := range link.Relays {
-		links = append(links, qcli.RelayLink{Weblink: r.Weblink, Authority: r.Authority})
-	}
 	a.mu.Lock()
-	a.relays = links
+	a.relays = link.Relays
 	a.mu.Unlock()
-	if len(links) > 0 {
-		fmt.Printf("relay    link carries %d relay(s), first via %s\n", len(links), links[0].Authority)
+	if len(link.Relays) > 0 {
+		fmt.Printf("relay    link carries %d relay(s), first via %s\n", len(link.Relays), link.Relays[0].Authority)
 	}
 
 	if link.NetworkKey != "" {
@@ -203,104 +193,49 @@ func (a *API) Import(uri string) error {
 		a.OnImport()
 	}
 
-	go func() {
-		reached := a.ProbeAll()
-		if reached == 0 {
-			a.db.Notify("warning", "No node answered this link yet.", time.Now().UnixMilli())
-			return
-		}
-		if fresh, err := a.db.Subscription(); err == nil {
-			fresh.LastRefresh = time.Now().UnixMilli()
-			a.db.SaveSubscription(fresh)
-		}
-		a.db.Notify("info",
-			fmt.Sprintf("Subscription imported: %d of %d entrypoints reachable.", reached, len(nodes)),
-			time.Now().UnixMilli())
-	}()
+	go a.check("imported")
 	return nil
 }
 
-// ProbeReach меряет задержку до каждой точки входа вопросом «whoami»: он же
-// отмечает присутствие клиента в базе узла. Раньше сюда летел свой ping-кадр,
-// зашифрованный ключом сети, а отвечал на него XDP прямо в ядре.
-func (a *API) ProbeReach() int {
-	nodes, err := a.db.Nodes()
-	if err != nil {
-		return 0
-	}
+func (a *API) check(verb string) (int, error) {
 	sub, err := a.db.Subscription()
-	if err != nil || !sub.Imported {
-		return 0
+	if err != nil {
+		return 0, err
 	}
-	wire := a.wire()
-	if wire == nil {
-		return 0
+	if !sub.Imported {
+		return 0, fmt.Errorf("nothing imported yet")
 	}
 
-	type result struct {
-		id      int
-		latency int
+	now := time.Now().UnixMilli()
+	reached, err := a.take()
+	if err != nil {
+		return 0, err
 	}
-	results := make(chan result, len(nodes))
-
-	var wg sync.WaitGroup
-	for _, n := range nodes {
-		wg.Add(1)
-		go func(n clientstate.Node) {
-			defer wg.Done()
-
-			where := net.JoinHostPort(n.Address, strconv.Itoa(n.Port))
-			began := time.Now()
-			if err := wire.Ask(where, "whoami", sub.Key, claim(a.platform.Identify(), sub.Key), nil); err != nil {
-				results <- result{id: n.ID, latency: -1}
-				return
-			}
-			results <- result{id: n.ID, latency: int(time.Since(began).Milliseconds())}
-		}(n)
+	if reached == 0 {
+		a.db.Notify("warning",
+			"No entrypoint answered — the subscription was left as it stands.", now)
+		return 0, fmt.Errorf("no entrypoint answered")
 	}
-	wg.Wait()
-	close(results)
 
-	reached := 0
-	for r := range results {
-		if r.latency >= 0 {
-			reached++
-		}
-		a.db.MarkReach(r.id, r.latency, r.latency >= 0)
+	if fresh, err := a.db.Subscription(); err == nil {
+		sub = fresh
 	}
-	return reached
+	sub.LastRefresh = now
+	a.db.SaveSubscription(sub)
+
+	nodes, _ := a.db.Nodes()
+	a.db.Notify("info",
+		fmt.Sprintf("Subscription %s: %d of %d entrypoints reachable.", verb, reached, len(nodes)), now)
+	return reached, nil
 }
 
-func (a *API) ProbeAll() int {
-	reached := a.ProbeReach()
-
-	nodes, err := a.db.Nodes()
-	if err != nil {
-		return reached
-	}
-	sub, err := a.db.Subscription()
-	if err != nil || !sub.Imported {
-		return reached
-	}
-
-	if answer, heard := AskStanding(nodes, a.key(), sub.Key, a.platform.Identify(), a.wire()); heard {
-		a.adoptNetworkDefaults(answer)
-		if answer.Refused() {
-			a.db.Notify("error", answer.Why(), time.Now().UnixMilli())
-			a.platform.Stop()
-		}
-	}
-	return reached
-}
+func (a *API) Refresh() (int, error) { return a.check("checked") }
 
 func (a *API) KeepFresh(stop <-chan struct{}) {
 	missed := 0
 
 	for {
-		wait := a.untilDue()
-		if wait > pollCap {
-			wait = pollCap
-		}
+		wait := min(a.untilDue(), pollCap)
 		if missed > 0 {
 			wait = retryIn(missed)
 		}
@@ -337,11 +272,7 @@ const (
 )
 
 func retryIn(missed int) time.Duration {
-	wait := time.Duration(missed) * 30 * time.Second
-	if wait > 10*time.Minute {
-		return 10 * time.Minute
-	}
-	return wait
+	return min(time.Duration(missed)*30*time.Second, 10*time.Minute)
 }
 
 func (a *API) KeepProbing(stop <-chan struct{}, every time.Duration) {
@@ -354,16 +285,10 @@ func (a *API) KeepProbing(stop <-chan struct{}, every time.Duration) {
 			return
 		case <-tick.C:
 		}
-		if sub, err := a.db.Subscription(); err != nil || !sub.Imported {
-			continue
-		}
-		a.ProbeReach()
+		a.sweep()
 	}
 }
 
-// untilDue counts from the last refresh, not from whenever this loop happened
-// to start. Counting from the start means a subscription that is already overdue
-// waits a whole further interval — the page says "now" and nothing happens.
 func (a *API) untilDue() time.Duration {
 	every := 60 * time.Minute
 	if settings, err := a.db.Settings(); err == nil && settings.RefreshMinutes > 0 {
@@ -377,27 +302,18 @@ func (a *API) untilDue() time.Duration {
 	if sub.LastRefresh <= 0 {
 		return pollFloor
 	}
-
-	left := time.Until(time.UnixMilli(sub.LastRefresh).Add(every))
-	if left < 5*time.Second {
-		return 5 * time.Second
-	}
-	return left
+	return max(time.Until(time.UnixMilli(sub.LastRefresh).Add(every)), pollFloor)
 }
 
 func (a *API) Greet() {
-	answer, heard := a.Standing()
-	if !heard {
+	reached, err := a.take()
+	if err != nil {
+		fmt.Printf("access   %v\n", err)
 		return
 	}
-	a.adoptNetworkDefaults(answer)
-	if answer.Refused() {
-		a.db.Notify("error", answer.Why(), time.Now().UnixMilli())
-		a.platform.Stop()
-		fmt.Printf("access   %s\n", answer.Why())
-		return
+	if reached > 0 {
+		fmt.Printf("device   %s recognised by the network\n", a.platform.Identify().ID[:12])
 	}
-	fmt.Printf("device   %s recognised by the network\n", a.platform.Identify().ID[:12])
 }
 
 func (a *API) adoptNetworkDefaults(answer Standing) {
@@ -413,12 +329,11 @@ func (a *API) adoptNetworkDefaults(answer Standing) {
 }
 
 func (a *API) adoptRelays(answer Standing) {
-	links := make([]qcli.RelayLink, 0, len(answer.Relays))
+	links := make([]relay.Link, 0, len(answer.Relays))
 	for _, r := range answer.Relays {
-		if r.Weblink == "" || r.Authority == "" {
-			continue
+		if r.Weblink != "" && r.Authority != "" {
+			links = append(links, r)
 		}
-		links = append(links, qcli.RelayLink{Weblink: r.Weblink, Authority: r.Authority})
 	}
 	a.mu.Lock()
 	changed := len(links) != len(a.relays)
@@ -427,21 +342,17 @@ func (a *API) adoptRelays(answer Standing) {
 	if changed && len(links) > 0 {
 		fmt.Printf("relay    subscription carries %d relay(s), first via %s\n", len(links), links[0].Authority)
 	}
+	a.platform.SyncControlRelays(links)
 }
 
-func (a *API) currentRelays() []qcli.RelayLink {
+func (a *API) Relays() []relay.Link {
 	a.mu.Lock()
-	held := append([]qcli.RelayLink{}, a.relays...)
+	held := append([]relay.Link{}, a.relays...)
 	a.mu.Unlock()
 	if len(held) > 0 {
 		return held
 	}
-	relays := a.db.RelayLinks()
-	out := make([]qcli.RelayLink, 0, len(relays))
-	for _, r := range relays {
-		out = append(out, qcli.RelayLink{Weblink: r.Weblink, Authority: r.Authority})
-	}
-	return out
+	return a.db.RelayLinks()
 }
 
 func (a *API) adoptAdmin(answer Standing) {
@@ -466,14 +377,6 @@ func (a *API) adoptPeers(answer Standing) {
 	a.db.SetValue(peersKey, strings.Join(answer.Peers, ","))
 }
 
-func (a *API) knownPeers() []string {
-	text, err := a.db.Value(peersKey)
-	if err != nil || text == "" {
-		return nil
-	}
-	return strings.Split(text, ",")
-}
-
 const peersKey = "peers"
 
 func (a *API) Peers() []string {
@@ -483,7 +386,11 @@ func (a *API) Peers() []string {
 	if len(held) > 0 {
 		return held
 	}
-	return a.knownPeers()
+	text, err := a.db.Value(peersKey)
+	if err != nil || text == "" {
+		return nil
+	}
+	return strings.Split(text, ",")
 }
 
 func (a *API) adoptEntrypoints(answer Standing) {
@@ -497,7 +404,7 @@ func (a *API) adoptEntrypoints(answer Standing) {
 	}
 	known := make(map[string]clientstate.Node, len(held))
 	for _, n := range held {
-		known[fmt.Sprintf("%s:%d", n.Address, n.Port)] = n
+		known[n.Endpoint()] = n
 	}
 
 	fresh := make([]clientstate.Node, 0, len(answer.Entrypoints))
@@ -506,19 +413,17 @@ func (a *API) adoptEntrypoints(answer Standing) {
 		if e.Address == "" || e.Port <= 0 {
 			continue
 		}
-		where := fmt.Sprintf("%s:%d", e.Address, e.Port)
-		called := strings.TrimSpace(e.Name)
-		if called == "" {
-			called = where
-		}
-
 		node := clientstate.Node{
-			ID: i + 1, Name: called, Role: "ingress",
+			ID: i + 1, Name: strings.TrimSpace(e.Name), Role: "ingress",
 			Address: e.Address, Port: e.Port, LatencyMs: -1,
+		}
+		where := node.Endpoint()
+		if node.Name == "" {
+			node.Name = where
 		}
 		if was, carried := known[where]; carried {
 			node.LatencyMs, node.Reachable, node.Selected = was.LatencyMs, was.Reachable, was.Selected
-			if was.Name != called {
+			if was.Name != node.Name {
 				same = false
 			}
 		} else {
@@ -573,24 +478,26 @@ func (a *API) adoptExit(answer Standing) {
 	}
 }
 
-func (a *API) Standing() (Standing, bool) {
-	sub, err := a.db.Subscription()
-	if err != nil || !sub.Imported {
-		return Standing{}, false
-	}
-	nodes, err := a.db.Nodes()
+func (a *API) adoptFixedRate(mbit int) {
+	settings, err := a.db.Settings()
 	if err != nil {
-		return Standing{}, false
+		a.platform.SetFixedRate(mbit)
+		return
 	}
-	return AskStanding(nodes, a.key(), sub.Key, a.platform.Identify(), a.wire())
+	if settings.RatePinned {
+		a.platform.SetFixedRate(settings.FixedRate)
+		return
+	}
+
+	a.platform.SetFixedRate(mbit)
+	if settings.FixedRate == mbit {
+		return
+	}
+	settings.FixedRate = mbit
+	a.db.SaveSettings(settings)
 }
 
-// wire — как спросить узел. Платформа даёт общий QUIC-диалер.
-func (a *API) wire() Asker { return a.platform.Wire() }
-
-func (a *API) Key() *qdcrypt.Key { return a.key() }
-
-func (a *API) key() *qdcrypt.Key {
+func (a *API) Key() *qdcrypt.Key {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.netKey
@@ -623,15 +530,11 @@ func (a *API) adoptNetworkKey(text string) error {
 }
 
 func (a *API) connect(w http.ResponseWriter, r *http.Request) {
-	if a.platform.Running() {
-		a.replyState(w)
-		return
-	}
 	if err := a.Connect(); err != nil {
 		fail(w, err)
 		return
 	}
-	a.replyState(w)
+	a.state(w, r)
 }
 
 func (a *API) Connect() error {
@@ -647,51 +550,49 @@ func (a *API) Connect() error {
 		return fmt.Errorf("nothing imported yet")
 	}
 
+	if sub.Admin && len(a.Peers()) == 0 {
+		if _, err := a.take(); err != nil {
+			return err
+		}
+	}
+
 	nodes, err := a.db.Nodes()
 	if err != nil {
 		return err
 	}
-
-	if sub.Admin && len(a.Peers()) == 0 {
-		if answer, heard := AskStanding(nodes, a.key(), sub.Key,
-			a.platform.Identify(), a.wire()); heard {
-			a.adoptNetworkDefaults(answer)
-			if fresh, err := a.db.Nodes(); err == nil && len(fresh) > 0 {
-				nodes = fresh
-			}
-		}
-	}
-
-	// Кандидата заранее не выбираем: туннель поднимает гонка по всем входам.
 	lane := Entrypoints(nodes)
 	if len(lane) == 0 {
 		a.db.Notify("warning", "No entrypoint to dial on this network.", time.Now().UnixMilli())
 		return fmt.Errorf("no entrypoint to dial")
 	}
 
-	session := clientstate.SessionID(sub.Key)
 	if settings, err := a.db.Settings(); err == nil {
 		a.platform.SetExit(settings.Egress && sub.AllowExit)
 	}
 
-	if err := a.platform.Start(lane, a.currentRelays(), session); err != nil {
+	if err := a.platform.Start(lane, a.Relays(), qdcrypt.SessionID(sub.Key)); err != nil {
 		a.db.Notify("warning", "Could not bring the tunnel up: "+err.Error(), time.Now().UnixMilli())
 		return err
 	}
 
 	a.db.ClearSelection()
-	winner := whoWon(nodes, a.platform.ServerName())
-	if winner != nil {
-		a.db.MarkNode(winner.ID, winner.LatencyMs, true, true)
-		a.db.Notify("info", fmt.Sprintf("Connected through %s.", winner.Name), time.Now().UnixMilli())
+	won := a.platform.ServerName()
+	for _, n := range nodes {
+		if n.Endpoint() == won {
+			a.db.MarkNode(n.ID, n.LatencyMs, true, true)
+			a.db.Notify("info", fmt.Sprintf("Connected through %s.", n.Name), time.Now().UnixMilli())
+			break
+		}
 	}
-
-	a.mu.Lock()
-	if winner != nil {
-		a.selected = winner.ID
-	}
-	a.mu.Unlock()
 	return nil
+}
+
+func (a *API) disconnect(w http.ResponseWriter, r *http.Request) {
+	if err := a.Disconnect(); err != nil {
+		fail(w, err)
+		return
+	}
+	a.state(w, r)
 }
 
 func (a *API) Disconnect() error {
@@ -708,11 +609,30 @@ func (a *API) StateJSON() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	blob, err := json.Marshal(payload)
-	if err != nil {
-		return "", err
+	return marshal(payload)
+}
+
+func (a *API) toggle(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Egress  *bool `json:"egress"`
+		Adblock *bool `json:"adblock"`
 	}
-	return string(blob), nil
+	if !decode(w, r, &body) {
+		return
+	}
+	if body.Egress != nil {
+		if err := a.SetEgress(*body.Egress); err != nil {
+			fail(w, err)
+			return
+		}
+	}
+	if body.Adblock != nil {
+		if err := a.SetAdblock(*body.Adblock); err != nil {
+			fail(w, err)
+			return
+		}
+	}
+	a.state(w, r)
 }
 
 func (a *API) SetEgress(on bool) error {
@@ -735,7 +655,7 @@ func (a *API) SetEgress(on bool) error {
 	if err := a.db.SaveSettings(settings); err != nil {
 		return err
 	}
-	a.platform.SetExit(on && sub.AllowExit)
+	a.platform.SetExit(on)
 	return nil
 }
 
@@ -752,44 +672,13 @@ func (a *API) SetAdblock(on bool) error {
 	return nil
 }
 
-func (a *API) Refresh() (int, error) {
-	sub, err := a.db.Subscription()
+func (a *API) refresh(w http.ResponseWriter, r *http.Request) {
+	reached, err := a.Refresh()
 	if err != nil {
-		return 0, err
+		fail(w, err)
+		return
 	}
-	if !sub.Imported {
-		return 0, fmt.Errorf("nothing imported yet")
-	}
-
-	now := time.Now().UnixMilli()
-
-	if answer, heard := a.Standing(); heard {
-		a.adoptNetworkDefaults(answer)
-		if answer.Refused() {
-			a.platform.Stop()
-			a.db.Notify("error", answer.Why(), now)
-			return 0, fmt.Errorf("%s", answer.Why())
-		}
-	}
-
-	reached := a.ProbeAll()
-	nodes, _ := a.db.Nodes()
-
-	if reached == 0 {
-		a.db.Notify("warning",
-			"No entrypoint answered — the subscription was left as it stands.", now)
-		return 0, fmt.Errorf("no entrypoint answered")
-	}
-
-	if fresh, err := a.db.Subscription(); err == nil {
-		sub = fresh
-	}
-	sub.LastRefresh = now
-	a.db.SaveSubscription(sub)
-
-	a.db.Notify("info",
-		fmt.Sprintf("Subscription checked: %d of %d entrypoints reachable.", reached, len(nodes)), now)
-	return reached, nil
+	ok(w, map[string]any{"nodes": reached})
 }
 
 func (a *API) RulesJSON() (string, error) {
@@ -801,15 +690,7 @@ func (a *API) RulesJSON() (string, error) {
 	if err != nil {
 		return "", err
 	}
-
-	blob, err := json.Marshal(map[string]any{
-		"defaultRole": defaultRole,
-		"rules":       rules,
-	})
-	if err != nil {
-		return "", err
-	}
-	return string(blob), nil
+	return marshal(map[string]any{"defaultRole": defaultRole, "rules": rules})
 }
 
 func (a *API) SaveRulesJSON(raw string) error {
@@ -832,11 +713,7 @@ func (a *API) SettingsJSON() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	blob, err := json.Marshal(settings)
-	if err != nil {
-		return "", err
-	}
-	return string(blob), nil
+	return marshal(settings)
 }
 
 func (a *API) SaveSettingsJSON(raw string) error {
@@ -856,21 +733,14 @@ func (a *API) SaveSettingsJSON(raw string) error {
 	if next.FixedRate != current.FixedRate {
 		next.RatePinned = true
 	}
-	if next.FixedRate < 0 {
-		next.FixedRate = 0
+	next.FixedRate = min(max(next.FixedRate, 0), 10000)
+	next.RefreshMinutes = min(max(next.RefreshMinutes, 1), 1440)
+
+	if next.Autostart != current.Autostart {
+		if err := a.platform.HoldAutostart(next.Autostart); err != nil {
+			return err
+		}
 	}
-	if next.FixedRate > 10000 {
-		next.FixedRate = 10000
-	}
-	if next.RefreshMinutes < 1 {
-		next.RefreshMinutes = 1
-	}
-	if next.RefreshMinutes > 1440 {
-		next.RefreshMinutes = 1440
-	}
-	next.Egress = current.Egress
-	next.Adblock = current.Adblock
-	next.NetworkKey = current.NetworkKey
 	if err := a.db.SaveSettings(next); err != nil {
 		return err
 	}
@@ -907,35 +777,6 @@ func (a *API) Reset(subscription bool) error {
 	return nil
 }
 
-// UnreadJSON hands over what the core has recorded since anyone last looked.
-// The events are already written for the notification bell; a client that wants
-// to surface them as they happen reads the same list instead of growing a
-// second channel beside it.
-func (a *API) UnreadJSON() (string, error) {
-	items, _, err := a.db.Notifications()
-	if err != nil {
-		return "", err
-	}
-
-	fresh := []clientstate.Notification{}
-	for _, item := range items {
-		if !item.Read {
-			fresh = append(fresh, item)
-		}
-	}
-	if len(fresh) > 1 {
-		for i, j := 0, len(fresh)-1; i < j; i, j = i+1, j-1 {
-			fresh[i], fresh[j] = fresh[j], fresh[i]
-		}
-	}
-
-	blob, err := json.Marshal(fresh)
-	if err != nil {
-		return "", err
-	}
-	return string(blob), nil
-}
-
 func (a *API) MarkNoticeRead(id int) error { return a.db.MarkRead(id) }
 
 func (a *API) AboutJSON() (string, error) {
@@ -945,7 +786,7 @@ func (a *API) AboutJSON() (string, error) {
 	}
 	up, down, _ := a.db.Traffic()
 
-	blob, err := json.Marshal(map[string]any{
+	return marshal(map[string]any{
 		"tag":       sub.Tag,
 		"label":     sub.Label,
 		"createdAt": sub.CreatedAt,
@@ -953,26 +794,14 @@ func (a *API) AboutJSON() (string, error) {
 		"up":        up,
 		"down":      down,
 	})
-	if err != nil {
-		return "", err
-	}
-	return string(blob), nil
 }
 
 func (a *API) NodesJSON() (string, error) {
-	nodes, err := a.db.Nodes()
+	views, err := a.nodeViews()
 	if err != nil {
 		return "", err
 	}
-	out := make([]map[string]any, 0, len(nodes))
-	for _, n := range nodes {
-		out = append(out, nodeView(n))
-	}
-	blob, err := json.Marshal(out)
-	if err != nil {
-		return "", err
-	}
-	return string(blob), nil
+	return marshal(views)
 }
 
 func (a *API) Selected() (clientstate.Node, bool) {
@@ -988,145 +817,13 @@ func (a *API) Selected() (clientstate.Node, bool) {
 	return clientstate.Node{}, false
 }
 
-func pickNode(nodes []clientstate.Node) *clientstate.Node {
-	var best *clientstate.Node
-	for i := range nodes {
-		n := &nodes[i]
-		if n.Role == "egress" {
-			continue
-		}
-		if best == nil {
-			best = n
-			continue
-		}
-		if better(n, best) {
-			best = n
-		}
-	}
-	return best
-}
-
-func better(a, b *clientstate.Node) bool {
-	if a.Reachable != b.Reachable {
-		return a.Reachable
-	}
-	if a.LatencyMs < 0 {
-		return false
-	}
-	if b.LatencyMs < 0 {
-		return true
-	}
-	return a.LatencyMs < b.LatencyMs
-}
-
-func (a *API) disconnect(w http.ResponseWriter, r *http.Request) {
-	if err := a.platform.Stop(); err != nil {
-		fail(w, err)
-		return
-	}
-	a.db.ClearSelection()
-	a.db.Notify("info", "Disconnected.", time.Now().UnixMilli())
-	a.replyState(w)
-}
-
-func (a *API) toggle(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Egress  *bool `json:"egress"`
-		Adblock *bool `json:"adblock"`
-	}
-	if !decode(w, r, &body) {
-		return
-	}
-
-	settings, err := a.db.Settings()
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	sub, err := a.db.Subscription()
-	if err != nil {
-		fail(w, err)
-		return
-	}
-
-	if body.Egress != nil {
-		if *body.Egress && !sub.AllowExit {
-			a.db.Notify("warning",
-				"Exit nodes were refused: this subscription's group does not allow them.",
-				time.Now().UnixMilli())
-			fail(w, fmt.Errorf("this subscription does not allow exit nodes"))
-			return
-		}
-		settings.Egress = *body.Egress
-	}
-	if body.Adblock != nil {
-		settings.Adblock = *body.Adblock
-	}
-
-	if err := a.db.SaveSettings(settings); err != nil {
-		fail(w, err)
-		return
-	}
-	a.seen.SetAdblock(settings.Adblock)
-	a.platform.SetExit(settings.Egress && sub.AllowExit)
-	a.replyState(w)
-}
-
-func (a *API) refresh(w http.ResponseWriter, r *http.Request) {
-	sub, err := a.db.Subscription()
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	if !sub.Imported {
-		fail(w, fmt.Errorf("nothing imported yet"))
-		return
-	}
-
-	reached := a.ProbeAll()
-	now := time.Now().UnixMilli()
-
-	if answer, heard := a.Standing(); heard {
-		a.adoptNetworkDefaults(answer)
-		if answer.Refused() {
-			a.platform.Stop()
-			a.db.Notify("error", answer.Why(), now)
-			fail(w, fmt.Errorf("%s", answer.Why()))
-			return
-		}
-	}
-
-	nodes, _ := a.db.Nodes()
-	if reached == 0 {
-		a.db.Notify("warning",
-			"No entrypoint answered — the subscription was left as it stands.", now)
-		fail(w, fmt.Errorf("no entrypoint answered"))
-		return
-	}
-
-	if fresh, err := a.db.Subscription(); err == nil {
-		sub = fresh
-	}
-	sub.LastRefresh = now
-	a.db.SaveSubscription(sub)
-
-	a.db.Notify("info",
-		fmt.Sprintf("Subscription checked: %d of %d entrypoints reachable.", reached, len(nodes)), now)
-
-	ok(w, map[string]any{"changed": false, "nodes": reached, "reconnected": false})
-}
-
 func (a *API) nodes(w http.ResponseWriter, r *http.Request) {
-	nodes, err := a.db.Nodes()
+	views, err := a.nodeViews()
 	if err != nil {
 		fail(w, err)
 		return
 	}
-	out := make([]map[string]any, 0, len(nodes))
-	for _, n := range nodes {
-		out = append(out, nodeView(n))
-	}
-	ok(w, out)
+	ok(w, views)
 }
 
 func (a *API) notifications(w http.ResponseWriter, r *http.Request) {
@@ -1139,27 +836,21 @@ func (a *API) notifications(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) markRead(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		ID int `json:"id"`
-	}
-	if !decode(w, r, &body) {
-		return
-	}
-	if err := a.db.MarkRead(body.ID); err != nil {
-		fail(w, err)
-		return
-	}
-	ok(w, nil)
+	a.withID(w, r, a.db.MarkRead)
 }
 
 func (a *API) dismissNotification(w http.ResponseWriter, r *http.Request) {
+	a.withID(w, r, a.db.DismissNotification)
+}
+
+func (a *API) withID(w http.ResponseWriter, r *http.Request, do func(id int) error) {
 	var body struct {
 		ID int `json:"id"`
 	}
 	if !decode(w, r, &body) {
 		return
 	}
-	if err := a.db.DismissNotification(body.ID); err != nil {
+	if err := do(body.ID); err != nil {
 		fail(w, err)
 		return
 	}
@@ -1177,20 +868,17 @@ func (a *API) clearNotifications(w http.ResponseWriter, r *http.Request) {
 func (a *API) history(w http.ResponseWriter, r *http.Request) {
 	raw := strings.TrimPrefix(r.URL.Path, "/client/api/history/")
 	window, err := strconv.Atoi(raw)
-	if err != nil {
+	switch {
+	case err != nil:
 		fail(w, fmt.Errorf("unknown window %s", raw))
 		return
-	}
-	switch window {
-	case 1, 5, 15, 60:
-	default:
+	case window != 1 && window != 5 && window != 15 && window != 60:
 		fail(w, fmt.Errorf("unknown window %d", window))
 		return
 	}
 
 	until := time.Now().Unix()
-	since := until - int64(window)*60
-	points, err := a.db.Samples(since, until, 180)
+	points, err := a.db.Samples(until-int64(window)*60, until, 180)
 	if err != nil {
 		fail(w, err)
 		return
@@ -1199,8 +887,7 @@ func (a *API) history(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) routing(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodPost {
-		a.saveRouting(w, r)
+	if r.Method == http.MethodPost && !a.saveBody(w, r, a.SaveRulesJSON) {
 		return
 	}
 
@@ -1215,22 +902,20 @@ func (a *API) routing(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	running := a.platform.Processes()
 	live := map[string]bool{}
-	// A rule keyed on a path takes that file's icon; one keyed on a bare name
-	// borrows the icon of whatever is running under it.
 	iconByPath := map[string]string{}
 	iconByName := map[string]string{}
-	for _, p := range running {
-		live[strings.ToLower(p.Name)] = true
+	for _, p := range a.platform.Processes() {
+		name := strings.ToLower(p.Name)
+		live[name] = true
 		if p.Icon == "" {
 			continue
 		}
 		if p.Path != "" {
 			iconByPath[strings.ToLower(p.Path)] = p.Icon
 		}
-		if _, held := iconByName[strings.ToLower(p.Name)]; !held {
-			iconByName[strings.ToLower(p.Name)] = p.Icon
+		if _, held := iconByName[name]; !held {
+			iconByName[name] = p.Icon
 		}
 	}
 	for i := range rules {
@@ -1250,67 +935,32 @@ func (a *API) routing(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (a *API) saveRouting(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		DefaultRole string             `json:"defaultRole"`
-		Rules       []clientstate.Rule `json:"rules"`
-	}
-	if !decode(w, r, &body) {
-		return
-	}
-	if err := a.db.ReplaceRules(body.DefaultRole, body.Rules); err != nil {
-		fail(w, err)
-		return
-	}
-	a.platform.RulesChanged()
-	a.routing(w, &http.Request{Method: http.MethodGet, URL: r.URL})
-}
-
 func (a *API) processes(w http.ResponseWriter, r *http.Request) {
 	ok(w, a.platform.Processes())
 }
 
 func (a *API) settings(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodPost {
-		var body clientstate.Settings
-		current, err := a.db.Settings()
-		if err != nil {
-			fail(w, err)
-			return
-		}
-		body = current
-		if !decode(w, r, &body) {
-			return
-		}
-		if body.RefreshMinutes != current.RefreshMinutes {
-			body.RefreshPinned = true
-		}
-		if body.RefreshMinutes < 1 {
-			body.RefreshMinutes = 1
-		}
-		if body.RefreshMinutes > 1440 {
-			body.RefreshMinutes = 1440
-		}
-		body.Egress = current.Egress
-		body.Adblock = current.Adblock
-		if body.Autostart != current.Autostart {
-			if err := a.platform.HoldAutostart(body.Autostart); err != nil {
-				fail(w, err)
-				return
-			}
-		}
-		if err := a.db.SaveSettings(body); err != nil {
-			fail(w, err)
-			return
-		}
+	if r.Method == http.MethodPost && !a.saveBody(w, r, a.SaveSettingsJSON) {
+		return
 	}
-
 	settings, err := a.db.Settings()
 	if err != nil {
 		fail(w, err)
 		return
 	}
 	ok(w, settings)
+}
+
+func (a *API) saveBody(w http.ResponseWriter, r *http.Request, save func(raw string) error) bool {
+	raw, err := io.ReadAll(r.Body)
+	if err == nil {
+		err = save(string(raw))
+	}
+	if err != nil {
+		fail(w, err)
+		return false
+	}
+	return true
 }
 
 func (a *API) about(w http.ResponseWriter, r *http.Request) {
@@ -1339,12 +989,16 @@ func (a *API) reset(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &body) {
 		return
 	}
-
 	if err := a.Reset(body.Subscription); err != nil {
 		fail(w, err)
 		return
 	}
-	a.replyState(w)
+	a.state(w, r)
+}
+
+func marshal(v any) (string, error) {
+	blob, err := json.Marshal(v)
+	return string(blob), err
 }
 
 func ok(w http.ResponseWriter, obj any) {
@@ -1368,43 +1022,13 @@ func decode(w http.ResponseWriter, r *http.Request, dst any) bool {
 	return true
 }
 
-func (a *API) adoptFixedRate(mbit int) {
-	settings, err := a.db.Settings()
-	if err != nil {
-		a.platform.SetFixedRate(mbit)
-		return
-	}
-	if settings.RatePinned {
-		a.platform.SetFixedRate(settings.FixedRate)
-		return
-	}
-
-	a.platform.SetFixedRate(mbit)
-	if settings.FixedRate == mbit {
-		return
-	}
-	settings.FixedRate = mbit
-	a.db.SaveSettings(settings)
-}
-
-// Entrypoints — адреса всех входов подписки. Выходные узлы клиент не набирает:
-// до них добирается ingress своей гонкой.
 func Entrypoints(nodes []clientstate.Node) []string {
 	out := make([]string, 0, len(nodes))
 	for _, n := range nodes {
 		if n.Role == "egress" || n.Address == "" || n.Port == 0 {
 			continue
 		}
-		out = append(out, net.JoinHostPort(n.Address, strconv.Itoa(n.Port)))
+		out = append(out, n.Endpoint())
 	}
 	return out
-}
-
-func whoWon(nodes []clientstate.Node, endpoint string) *clientstate.Node {
-	for i := range nodes {
-		if net.JoinHostPort(nodes[i].Address, strconv.Itoa(nodes[i].Port)) == endpoint {
-			return &nodes[i]
-		}
-	}
-	return nil
 }

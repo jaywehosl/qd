@@ -7,11 +7,6 @@ import android.util.Log;
 
 import qdmobile.Client;
 
-// Buttons принимает нажатия из уведомления, которым не нужен туннель.
-//
-// Через приёмник, а не через службу, намеренно: выход переключается и с
-// опущенным туннелем, а служба в этот момент не запущена — поднимать её ради
-// одного флага значило бы держать пустую службу переднего плана.
 public class Buttons extends BroadcastReceiver {
 
     public static final String ACTION_EGRESS = "ru.quicdiver.client.EGRESS";
@@ -23,9 +18,6 @@ public class Buttons extends BroadcastReceiver {
             return;
         }
 
-        // С Android 14 пользователь может смахнуть даже уведомление службы
-        // переднего плана: setOngoing больше не держит. Возвращаем на место —
-        // через него подключаются, и без него клиент становится недоступен.
         if (ACTION_KEEP.equals(intent.getAction())) {
             Notes.wake(context);
             return;

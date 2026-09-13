@@ -1,21 +1,3 @@
-// Package hybrid — гибридный data-path: TCP через надёжный стрим, UDP через
-// датаграммы.
-//
-// Зачем (измерено на живом стенде):
-//
-//	чистый QUIC-datagram (потолок транспорта) — 560 Мбит, stddev 11%
-//	TCP через надёжный стрим (H3 CONNECT)     — 494 Мбит, stddev 9%
-//	TCP через connect-ip датаграммы           — 115 Мбит, пила
-//
-// Датаграммы QUIC не ретрансмитятся (RFC 9221 by design), а congestion туннеля
-// сам создаёт ~0.25% потерь: каждая потерянная датаграмма = потерянный IP-пакет,
-// и внутренний TCP рушит cwnd. Поэтому TCP-флоу терминируется локальным gVisor и
-// уезжает в CONNECT-стрим (потери закрывает ретрансмит QUIC). UDP остаётся на
-// датаграммах: там ретрансмит только добавил бы задержку, приложение (QUIC, DNS)
-// разбирается само.
-//
-// Побочные выигрыши для TCP: не нужен ни NAT (стрим несёт dst отдельно), ни
-// MSS-clamp (пакеты приложения не едут в датаграмме).
 package hybrid
 
 import (
@@ -29,8 +11,8 @@ import (
 	quic "github.com/quic-go/quic-go"
 
 	"github.com/jaywehosl/quic-diver/internal/ippkt"
-	"github.com/jaywehosl/quic-diver/internal/qcli/engine"
 	"github.com/jaywehosl/quic-diver/internal/qcli/guard"
+	"github.com/jaywehosl/quic-diver/internal/qcli/nat"
 	"github.com/jaywehosl/quic-diver/internal/qcli/packet"
 	"github.com/jaywehosl/quic-diver/internal/qsrv/server/netstack"
 )
@@ -38,111 +20,93 @@ import (
 const (
 	maxInboundBatch = 128
 	tcpSlot         = 2048
+	bufSlot         = 65600
 )
 
-// Engine — гибридный движок клиента.
+type Tunnel interface {
+	WritePacket(b []byte) (icmp []byte, err error)
+	ReadPacket(b []byte) (int, error)
+}
+
+type markedTunnel interface {
+	WritePacketMarked(b []byte, mark uint64) (icmp []byte, err error)
+}
+
+type Options struct {
+	Guard    *guard.Guard
+	NAT      *nat.NAT
+	Stack    *netstack.Stack
+	Workers  int
+	Meter    *Meter
+	Fast     func()
+	CatchDNS bool
+	Direct   func(pkt []byte) bool
+	Mark     func(pkt []byte) uint64
+	Loud     bool
+}
+
 type Engine struct {
-	guard       *guard.Guard
-	rewriter    engine.Rewriter // NAT только для датаграммного (UDP) пути
-	ns          atomic.Pointer[netstack.Stack]
-	recvWorkers int       // потоков захвата (>1 ускоряет скачивание, но даёт reordering)
-	bufPool     sync.Pool // буферы датаграммного пути
-	tcpPool     sync.Pool // буферы TCP-моста; отдельный, чтобы пути не делили пул
+	Options
+	bufPool sync.Pool
+	tcpPool sync.Pool
 
 	cOutRecv, cTCP, cUDP, cBypass, cWriteErr, cOversize atomic.Uint64
-	loud                                                bool
 	cInRecv, cInject, cInErr                            atomic.Uint64
-
-	meter    *Meter
-	fast     atomic.Pointer[func()]
-	catchDNS atomic.Bool
-	streams  atomic.Bool
-	direct   atomic.Pointer[func([]byte) bool]
-	mark     atomic.Pointer[func([]byte) uint64]
 }
 
-// New собирает движок: ns — стек с CONNECT-Dialer (TCP), rw — NAT для UDP,
-// recvWorkers — потоков захвата (1 = сохранять порядок пакетов; >1 ускоряет
-// скачивание ценой reordering и просадки отдачи).
-func New(g *guard.Guard, rw engine.Rewriter, ns *netstack.Stack, recvWorkers int, meter *Meter) *Engine {
-	if recvWorkers < 1 {
-		recvWorkers = 1
+func New(opts Options) *Engine {
+	if opts.Workers < 1 {
+		opts.Workers = 1
 	}
-	e := &Engine{
-		guard:       g,
-		rewriter:    rw,
-		recvWorkers: recvWorkers,
-		meter:       meter,
-		bufPool:     sync.Pool{New: func() any { return make([]byte, 65600) }},
-		tcpPool:     sync.Pool{New: func() any { return make([]byte, tcpSlot) }},
+	return &Engine{
+		Options: opts,
+		bufPool: sync.Pool{New: func() any { return new([bufSlot]byte) }},
+		tcpPool: sync.Pool{New: func() any { return new([tcpSlot]byte) }},
 	}
-	e.ns.Store(ns)
-	return e
 }
 
-// Run гоняет трафик до отмены ctx или фатальной ошибки.
-func (e *Engine) Run(ctx context.Context, src packet.Source, tun engine.PacketTunnel) error {
-	// Канал вмещает всех пишущих: стек, каждый читатель захвата и насос
-	// входящих. Меньше — и лишние навсегда зависли бы на отправке.
-	errc := make(chan error, e.recvWorkers+2)
+func (e *Engine) Run(ctx context.Context, src packet.Source, tun Tunnel) error {
+	errc := make(chan error, e.Workers+2)
 
-	// Локальный стек обслуживает TCP: читает перехваченные TCP-пакеты из tt,
-	// терминирует флоу, ходит наружу CONNECT-стримами, а ответные пакеты пишет
-	// обратно в стек ОС через tt.WritePacket.
 	tt := &tcpTunnel{
-		src:   src,
 		ch:    make(chan []byte, 8192),
 		out:   make(chan []byte, 16384),
 		pool:  &e.tcpPool,
-		meter: e.meter,
-	}
-	// Захват и инжект — в несколько потоков, если источник это умеет: один поток
-	// упирается в потолок раньше канала (замерено: тот же путь без WinDivert даёт
-	// 693 Мбит, с однопоточным WinDivert — ~300).
-	// Инжектор — РОВНО ОДИН: несколько дерутся за общий канал и разваливают
-	// батчи (замерено: avg падал 19 → 3.8 пак/syscall).
-	//
-	// Читателей — умеренно: параллельный Recv поднимает скачивание (300→450), но
-	// ломает порядок пакетов, и отдача проседает от reordering (800→450). Порядок
-	// внутри потока важнее пары сотен мегабит, поэтому по умолчанию читатель тоже
-	// один; больше — только явным флагом, для экспериментов.
-	if ms, ok := src.(packet.MultiSource); ok {
-		go func(w packet.Writer) {
-			defer e.hurry()()
-			tt.injector(ctx, w)
-		}(ms.NewWriter())
-	} else {
-		go func() {
-			defer e.hurry()()
-			tt.injector(ctx, src)
-		}()
+		meter: e.Meter,
 	}
 
-	defer e.ns.Load().Reset(tt, resetDrain)
+	ms, multi := src.(packet.MultiSource)
+	var writer packet.Writer = src
+	if multi {
+		writer = ms.NewWriter()
+	}
+	go func() {
+		defer e.hurry()()
+		tt.injector(ctx, writer)
+	}()
 
-	go func() { errc <- e.ns.Load().Run(ctx, tt) }()
+	defer e.Stack.Reset(tt, resetDrain)
+	go func() { errc <- e.Stack.Run(ctx, tt) }()
 
-	if ms, ok := src.(packet.MultiSource); ok && e.recvWorkers > 1 {
-		log.Printf("захват в %d потоков (внимание: возможен reordering)", e.recvWorkers)
-		for i := 0; i < e.recvWorkers; i++ {
+	if multi && e.Workers > 1 {
+		log.Printf("capture on %d threads, reordering possible", e.Workers)
+		for i := 0; i < e.Workers; i++ {
 			go func(r packet.Reader) {
 				defer e.hurry()()
-				e.pumpOutboundReader(ctx, r, src, tun, tt, errc)
+				e.pumpOutbound(ctx, r, src, tun, tt, errc)
 			}(ms.NewReader())
 		}
 	} else {
 		go func() {
 			defer e.hurry()()
-			e.pumpOutbound(ctx, src, tun, tt, errc)
+			e.pumpOutbound(ctx, src, src, tun, tt, errc)
 		}()
 	}
-	if !e.streams.Load() {
-		go func() {
-			defer e.hurry()()
-			e.pumpInbound(ctx, src, tun, errc)
-		}()
-	}
-	if e.loud {
+	go func() {
+		defer e.hurry()()
+		e.pumpInbound(ctx, src, tun, errc)
+	}()
+	if e.Loud {
 		go e.logStats(ctx, tt, src)
 	}
 
@@ -167,7 +131,7 @@ func (e *Engine) logStats(ctx context.Context, tt *tcpTunnel, src packet.Source)
 			if rcvd+dropped > 0 {
 				pct = float64(dropped) * 100 / float64(rcvd+dropped)
 			}
-			log.Printf("stats out: recv=%d tcp→стек=%d udp→датаграмма=%d bypass=%d oversize=%d | udp-in: recv=%d inject=%d",
+			log.Printf("stats out: recv=%d tcp→stack=%d udp→datagram=%d bypass=%d oversize=%d | udp-in: recv=%d inject=%d",
 				e.cOutRecv.Load(), e.cTCP.Load(), e.cUDP.Load(), e.cBypass.Load(),
 				e.cOversize.Load(), e.cInRecv.Load(), e.cInject.Load())
 			var avgBatch float64
@@ -178,28 +142,16 @@ func (e *Engine) logStats(ctx context.Context, tt *tcpTunnel, src packet.Source)
 			if teller, ok := src.(interface{ Dropped() uint64 }); ok {
 				sunk = teller.Dropped()
 			}
-			log.Printf("  мост: push=%d drop=%d read=%d | inject=%d батчей=%d (avg %.1f пак/syscall) outDrop=%d writeErr=%d tunDrop=%d | datagram DROPPED=%.2f%%",
+			log.Printf("  bridge: push=%d drop=%d read=%d | inject=%d batches=%d (avg %.1f pkt/syscall) outDrop=%d writeErr=%d tunDrop=%d | datagram DROPPED=%.2f%%",
 				tt.cPush.Load(), tt.cDrop.Load(), tt.cRead.Load(),
 				tt.cWrite.Load(), tt.cBatches.Load(), avgBatch,
 				tt.cOutDrop.Load(), tt.cWriteErr.Load(), sunk, pct)
-			log.Printf("  стек: %s", e.ns.Load().DebugStats())
+			log.Printf("  stack: %s", e.Stack.DebugStats())
 		}
 	}
 }
 
-// pumpOutbound разводит перехваченные пакеты: TCP → локальный стек (стрим),
-// остальное → датаграмма.
-func (e *Engine) pumpOutbound(ctx context.Context, src packet.Source, tun engine.PacketTunnel, tt *tcpTunnel, errc chan<- error) {
-	e.pumpOutboundReader(ctx, srcReader{src}, src, tun, tt, errc)
-}
-
-// srcReader адаптирует однопоточный Source к интерфейсу Reader.
-type srcReader struct{ s packet.Source }
-
-func (r srcReader) Recv(ctx context.Context) ([]packet.Packet, error) { return r.s.Recv(ctx) }
-
-// pumpOutboundReader — тело насоса поверх одного независимого приёмника.
-func (e *Engine) pumpOutboundReader(ctx context.Context, rd packet.Reader, src packet.Source, tun engine.PacketTunnel, tt *tcpTunnel, errc chan<- error) {
+func (e *Engine) pumpOutbound(ctx context.Context, rd packet.Reader, src packet.Source, tun Tunnel, tt *tcpTunnel, errc chan<- error) {
 	var reinject []packet.Packet
 	for {
 		pkts, err := rd.Recv(ctx)
@@ -215,29 +167,21 @@ func (e *Engine) pumpOutboundReader(ctx context.Context, rd packet.Reader, src p
 			if !ok {
 				continue
 			}
-			// DNS решается раньше guard: системный резолвер обычно смотрит в
-			// локальную сеть (роутер), а её guard отпускает мимо туннеля — и запрос
-			// уходил к провайдеру. Забираем такие пакеты себе независимо от адреса.
-			catch := e.catchDNS.Load() && ippkt.IsDNS(p.Data)
-			if !catch {
-				if (e.guard != nil && e.guard.Bypass(dst)) || e.stepsAside(p.Data) {
-					e.cBypass.Add(1)
-					reinject = append(reinject, *p)
-					continue
-				}
-			}
-			if ippkt.IsTCP(p.Data) || catch || e.streams.Load() {
-				e.cTCP.Add(1)
-				e.meter.carried(len(p.Data))
-				tt.push(p.Data) // локальный стек терминирует и уедет CONNECT-стримом
+			catch := e.CatchDNS && ippkt.IsDNS(p.Data)
+			if !catch && (e.Guard.Bypass(dst) || e.stepsAside(p.Data)) {
+				e.cBypass.Add(1)
+				reinject = append(reinject, *p)
 				continue
 			}
-			// UDP и прочее — датаграммой, как в модели B.
-			e.cUDP.Add(1)
-			e.meter.carried(len(p.Data))
-			if e.rewriter != nil {
-				e.rewriter.Outbound(p.Data)
+			if catch || ippkt.IsTCP(p.Data) {
+				e.cTCP.Add(1)
+				e.Meter.carried(len(p.Data))
+				tt.push(p.Data)
+				continue
 			}
+			e.cUDP.Add(1)
+			e.Meter.carried(len(p.Data))
+			e.NAT.Outbound(p.Data)
 			icmp, err := e.carry(tun, p.Data)
 			if err != nil {
 				e.cWriteErr.Add(1)
@@ -245,9 +189,7 @@ func (e *Engine) pumpOutboundReader(ctx context.Context, rd packet.Reader, src p
 			}
 			if len(icmp) > 0 {
 				e.cOversize.Add(1)
-				if e.rewriter != nil {
-					e.rewriter.Inbound(icmp)
-				}
+				e.NAT.Inbound(icmp)
 				reinject = append(reinject, packet.Packet{Data: icmp, Dir: packet.Inbound})
 			}
 		}
@@ -259,8 +201,7 @@ func (e *Engine) pumpOutboundReader(ctx context.Context, rd packet.Reader, src p
 	}
 }
 
-// pumpInbound — ответные UDP-пакеты из датаграмм → инжект в стек ОС.
-func (e *Engine) pumpInbound(ctx context.Context, src packet.Source, tun engine.PacketTunnel, errc chan<- error) {
+func (e *Engine) pumpInbound(ctx context.Context, src packet.Source, tun Tunnel, errc chan<- error) {
 	ch := make(chan []byte, 2048)
 	go func() {
 		defer close(ch)
@@ -268,19 +209,19 @@ func (e *Engine) pumpInbound(ctx context.Context, src packet.Source, tun engine.
 			if ctx.Err() != nil {
 				return
 			}
-			buf := e.bufPool.Get().([]byte)
-			n, err := tun.ReadPacket(buf)
+			slot := e.bufPool.Get().(*[bufSlot]byte)
+			n, err := tun.ReadPacket(slot[:])
 			if err != nil {
 				errc <- err
 				return
 			}
 			if n == 0 {
-				e.bufPool.Put(buf)
+				e.bufPool.Put(slot)
 				continue
 			}
 			e.cInRecv.Add(1)
 			select {
-			case ch <- buf[:n]:
+			case ch <- slot[:n]:
 			case <-ctx.Done():
 				return
 			}
@@ -288,7 +229,6 @@ func (e *Engine) pumpInbound(ctx context.Context, src packet.Source, tun engine.
 	}()
 
 	batch := make([]packet.Packet, 0, maxInboundBatch)
-	bufs := make([][]byte, 0, maxInboundBatch)
 	for {
 		var first []byte
 		select {
@@ -300,9 +240,8 @@ func (e *Engine) pumpInbound(ctx context.Context, src packet.Source, tun engine.
 			}
 			first = d
 		}
-		batch, bufs = batch[:0], bufs[:0]
+		batch = batch[:0]
 		e.prep(first, &batch)
-		bufs = append(bufs, first)
 	drain:
 		for len(batch) < maxInboundBatch {
 			select {
@@ -311,43 +250,31 @@ func (e *Engine) pumpInbound(ctx context.Context, src packet.Source, tun engine.
 					break drain
 				}
 				e.prep(d, &batch)
-				bufs = append(bufs, d)
 			default:
 				break drain
 			}
 		}
-		if len(batch) > 0 {
-			if err := src.Send(batch); err != nil {
-				e.cInErr.Add(1)
-			} else {
-				e.cInject.Add(uint64(len(batch)))
-				e.meter.delivered(batch)
-				e.meter.Back.Add(uint64(len(batch)))
-			}
+		if err := src.Send(batch); err != nil {
+			e.cInErr.Add(1)
+		} else {
+			e.cInject.Add(uint64(len(batch)))
+			e.Meter.delivered(batch)
+			e.Meter.Back.Add(uint64(len(batch)))
 		}
-		for _, b := range bufs {
-			e.bufPool.Put(b[:cap(b)])
+		for _, p := range batch {
+			e.bufPool.Put((*[bufSlot]byte)(p.Data[:bufSlot]))
 		}
 	}
 }
 
 func (e *Engine) prep(data []byte, batch *[]packet.Packet) {
-	if e.rewriter != nil {
-		e.rewriter.Inbound(data)
-	}
+	e.NAT.Inbound(data)
 	*batch = append(*batch, packet.Packet{Data: data, Dir: packet.Inbound})
 }
 
-// tcpTunnel — мост между перехватом и локальным стеком: стек читает отсюда
-// TCP-пакеты приложений, а свои ответные пакеты уходят на инжект в стек ОС.
-//
-// Ответы инжектятся ПАЧКАМИ: на download стек генерит десятки тысяч пакетов в
-// секунду, и syscall на каждый (плюс аллокация) резал скорость втрое — upload,
-// которому инжект не нужен, всё это время выдавал полную линию.
 type tcpTunnel struct {
-	src  packet.Source
-	ch   chan []byte // перехват → стек
-	out  chan []byte // стек → инжект (батчится в injector)
+	ch   chan []byte
+	out  chan []byte
 	pool *sync.Pool
 
 	cPush, cDrop, cRead, cWrite, cWriteErr, cOutDrop, cBatches atomic.Uint64
@@ -355,15 +282,25 @@ type tcpTunnel struct {
 	meter *Meter
 }
 
-func (t *tcpTunnel) push(pkt []byte) {
-	buf := t.pool.Get().([]byte)
-	n := copy(buf, pkt)
+func (t *tcpTunnel) take(pkt []byte, into chan []byte) bool {
+	slot := t.pool.Get().(*[tcpSlot]byte)
+	n := copy(slot[:], pkt)
 	select {
-	case t.ch <- buf[:n]:
+	case into <- slot[:n]:
+		return true
+	default:
+		t.pool.Put(slot)
+		return false
+	}
+}
+
+func (t *tcpTunnel) give(b []byte) { t.pool.Put((*[tcpSlot]byte)(b[:tcpSlot])) }
+
+func (t *tcpTunnel) push(pkt []byte) {
+	if t.take(pkt, t.ch) {
 		t.cPush.Add(1)
-	default: // стек не успевает — лучше уронить пакет, чем застопорить перехват
+	} else {
 		t.cDrop.Add(1)
-		t.pool.Put(buf)
 	}
 }
 
@@ -373,40 +310,22 @@ func (t *tcpTunnel) ReadPacket(b []byte) (int, error) {
 		return 0, context.Canceled
 	}
 	n := copy(b, data)
-	t.pool.Put(data[:cap(data)])
+	t.give(data)
 	t.cRead.Add(1)
 	return n, nil
 }
 
-// WritePacket ставит ответный пакет в очередь на инжект (не syscall на каждый).
-//
-// Очередь полна — дропаем немедленно, как в прототипе. Пробовал ждать пару
-// миллисекунд, чтобы не терять ответ: потери действительно упали с тысяч до
-// единиц, но ожидание тормозит стек на каждом переполнении, и скачивание
-// просело с 800 до 770. Потеря ответа для TCP дешевле, чем придержанный стек.
 func (t *tcpTunnel) WritePacket(b []byte) ([]byte, error) {
-	buf := t.pool.Get().([]byte)
-	n := copy(buf, b)
-	select {
-	case t.out <- buf[:n]:
-	default:
+	if !t.take(b, t.out) {
 		t.cOutDrop.Add(1)
-		t.pool.Put(buf)
 	}
 	return nil, nil
 }
 
-// injector собирает ответные пакеты в пачку и инжектит одним вызовом.
-//
-// Стек отдаёт пакеты по одному, поэтому чистый неблокирующий drain почти всегда
-// собирал батч из ОДНОГО пакета — syscall на каждый, как будто батча и нет
-// (профиль: sendEx съедал полъядра). Поэтому ждём короткое окно накопления:
-// задержка микроскопическая, а syscall'ов кратно меньше.
 const injectGather = 300 * time.Microsecond
 
 func (t *tcpTunnel) injector(ctx context.Context, w packet.Writer) {
 	batch := make([]packet.Packet, 0, maxInboundBatch)
-	bufs := make([][]byte, 0, maxInboundBatch)
 	timer := time.NewTimer(time.Hour)
 	defer timer.Stop()
 	if !timer.Stop() {
@@ -424,9 +343,7 @@ func (t *tcpTunnel) injector(ctx context.Context, w packet.Writer) {
 			}
 			first = d
 		}
-		batch, bufs = batch[:0], bufs[:0]
-		batch = append(batch, packet.Packet{Data: first, Dir: packet.Inbound})
-		bufs = append(bufs, first)
+		batch = append(batch[:0], packet.Packet{Data: first, Dir: packet.Inbound})
 
 		timer.Reset(injectGather)
 	drain:
@@ -437,7 +354,6 @@ func (t *tcpTunnel) injector(ctx context.Context, w packet.Writer) {
 					break drain
 				}
 				batch = append(batch, packet.Packet{Data: d, Dir: packet.Inbound})
-				bufs = append(bufs, d)
 			case <-timer.C:
 				break drain
 			}
@@ -456,57 +372,30 @@ func (t *tcpTunnel) injector(ctx context.Context, w packet.Writer) {
 			t.meter.delivered(batch)
 		}
 		t.cBatches.Add(1)
-		for _, b := range bufs {
-			t.pool.Put(b[:cap(b)])
+		for _, p := range batch {
+			t.give(p.Data)
 		}
 	}
 }
 
-var _ engine.Engine = (*Engine)(nil)
-
-func (e *Engine) CatchDNS(on bool) { e.catchDNS.Store(on) }
-
-func (e *Engine) Streams(on bool) { e.streams.Store(on) }
-
-func (e *Engine) Direct(fn func(pkt []byte) bool) { e.direct.Store(&fn) }
-
 func (e *Engine) stepsAside(pkt []byte) bool {
-	held := e.direct.Load()
-	return held != nil && *held != nil && (*held)(pkt)
+	return e.Direct != nil && e.Direct(pkt)
 }
 
-func (e *Engine) Stack() *netstack.Stack { return e.ns.Load() }
-
-func (e *Engine) Mark(fn func(pkt []byte) uint64) { e.mark.Store(&fn) }
-
-func (e *Engine) Loud(on bool) { e.loud = on }
-
-func (e *Engine) carry(tun engine.PacketTunnel, pkt []byte) ([]byte, error) {
-	marked, ok := tun.(engine.MarkedTunnel)
-	held := e.mark.Load()
-	if !ok || held == nil || *held == nil {
+func (e *Engine) carry(tun Tunnel, pkt []byte) ([]byte, error) {
+	marked, ok := tun.(markedTunnel)
+	if !ok || e.Mark == nil {
 		return tun.WritePacket(pkt)
 	}
-	return marked.WritePacketMarked(pkt, (*held)(pkt))
-}
-
-// Fast задаёт то, что делает поток датапути перед работой: закрепляется за своим
-// потоком ОС и просит у планировщика больше. Знание об этом платформенное, поэтому
-// сюда оно приходит снаружи.
-func (e *Engine) Fast(fn func()) {
-	if fn == nil {
-		return
-	}
-	e.fast.Store(&fn)
+	return marked.WritePacketMarked(pkt, e.Mark(pkt))
 }
 
 func (e *Engine) hurry() func() {
-	held := e.fast.Load()
-	if held == nil {
+	if e.Fast == nil {
 		return func() {}
 	}
 	runtime.LockOSThread()
-	(*held)()
+	e.Fast()
 	return runtime.UnlockOSThread
 }
 

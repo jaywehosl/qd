@@ -9,30 +9,30 @@ import (
 	"net/http"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	quic "github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 	"golang.org/x/net/http2"
 
+	"github.com/jaywehosl/quic-diver/internal/qsrv/transport/cip"
 	"github.com/jaywehosl/quic-diver/internal/qsrv/uplink/quicconn"
 	"github.com/jaywehosl/quic-diver/internal/qsrv/uplink/relay"
 	"github.com/jaywehosl/quic-diver/internal/roads"
 )
 
-type RelayLink struct {
-	Weblink   string
-	Authority string
-}
-
 type Dialer struct {
 	keep    func(fd uintptr)
 	mu      sync.Mutex
 	token   string
-	relays  []RelayLink
+	relays  []relay.Link
 	held    map[string]*controlLink
-	dialing map[string]chan struct{}
+	dialing map[string]*dialing
+}
+
+type dialing struct {
+	done chan struct{}
+	err  error
 }
 
 type controlLink struct {
@@ -58,13 +58,11 @@ func (l *controlLink) asker() asker {
 
 func New() *Dialer { return NewKept(nil) }
 
-// NewKept — диалер, чьи сокеты помечаются как исключённые из туннеля. Нужен на
-// Android: там управляющий разговор с узлом иначе уходит в туннель сам к себе.
 func NewKept(keep func(fd uintptr)) *Dialer {
 	return &Dialer{
 		keep:    keep,
 		held:    map[string]*controlLink{},
-		dialing: map[string]chan struct{}{},
+		dialing: map[string]*dialing{},
 	}
 }
 
@@ -81,21 +79,18 @@ func (d *Dialer) SetToken(token string) {
 	}
 }
 
-func (d *Dialer) SetRelays(relays []RelayLink) {
+func (d *Dialer) SetRelays(relays []relay.Link) {
 	d.mu.Lock()
-	d.relays = append([]RelayLink{}, relays...)
+	d.relays = append([]relay.Link{}, relays...)
 	d.mu.Unlock()
 }
 
-func (d *Dialer) relaySnapshot() []RelayLink {
+func (d *Dialer) relaySnapshot() []relay.Link {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return append([]RelayLink{}, d.relays...)
+	return append([]relay.Link{}, d.relays...)
 }
 
-// controlConfig — живучесть управляющего соединения. Данных оно не несёт, зато
-// должно быстро замечать перезапуск узла: пингуем часто и сдаёмся рано, иначе
-// панель висит на мёртвом соединении.
 func controlConfig() *quic.Config {
 	return &quic.Config{
 		EnableDatagrams: true,
@@ -118,17 +113,17 @@ func (d *Dialer) conn(endpoint string) (asker, string, error) {
 			l.close()
 			delete(d.held, endpoint)
 		}
-		if wait := d.dialing[endpoint]; wait != nil {
+		if pending := d.dialing[endpoint]; pending != nil {
 			d.mu.Unlock()
-			<-wait
+			<-pending.done
+			if pending.err != nil {
+				return nil, "", pending.err
+			}
 			continue
 		}
 
-		done := make(chan struct{})
-		if d.dialing == nil {
-			d.dialing = map[string]chan struct{}{}
-		}
-		d.dialing[endpoint] = done
+		pending := &dialing{done: make(chan struct{})}
+		d.dialing[endpoint] = pending
 		token := d.token
 		d.mu.Unlock()
 
@@ -139,8 +134,9 @@ func (d *Dialer) conn(endpoint string) (asker, string, error) {
 		if err == nil {
 			d.held[endpoint] = link
 		}
+		pending.err = err
 		d.mu.Unlock()
-		close(done)
+		close(pending.done)
 
 		if err != nil {
 			return nil, "", err
@@ -161,7 +157,7 @@ func (l *controlLink) alive() bool {
 	return l.h2 != nil && l.h2.CanTakeNewRequest()
 }
 
-func dialControl(endpoint string, keep func(fd uintptr), relays []RelayLink) (*controlLink, error) {
+func dialControl(endpoint string, keep func(fd uintptr), relays []relay.Link) (*controlLink, error) {
 	host, _, err := net.SplitHostPort(endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("endpoint %q: %w", endpoint, err)
@@ -183,15 +179,11 @@ func dialControl(endpoint string, keep func(fd uintptr), relays []RelayLink) (*c
 	if !roads.OnlyTCP() {
 		paths++
 		go func() {
-			raw, err := quicconn.Dialer{TLS: &tls.Config{
-				ServerName: host,
-				NextProtos: []string{http3.NextProtoH3},
-			}, QUIC: controlConfig(), Keep: keep}.Dial(round, endpoint)
+			conn, err := quicconn.Dialer{TLS: &tls.Config{ServerName: host}, QUIC: controlConfig(), Keep: keep}.Dial(round, endpoint)
 			if err != nil {
 				line <- finish{err: fmt.Errorf("quic: %w", err)}
 				return
 			}
-			conn := raw.(*quicconn.Conn)
 			tr := &http3.Transport{EnableDatagrams: true}
 			line <- finish{link: &controlLink{tr: tr, conn: conn, cc: tr.NewClientConn(conn.QUIC())}}
 		}()
@@ -205,15 +197,15 @@ func dialControl(endpoint string, keep func(fd uintptr), relays []RelayLink) (*c
 			line <- finish{err: round.Err()}
 			return
 		}
-		link, err := dialOverTCP(round, endpoint, host, keep)
+		conn, cc, err := cip.ReachH2(round, endpoint, keep)
 		if err != nil {
 			line <- finish{err: fmt.Errorf("tcp: %w", err)}
 			return
 		}
-		line <- finish{link: link}
+		line <- finish{link: &controlLink{tcp: conn, h2: cc}}
 	}()
 
-	if relayReachable(relays) {
+	if mine, ok := relayFor(endpoint, relays); ok {
 		paths++
 		go func() {
 			fora := relayHeadStart
@@ -226,19 +218,12 @@ func dialControl(endpoint string, keep func(fd uintptr), relays []RelayLink) (*c
 				line <- finish{err: round.Err()}
 				return
 			}
-			for _, link := range relays {
-				if link.Weblink == "" || link.Authority == "" {
-					continue
-				}
-				rl, err := dialControlRelay(link, keep)
-				if err != nil {
-					line <- finish{err: fmt.Errorf("relay: %w", err)}
-					return
-				}
-				line <- finish{link: rl}
+			rl, err := dialControlRelay(mine, keep)
+			if err != nil {
+				line <- finish{err: fmt.Errorf("relay: %w", err)}
 				return
 			}
-			line <- finish{err: errors.New("no relay answered")}
+			line <- finish{link: rl}
 		}()
 	}
 
@@ -266,66 +251,25 @@ func dialControl(endpoint string, keep func(fd uintptr), relays []RelayLink) (*c
 
 const relayHeadStart = 800 * time.Millisecond
 
-func relayReachable(relays []RelayLink) bool {
+func relayFor(endpoint string, relays []relay.Link) (relay.Link, bool) {
 	for _, l := range relays {
-		if l.Weblink != "" && l.Authority != "" {
-			return true
+		if l.Weblink != "" && l.Authority == endpoint {
+			return l, true
 		}
 	}
-	return false
+	return relay.Link{}, false
 }
 
-func dialControlRelay(link RelayLink, keep func(fd uintptr)) (*controlLink, error) {
-	host, _, err := net.SplitHostPort(link.Authority)
-	if err != nil {
-		return nil, err
-	}
+func dialControlRelay(link relay.Link, keep func(fd uintptr)) (*controlLink, error) {
 	sess := relay.New(relay.Config{Public: link.Weblink, Keep: keep})
-	pc := relay.NewPacketConn(sess)
-	if err := sess.Start(); err != nil {
-		return nil, err
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	qc, err := quicconn.DialPacketConn(ctx, pc, relay.Peer, &tls.Config{
-		ServerName: host, NextProtos: []string{http3.NextProtoH3},
-	}, controlConfig())
+	qc, err := quicconn.OverRelay(ctx, sess, link.Authority, controlConfig())
 	if err != nil {
-		sess.Stop()
 		return nil, err
 	}
 	tr := &http3.Transport{EnableDatagrams: true}
 	return &controlLink{tr: tr, conn: qc, cc: tr.NewClientConn(qc.QUIC()), relay: sess}, nil
-}
-
-func dialOverTCP(ctx context.Context, endpoint, host string, keep func(fd uintptr)) (*controlLink, error) {
-	dialer := &net.Dialer{}
-	if keep != nil {
-		dialer.Control = func(_, _ string, rc syscall.RawConn) error {
-			return rc.Control(keep)
-		}
-	}
-
-	raw, err := roads.ReachTCP(ctx, dialer, endpoint)
-	if err != nil {
-		return nil, err
-	}
-	held := tls.Client(raw, &tls.Config{ServerName: host, NextProtos: []string{"h2"}})
-	if err := held.HandshakeContext(ctx); err != nil {
-		raw.Close()
-		return nil, err
-	}
-	if state := held.ConnectionState(); state.NegotiatedProtocol != "h2" {
-		held.Close()
-		return nil, fmt.Errorf("the node offered %q, not h2", state.NegotiatedProtocol)
-	}
-
-	cc, err := (&http2.Transport{}).NewClientConn(held)
-	if err != nil {
-		held.Close()
-		return nil, err
-	}
-	return &controlLink{tcp: held, h2: cc}, nil
 }
 
 func (d *Dialer) drop(endpoint string) {

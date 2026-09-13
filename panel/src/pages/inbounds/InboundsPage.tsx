@@ -13,9 +13,7 @@ import {
 } from '@ant-design/icons';
 
 import { HttpUtil, SizeFormatter, RandomUtil } from '@/utils';
-import { createDefaultInboundSettings } from '@/lib/qd/entry-compat';
-import { genEntryLinks, preferPublicHost } from '@/lib/qd/entry-link';
-import { inboundFromDb } from '@/lib/qd/entry-link';
+import { genEntryLinks, inboundFromDb, preferPublicHost } from '@/lib/qd/entry-link';
 import { coerceInboundJsonField, type DBInbound } from '@/models/dbinbound';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { useWebSocket } from '@/hooks/useWebSocket';
@@ -51,12 +49,6 @@ type RowAction =
 
 type GeneralAction = 'import' | 'export' | 'subs' | 'resetInbounds';
 
-interface ClientMatchTarget {
-  id?: string;
-  email?: string;
-  password?: string;
-}
-
 export default function InboundsPage() {
   const { t } = useTranslation();
   const { isDark, isUltra } = useTheme();
@@ -78,7 +70,6 @@ export default function InboundsPage() {
     subSettings,
     tgBotEnable,
     ipLimitEnable,
-    remarkModel,
     refresh,
     hydrateInbound,
     applyTrafficEvent,
@@ -86,7 +77,6 @@ export default function InboundsPage() {
   } = useInbounds();
 
   interface ConfirmConfig {
-    // The reset confirm carries the node as a pill, so the title is markup.
     title: ReactNode;
     content: string;
     okText?: string;
@@ -129,8 +119,6 @@ export default function InboundsPage() {
   }, [dbInbounds, nodesById, t]);
 
   const [role, setRole] = useState('ingress');
-  // A role can empty out while it is the one on screen, so fall back rather
-  // than render a switch pointing at nothing.
   const shownRole = byRole.find((g) => g.role === role) ?? byRole[0];
 
   const hasActiveNode = useMemo(
@@ -154,7 +142,6 @@ export default function InboundsPage() {
 
   const [infoOpen, setInfoOpen] = useState(false);
   const [infoDbInbound, setInfoDbInbound] = useState<DBInbound | null>(null);
-  const [infoClientIndex, setInfoClientIndex] = useState(0);
 
 
   const [attachOpen, setAttachOpen] = useState(false);
@@ -177,8 +164,6 @@ export default function InboundsPage() {
     return nodesById.get(dbInbound.nodeId)?.address || '';
   }, [nodesById]);
 
-  const infoNodeAddress = useMemo(() => hostOverrideFor(infoDbInbound), [infoDbInbound, hostOverrideFor]);
-
   const openText = useCallback((opts: { title: string; content: string; fileName?: string }) => {
     setTextTitle(opts.title);
     setTextContent(opts.content);
@@ -186,72 +171,18 @@ export default function InboundsPage() {
     setTextOpen(true);
   }, []);
 
-  const projectChildThroughMaster = useCallback((child: DBInbound, master: DBInbound): DBInbound => {
-    const projected = JSON.parse(JSON.stringify(child)) as DBInbound;
-    projected.listen = master.listen;
-    projected.port = master.port;
-    const masterStream = coerceInboundJsonField(master.streamSettings) as Record<string, unknown>;
-    const childStream = { ...(coerceInboundJsonField(child.streamSettings) as Record<string, unknown>) };
-    childStream.security = masterStream.security;
-    childStream.tlsSettings = masterStream.tlsSettings;
-    childStream.realitySettings = masterStream.realitySettings;
-    childStream.externalProxy = masterStream.externalProxy;
-    projected.streamSettings = JSON.stringify(childStream);
-    const Ctor = child.constructor as new (data: DBInbound) => DBInbound;
-    return new Ctor(projected);
-  }, []);
-
-  const checkFallback = useCallback((dbInbound: DBInbound): DBInbound => {
-    const parent = dbInbound?.fallbackParent;
-    if (parent?.masterId) {
-      const master = dbInbounds.find((ib) => ib.id === parent.masterId);
-      if (master) return projectChildThroughMaster(dbInbound, master);
-    }
-    if (!dbInbound?.listen?.startsWith?.('@')) return dbInbound;
-    for (const candidate of dbInbounds) {
-      if (candidate.id === dbInbound.id) continue;
-      if (!['trojan', 'vless'].includes(candidate.protocol)) continue;
-      const candStream = coerceInboundJsonField(candidate.streamSettings) as { network?: string };
-      if (candStream.network !== 'tcp') continue;
-      const candSettings = coerceInboundJsonField(candidate.settings) as { fallbacks?: { dest?: string }[] };
-      const fallbacks = candSettings.fallbacks || [];
-      if (!fallbacks.find((f) => f.dest === dbInbound.listen)) continue;
-      return projectChildThroughMaster(dbInbound, candidate);
-    }
-    return dbInbound;
-  }, [dbInbounds, projectChildThroughMaster]);
-
-  const findClientIndex = useCallback((dbInbound: DBInbound, client: ClientMatchTarget | null) => {
-    if (!client) return 0;
-    const settings = coerceInboundJsonField(dbInbound.settings) as { clients?: ClientMatchTarget[] };
-    const clients = settings.clients || [];
-    const idx = clients.findIndex((c) => {
-      if (!c) return false;
-      switch (dbInbound.protocol) {
-        case 'trojan':
-        case 'shadowsocks':
-          return c.password === client.password && c.email === client.email;
-        default:
-          return c.id === client.id && c.email === client.email;
-      }
-    });
-    return idx >= 0 ? idx : 0;
-  }, []);
-
   const exportInboundLinks = useCallback((dbInbound: DBInbound) => {
-    const projected = checkFallback(dbInbound);
     openText({
       title: t('pages.inbounds.exportLinksTitle'),
       content: genEntryLinks({
-        inbound: inboundFromDb(projected),
-        remark: projected.remark,
-        remarkModel,
+        inbound: inboundFromDb(dbInbound),
+        remark: dbInbound.remark,
         hostOverride: hostOverrideFor(dbInbound),
         fallbackHostname: preferPublicHost(window.location.hostname, subSettings.publicHost),
       }),
-      fileName: projected.remark || 'inbound',
+      fileName: dbInbound.remark || 'inbound',
     });
-  }, [checkFallback, remarkModel, hostOverrideFor, subSettings.publicHost, openText, t]);
+  }, [hostOverrideFor, subSettings.publicHost, openText, t]);
 
   const exportInboundClipboard = useCallback((dbInbound: DBInbound) => {
     openText({ title: t('pages.inbounds.inboundJsonTitle'), content: JSON.stringify(dbInbound, null, 2) });
@@ -279,17 +210,15 @@ export default function InboundsPage() {
     );
     const out: string[] = [];
     for (const ib of hydrated) {
-      const projected = checkFallback(ib);
       out.push(genEntryLinks({
-        inbound: inboundFromDb(projected),
-        remark: projected.remark,
-        remarkModel,
+        inbound: inboundFromDb(ib),
+        remark: ib.remark,
         hostOverride: hostOverrideFor(ib),
         fallbackHostname: preferPublicHost(window.location.hostname, subSettings.publicHost),
       }));
     }
     openText({ title: t('pages.inbounds.exportAllLinksTitle'), content: out.join('\r\n'), fileName: t('pages.inbounds.exportAllLinksFileName') });
-  }, [dbInbounds, hydrateInbound, checkFallback, remarkModel, hostOverrideFor, subSettings.publicHost, openText, t]);
+  }, [dbInbounds, hydrateInbound, hostOverrideFor, subSettings.publicHost, openText, t]);
 
   const exportAllSubs = useCallback(async () => {
     const hydrated = await Promise.all(
@@ -357,8 +286,6 @@ export default function InboundsPage() {
   }), [refresh, t]);
 
   const confirmResetTraffic = useCallback((dbInbound: DBInbound) => {
-    // Name the node and the port rather than the stored remark: that label is a
-    // leftover nobody edits any more, so it can still name a renamed node.
     const owner = nodesById.get((dbInbound as unknown as { nodeId?: number }).nodeId ?? 0);
     const where = owner?.name || owner?.address || '—';
     setConfirm({
@@ -384,15 +311,9 @@ export default function InboundsPage() {
       content: t('pages.inbounds.cloneConfirmContent'),
       okText: t('pages.inbounds.clone'),
       onOk: async () => {
-        let clonedSettings: string;
-        try {
-          const raw = coerceInboundJsonField(dbInbound.settings);
-          raw.clients = [];
-          clonedSettings = JSON.stringify(raw);
-        } catch {
-          const fallback = createDefaultInboundSettings(dbInbound.protocol);
-          clonedSettings = fallback ? JSON.stringify(fallback, null, 2) : '{}';
-        }
+        const raw = coerceInboundJsonField(dbInbound.settings);
+        raw.clients = [];
+        const clonedSettings = JSON.stringify(raw);
         const streamSettingsString = typeof dbInbound.streamSettings === 'string'
           ? dbInbound.streamSettings
           : JSON.stringify(dbInbound.streamSettings ?? {});
@@ -441,9 +362,6 @@ export default function InboundsPage() {
 
 
   const onRowAction = useCallback(async ({ key, dbInbound }: { key: RowAction; dbInbound: DBInbound }) => {
-    // Actions that touch per-client secrets (uuid, password, flow, ...) need
-    // the full payload that the slim list view does not ship. Hydrate first
-    // and then operate on the rehydrated record.
     const hydratingKeys: RowAction[] = ['edit', 'showInfo', 'qrcode', 'export', 'subs', 'clipboard', 'clone', 'attachClients', 'addToGroup'];
     let target = dbInbound;
     if (hydratingKeys.includes(key)) {
@@ -455,8 +373,7 @@ export default function InboundsPage() {
         openEdit(target);
         break;
       case 'showInfo':
-        setInfoDbInbound(checkFallback(target));
-        setInfoClientIndex(findClientIndex(target, null));
+        setInfoDbInbound(target);
         setInfoOpen(true);
         break;
       case 'export':
@@ -496,7 +413,7 @@ export default function InboundsPage() {
       default:
         toast.info(`Action "${key}" — coming in a later 5f subphase`);
     }
-  }, [hydrateInbound, openEdit, checkFallback, findClientIndex, exportInboundLinks, exportInboundSubs, exportInboundClipboard, confirmDelete, confirmResetTraffic, confirmClone]);
+  }, [hydrateInbound, openEdit, exportInboundLinks, exportInboundSubs, exportInboundClipboard, confirmDelete, confirmResetTraffic, confirmClone]);
 
   return (
     <div className={`section-content-wrapper inbounds-section-wrapper ${pageClass}`}>
@@ -586,15 +503,12 @@ export default function InboundsPage() {
             open={infoOpen}
             onClose={() => setInfoOpen(false)}
             dbInbound={infoDbInbound}
-            clientIndex={infoClientIndex}
-            remarkModel={remarkModel}
             expireDiff={expireDiff}
             trafficDiff={trafficDiff}
             ipLimitEnable={ipLimitEnable}
             tgBotEnable={tgBotEnable}
             subSettings={subSettings}
             lastOnlineMap={lastOnlineMap}
-            nodeAddress={infoNodeAddress}
           />
         </LazyMount>
         <LazyMount when={attachOpen}>

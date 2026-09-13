@@ -1,6 +1,6 @@
 //go:build windows
 
-package roam
+package main
 
 import (
 	"sync"
@@ -9,16 +9,12 @@ import (
 )
 
 var (
-	iphlpapi = syscall.NewLazyDLL("iphlpapi.dll")
-
-	procNotifyRouteChange2       = iphlpapi.NewProc("NotifyRouteChange2")
-	procNotifyIpInterfaceChange  = iphlpapi.NewProc("NotifyIpInterfaceChange")
-	procCancelMibChangeNotify2   = iphlpapi.NewProc("CancelMibChangeNotify2")
+	procNotifyRouteChange2      = iphlpapi.NewProc("NotifyRouteChange2")
+	procNotifyIpInterfaceChange = iphlpapi.NewProc("NotifyIpInterfaceChange")
+	procCancelMibChangeNotify2  = iphlpapi.NewProc("CancelMibChangeNotify2")
 )
 
-const afUnspec = 0
-
-type systemWatcher struct {
+type routeWatcher struct {
 	changed chan struct{}
 
 	mu       sync.Mutex
@@ -27,8 +23,8 @@ type systemWatcher struct {
 	closed   bool
 }
 
-func NewSystemWatcher() (Watcher, error) {
-	w := &systemWatcher{changed: make(chan struct{}, 1)}
+func watchRoutes() (*routeWatcher, error) {
+	w := &routeWatcher{changed: make(chan struct{}, 1)}
 	w.callback = syscall.NewCallback(w.onChange)
 
 	var routeHandle, ifaceHandle syscall.Handle
@@ -46,7 +42,7 @@ func NewSystemWatcher() (Watcher, error) {
 	return w, nil
 }
 
-func (w *systemWatcher) onChange(_ uintptr, _ uintptr, _ uintptr) uintptr {
+func (w *routeWatcher) onChange(_ uintptr, _ uintptr, _ uintptr) uintptr {
 	select {
 	case w.changed <- struct{}{}:
 	default:
@@ -54,9 +50,9 @@ func (w *systemWatcher) onChange(_ uintptr, _ uintptr, _ uintptr) uintptr {
 	return 0
 }
 
-func (w *systemWatcher) Changed() <-chan struct{} { return w.changed }
+func (w *routeWatcher) Changed() <-chan struct{} { return w.changed }
 
-func (w *systemWatcher) Close() error {
+func (w *routeWatcher) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.closed {
@@ -69,4 +65,3 @@ func (w *systemWatcher) Close() error {
 	w.handles = nil
 	return nil
 }
-

@@ -29,6 +29,11 @@ const (
 	browserUA     = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36"
 )
 
+type Link struct {
+	Authority string `json:"authority"`
+	Weblink   string `json:"weblink"`
+}
+
 type Config struct {
 	Public string
 	Token  string
@@ -123,14 +128,13 @@ func (s *Session) logf(f string, a ...any) {
 	}
 }
 
-
 func (s *Session) Start() error {
 	s.running.Store(true)
 	if i := strings.Index(s.cfg.Public, "/public/"); i >= 0 {
 		s.cfg.Public = s.cfg.Public[i+len("/public/"):]
 	}
 	if s.cfg.Public == "" && s.cfg.Token == "" {
-		return fmt.Errorf("relay: нужен Public или Token")
+		return fmt.Errorf("relay: needs a Public link or a Token")
 	}
 	go s.writerLoop()
 	go s.keepAliveLoop()
@@ -143,7 +147,7 @@ func (s *Session) Send(b []byte) error {
 	case s.queue <- append([]byte(nil), b...):
 		return nil
 	default:
-		return fmt.Errorf("relay: очередь переполнена")
+		return fmt.Errorf("relay: queue is full")
 	}
 }
 
@@ -275,7 +279,7 @@ func (s *Session) mint() (string, error) {
 		return "", err
 	}
 	if out.Token == "" {
-		return "", fmt.Errorf("r7/view: пустой token")
+		return "", fmt.Errorf("r7/view: empty token")
 	}
 	return out.Token, nil
 }
@@ -283,7 +287,7 @@ func (s *Session) mint() (string, error) {
 func (s *Session) authenticate(conn *websocket.Conn) error {
 	cfg, err := decodeJWT(s.cfg.Token)
 	if err != nil {
-		return fmt.Errorf("разбор jwtOpen: %w", err)
+		return fmt.Errorf("jwtOpen: %w", err)
 	}
 	docKey := firstNonEmpty(s.cfg.DocID, cfg.Document.Key)
 	userID := firstNonEmpty(s.userID, cfg.EditorConfig.User.ID)
@@ -301,7 +305,7 @@ func (s *Session) authenticate(conn *websocket.Conn) error {
 		return fmt.Errorf("handshake read: %w", err)
 	}
 	if len(open) == 0 || open[0] != '0' {
-		return fmt.Errorf("не engine.io handshake: %.40s", open)
+		return fmt.Errorf("not an engine.io handshake: %.40s", open)
 	}
 
 	if err := s.write(conn, fmt.Sprintf(`40{"token":%q}`, s.cfg.Token)); err != nil {
@@ -332,15 +336,15 @@ func (s *Session) authenticate(conn *websocket.Conn) error {
 			"id": userID, "username": cfg.EditorConfig.User.Name,
 			"firstname": nil, "lastname": nil, "indexUser": -1,
 		},
-		"editorType":            0,
-		"lastOtherSaveTime":     -1,
-		"block":                 []interface{}{},
-		"sessionId":             nil,
-		"sessionTimeConnect":    nil,
-		"sessionTimeIdle":       0,
-		"documentFormatSave":    65,
-		"view":                  view,
-		"isCloseCoAuthoring":    false,
+		"editorType":         0,
+		"lastOtherSaveTime":  -1,
+		"block":              []interface{}{},
+		"sessionId":          nil,
+		"sessionTimeConnect": nil,
+		"sessionTimeIdle":    0,
+		"documentFormatSave": 65,
+		"view":               view,
+		"isCloseCoAuthoring": false,
 		"openCmd": map[string]interface{}{
 			"c": "open", "id": docKey, "userid": userID,
 			"format": cfg.Document.FileType, "url": cfg.Document.URL,
@@ -381,7 +385,7 @@ func decodeJWT(token string) (jwtConfig, error) {
 	var cfg jwtConfig
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
-		return cfg, fmt.Errorf("не JWT")
+		return cfg, fmt.Errorf("not a JWT")
 	}
 	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {

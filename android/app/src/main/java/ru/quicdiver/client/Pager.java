@@ -70,8 +70,6 @@ public class Pager extends HorizontalScrollView {
         glide(page);
     }
 
-    // Ширина страницы -- не ширина самого пейджера: по бокам живут отступы под
-    // вырез камеры, и в альбомной ориентации страницы разъезжались ровно на них.
     private int span() {
         return Math.max(1, getWidth() - getPaddingLeft() - getPaddingRight());
     }
@@ -102,8 +100,6 @@ public class Pager extends HorizontalScrollView {
         settle(velocity);
     }
 
-    // A page can hold a vertical scroller, and that child grabs the gesture
-    // first. Claim anything that moves sideways before it gets the chance.
     @Override
     public boolean onInterceptTouchEvent(MotionEvent event) {
         switch (event.getActionMasked()) {
@@ -116,9 +112,6 @@ public class Pager extends HorizontalScrollView {
                 from = nearest();
                 break;
             case MotionEvent.ACTION_MOVE:
-                // Палец редко идёт строго вниз, и на первых пикселях боковое
-                // смещение легко обгоняет вертикальное. Как только вертикаль
-                // перевалила порог, жест до конца принадлежит странице.
                 if (!claiming && !yielding) {
                     float dx = Math.abs(event.getX() - downX);
                     float dy = Math.abs(event.getY() - downY);

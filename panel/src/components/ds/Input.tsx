@@ -27,7 +27,6 @@ export interface FieldProps {
   className?: string;
 }
 
-/** Label + control + error-slot wrapper for forms. */
 export function Field({ label, error, htmlFor, children, className = '' }: FieldProps) {
   return (
     <div className={['ds-field', className].filter(Boolean).join(' ')}>

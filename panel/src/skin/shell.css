@@ -152,8 +152,6 @@ html.in-window .nav-menu-item:hover { background: none; }
   box-sizing: border-box;
 }
 
-/* The admin pages render straight into this wrapper, so it carries the width
-   and the gutters the client pages set on themselves. */
 .panel-main-content {
   width: 100%;
   max-width: 1180px;

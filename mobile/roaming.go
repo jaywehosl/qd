@@ -11,20 +11,6 @@ import (
 
 var moving atomic.Bool
 
-// watch держит туннель на месте, когда телефон меняет сеть. Здесь не нужен свой
-// сторож за адресами: систему об этом спрашивать не надо, она сама говорит —
-// NetworkChanged приходит от VpnService. Остаётся то, чего система не скажет:
-// путь может умереть молча.
-//
-// Молчание пути нельзя мерить одними счётчиками. Телефон морозит процесс, пока
-// он заморожен — не идёт ни keepalive, ни трафик, и узел снимает сессию по
-// своему idle. Проснувшись, клиент видит ровный туннель: писать в него некому,
-// значит и «глухоты» не видно, а QUIC о смерти не сообщает — наш собственный
-// keepalive держит его idle-таймер живым и после того, как с той стороны никого
-// не осталось. Такой туннель висит бесконечно, и приложения висят вместе с ним.
-//
-// Поэтому узел спрашивают напрямую — тем же запросом, каким клиент здоровается
-// при дозвоне: ответил, значит путь жив и сессию помнят.
 func (c *Client) watch(ctx context.Context, stop <-chan struct{}) {
 	tick := time.NewTicker(deafStep)
 	defer tick.Stop()
@@ -59,9 +45,6 @@ func (c *Client) watch(ctx context.Context, stop <-chan struct{}) {
 			return
 		}
 
-		// Процесс стоял: между двумя тиками прошло много больше, чем шаг. Пока он
-		// стоял, узел успел снять сессию по своему idle, а счётчики этого не
-		// покажут — в туннель было некому писать.
 		if stood > goneFor {
 			say("roam: the process stood still for %s, the node has dropped the session by now", stood.Round(time.Second))
 			go c.lost()
@@ -94,10 +77,6 @@ func (c *Client) watch(ctx context.Context, stop <-chan struct{}) {
 			continue
 		}
 
-		// Обратно давно ничего не приходило. Само по себе это не поломка — в
-		// молчащий туннель никто не писал, — но и здоровьем это не считается:
-		// мёртвый путь молчит точно так же. Спрашиваем сами, пока узел ещё
-		// держит сессию.
 		if time.Since(heardAt) > silenceFor {
 			say("roam: nothing has come back for %s, asking the path", silenceFor)
 			if !c.pathAnswers(ctx) {
@@ -113,7 +92,6 @@ func (c *Client) watch(ctx context.Context, stop <-chan struct{}) {
 			continue
 		}
 
-		// Наружу пишем, обратно тишина — это уже глухота.
 		if deaf.IsZero() {
 			deaf = time.Now()
 			continue
@@ -134,8 +112,6 @@ func (c *Client) watch(ctx context.Context, stop <-chan struct{}) {
 	}
 }
 
-// pathAnswers спрашивает узел по тому же соединению. Ответил — путь жив и
-// сессию помнят; промолчал — ждать нечего, поднимаемся заново.
 func (c *Client) pathAnswers(ctx context.Context) bool {
 	c.mu.Lock()
 	live := c.live
@@ -154,8 +130,6 @@ func (c *Client) pathAnswers(ctx context.Context) bool {
 	return false
 }
 
-// migrate просит QUIC переехать на новый путь. Сессия на узле остаётся той же:
-// ни нового рукопожатия, ни разрыва живых соединений в приложениях.
 func (c *Client) migrate(ctx context.Context) {
 	if !moving.CompareAndSwap(false, true) {
 		return
@@ -202,10 +176,6 @@ func (c *Client) migrate(ctx context.Context) {
 
 var resolved sync.Map
 
-// lookUp узнаёт адреса узла, чтобы держать их мимо туннеля. Известное отдаётся
-// сразу, а обновляется в стороне: этот вызов стоит на пути дозвона, а системный
-// резолвер сразу после разрыва туннеля лежит и отвечает только по таймауту —
-// три секунды впустую на каждое нажатие.
 func lookUp(host string) []netip.Addr {
 	if held, known := resolved.Load(host); known {
 		go refresh(host)

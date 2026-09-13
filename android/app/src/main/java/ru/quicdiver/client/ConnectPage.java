@@ -116,9 +116,6 @@ public class ConnectPage {
         card.setOrientation(LinearLayout.HORIZONTAL);
         card.setGravity(Gravity.CENTER_VERTICAL);
 
-        // Счётчик держится середины карточки, а не середины того, что осталось от
-        // соседей: иначе он ездит туда-сюда вслед за длиной имени узла. Поэтому
-        // все трое лежат в одном слое, а не в ряд.
         FrameLayout row = new FrameLayout(host);
 
         title = skin.label("", skin.bold, 24);
@@ -131,8 +128,6 @@ public class ConnectPage {
 
         refreshLine = skin.note("");
         refreshLine.setGravity(Gravity.CENTER);
-        // Табличные цифры: в пропорциональном начертании единица уже семёрки, и
-        // строка дёргается на каждом тике вместе с шириной последнего разряда.
         refreshLine.setFontFeatureSettings("tnum");
         FrameLayout.LayoutParams lineAt = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
@@ -161,8 +156,6 @@ public class ConnectPage {
         spark.setGirth(skin.dpf(19f));
         spark.setWeight(skin.dpf(3f), skin.dpf(4f));
         spark.setTone(skin.good);
-        // Тень тут ни к чему: кнопка сидит внутри карточки, а слой Halo рисуется
-        // программно и на таком размере проступает светлым прямоугольником.
         spark.setElevation(0f);
         spark.addView(again, new FrameLayout.LayoutParams(
                 skin.dp(38), skin.dp(38)));
@@ -358,9 +351,6 @@ public class ConnectPage {
         return view;
     }
 
-    // Кнопка идёт без карточки вокруг: она сама себе карточка и занимает ту же
-    // ширину, что и остальные. Переход по страницам живёт в плавающей строке
-    // внизу, поэтому подписи со стрелками отсюда убраны.
     private View controls() {
         halo = new Halo(host, skin);
 
@@ -494,10 +484,6 @@ public class ConnectPage {
         try {
             JSONObject state = Snapshot.state();
 
-            // В шапке имя узла, который выиграл гонку подключений, а не тег
-            // подписки: тег и так виден в настройках, а узел меняется сам. Метка
-            // selected переживает отключение, поэтому спрашиваем ещё и туннель --
-            // иначе на холодном старте в шапке висел бы узел прошлой сессии.
             name(Core.up() ? carrying() : "");
 
             JSONObject sub = state.optJSONObject("subscription");
@@ -529,8 +515,6 @@ public class ConnectPage {
         }
     }
 
-    // Имя не подменяется на месте: узел выбирается посреди гонки, и подстановка
-    // в один кадр читается как сбой отрисовки, а не как смена узла.
     private void name(String want) {
         if (want.equals(titleWas)) {
             return;
@@ -684,8 +668,6 @@ public class ConnectPage {
                 } catch (Exception ignored) {
                 }
                 Snapshot.refreshState(host);
-                // Уведомление держит своё представление о выходе: без этого оно
-                // показывало бы прошлое состояние, пока не переподключишься.
                 Core.readExit(host);
                 Core.repaint(host);
                 flipping = false;

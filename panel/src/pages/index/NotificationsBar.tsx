@@ -35,7 +35,6 @@ export default function NotificationsBar() {
           </div>
         ) : (
           <ul className="notif-list">
-            {/* Live-condition alerts (port/path/xray/restart) — dismiss silences the key. */}
             {rows.map((r) => (
               <li key={r.id} className={`notif-row notif-row--${r.severity}`}>
                 <span className="notif-row__icon">{SEVERITY_ICON[r.severity]}</span>
@@ -53,7 +52,6 @@ export default function NotificationsBar() {
                 </button>
               </li>
             ))}
-            {/* Event notifications (sensors / log) — dismiss removes from the strip. */}
             {active.map((r) => (
               <li key={r.id} className={`notif-row notif-row--${r.severity}`}>
                 <span className="notif-row__icon">{SEVERITY_ICON[r.severity]}</span>

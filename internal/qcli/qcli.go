@@ -31,14 +31,9 @@ import (
 	"github.com/jaywehosl/quic-diver/internal/roads"
 )
 
-type RelayLink struct {
-	Weblink   string
-	Authority string
-}
-
 type Options struct {
 	Endpoints []string
-	Relays    []RelayLink
+	Relays    []relay.Link
 	Token     string
 	Device    string
 	Route     string
@@ -71,9 +66,6 @@ type Tunnel struct {
 	marks    atomic.Uint64
 }
 
-// Dial поднимает туннель гонкой: запросы уходят ко ВСЕМ точкам входа сразу,
-// побеждает та, что первой отдала адрес, остальные закрываются немедленно —
-// чтобы узел не держал соединение, по которому не пойдёт трафик.
 func Dial(ctx context.Context, opts Options) (*Tunnel, error) {
 	if opts.MTU <= 0 {
 		opts.MTU = 1500
@@ -202,7 +194,7 @@ func dialRelays(ctx context.Context, opts Options) *Tunnel {
 	return nil
 }
 
-func reachRelay(ctx context.Context, opts Options, link RelayLink) (*Tunnel, error) {
+func reachRelay(ctx context.Context, opts Options, link relay.Link) (*Tunnel, error) {
 	host, _, err := net.SplitHostPort(link.Authority)
 	if err != nil {
 		return nil, err
@@ -210,21 +202,14 @@ func reachRelay(ctx context.Context, opts Options, link RelayLink) (*Tunnel, err
 
 	sess := relay.New(relay.Config{Public: link.Weblink, Keep: opts.Keep})
 	sess.Log = func(f string, a ...any) { fmt.Printf(f+"\n", a...) }
-	pc := relay.NewPacketConn(sess)
-	if err := sess.Start(); err != nil {
-		return nil, err
-	}
-
-	tlsConf := &tls.Config{ServerName: host, NextProtos: []string{"h3"}}
-	qc, err := quicconn.DialPacketConn(ctx, pc, relay.Peer, tlsConf, relayQUIC())
+	qc, err := quicconn.OverRelay(ctx, sess, link.Authority, relayQUIC())
 	if err != nil {
-		sess.Stop()
 		return nil, err
 	}
 
 	tmpl := qsrv.Template(link.Authority, qsrv.ConnectIPPath)
 	authURL := "https://" + link.Authority + qsrv.AuthPath
-	client, _, err := cip.DialAuthConn(ctx, qc, tmpl, opts.Token, opts.Device, opts.Route, authURL)
+	client, err := cip.DialAuthConn(ctx, qc, tmpl, opts.Token, opts.Device, opts.Route, authURL)
 	if err != nil {
 		sess.Stop()
 		return nil, err
@@ -283,7 +268,7 @@ func reach(ctx context.Context, opts Options, endpoint string) (*Tunnel, error) 
 
 	if !roads.OnlyTCP() {
 		go func() {
-			client, _, err := cip.DialAuth(round, endpoint, tmpl, tlsConf,
+			client, err := cip.DialAuth(round, endpoint, tmpl, tlsConf,
 				opts.Token, opts.Device, opts.Route, authURL, opts.Keep)
 			if err != nil {
 				line <- finish{err: fmt.Errorf("quic: %w", err)}
@@ -300,8 +285,7 @@ func reach(ctx context.Context, opts Options, endpoint string) (*Tunnel, error) 
 			line <- finish{err: round.Err()}
 			return
 		}
-		over, err := cip.DialOver(round, endpoint, tlsConf,
-			opts.Token, opts.Device, opts.Route, authURL)
+		over, err := cip.DialOver(round, endpoint, opts.Token, opts.Device, opts.Route, authURL, opts.Keep)
 		if err != nil {
 			line <- finish{err: fmt.Errorf("tcp: %w", err)}
 			return
@@ -338,14 +322,9 @@ func reach(ctx context.Context, opts Options, endpoint string) (*Tunnel, error) 
 			assigned: assigned,
 			peers:    resolve(ctx, host),
 		}
-		// Маршрут уже уехал узлу в приветствии: спрашивать его вторым запросом
-		// значило лишний полный круг на каждом подключении.
 		tag := opts.Route
 		t.route.Store(&tag)
 
-		// Пути, добежавшие после победителя, закрываем: каждый из них — уже
-		// авторизованная у узла сессия, брошенная молча она висела бы там до
-		// таймаута.
 		left := paths - i - 1
 		go func() {
 			for k := 0; k < left; k++ {
@@ -404,22 +383,29 @@ func (t *Tunnel) StopRelay() {
 	}
 }
 
-// Alive — жива ли сессия туннеля.
 func (t *Tunnel) Alive() bool { return t.road.Alive() }
 
-// DatagramLimit — сколько байт полезной нагрузки помещается в датаграмму на
-// этом пути. Спрашиваем у QUIC заведомо большой датаграммой: в сеть она не
-// уходит, зато ошибка называет точный предел.
 func (t *Tunnel) DatagramLimit() int { return t.road.DatagramLimit() }
 
-// Ask спрашивает узел, жив ли путь и помнит ли он эту сессию. Маршрут посылается
-// текущий, поэтому вопрос ничего не меняет.
 func (t *Tunnel) Ask(ctx context.Context) error {
-	tag := ""
-	if held := t.route.Load(); held != nil {
-		tag = *held
+	return t.road.Ask(ctx, currentRoute(&t.route))
+}
+
+func currentRoute(route *atomic.Pointer[string]) string {
+	if held := route.Load(); held != nil {
+		return *held
 	}
-	return t.road.Ask(ctx, tag)
+	return ""
+}
+
+func exitTag(route string, exit func(src, dst netip.AddrPort, udp bool) string, flow netstack.Flow, known bool) string {
+	if exit != nil && known {
+		route = exit(flow.Src, flow.Dst, flow.UDP)
+	}
+	if route == "" {
+		return qsrv.HereExit
+	}
+	return route
 }
 
 func (t *Tunnel) Rebind(ctx context.Context) error {
@@ -442,16 +428,11 @@ func (t *Tunnel) SetRoute(tag string) {
 	fmt.Printf("route    exit is now %q\n", tag)
 }
 
-// Run несёт трафик, пока жив контекст. Источник пакетов даёт вызывающий: на
-// Windows это WinDivert, на телефоне — дескриптор от VpnService. Движку разницы
-// нет, оба отдают сырые IP-пакеты.
 func (t *Tunnel) Run(ctx context.Context, src packet.Source) error {
 	assigned := make([]netip.Addr, 0, len(t.assigned))
 	for _, p := range t.assigned {
 		assigned = append(assigned, p.Addr())
 	}
-	rewriter := nat.New(assigned)
-
 	ns, err := t.stack()
 	if err != nil {
 		return err
@@ -466,15 +447,18 @@ func (t *Tunnel) Run(ctx context.Context, src packet.Source) error {
 		}
 	}
 
-	eng := hybrid.New(guard.New(keepOut), rewriter, ns, t.opts.Workers, &t.meter)
-	eng.Fast(t.opts.Fast)
-	eng.CatchDNS(t.opts.Resolver != "")
-	eng.Streams(false)
-	eng.Direct(t.opts.Direct)
-	eng.Mark(t.markOf)
-	eng.Loud(t.opts.Loud)
-
-	return eng.Run(ctx, src, t.road)
+	return hybrid.New(hybrid.Options{
+		Guard:    guard.New(keepOut),
+		NAT:      nat.New(assigned),
+		Stack:    ns,
+		Workers:  t.opts.Workers,
+		Meter:    &t.meter,
+		Fast:     t.opts.Fast,
+		CatchDNS: t.opts.Resolver != "",
+		Direct:   t.opts.Direct,
+		Mark:     t.markOf,
+		Loud:     t.opts.Loud,
+	}).Run(ctx, src, t.road)
 }
 
 func (t *Tunnel) Reroute() int {
@@ -510,9 +494,6 @@ func (t *Tunnel) keepOnly(alive map[flowMark]struct{}) {
 	})
 }
 
-// forgetDeadFlows выбрасывает метки закончившихся флоу. Без этого карта росла на
-// каждый дозвон и не убывала никогда: чистил её только Reroute, а он случается
-// лишь при смене правил.
 func (t *Tunnel) forgetDeadFlows() {
 	ns := t.stackNow.Load()
 	if ns == nil {
@@ -527,17 +508,7 @@ func (t *Tunnel) forgetDeadFlows() {
 }
 
 func (t *Tunnel) exitOf(f netstack.Flow) string {
-	tag := ""
-	if held := t.route.Load(); held != nil {
-		tag = *held
-	}
-	if t.opts.Exit != nil {
-		tag = t.opts.Exit(f.Src, f.Dst, f.UDP)
-	}
-	if tag == "" {
-		tag = qsrv.HereExit
-	}
-	return tag
+	return exitTag(currentRoute(&t.route), t.opts.Exit, f, true)
 }
 
 func (t *Tunnel) tookFlow(f netstack.Flow, tag string) {
@@ -555,7 +526,7 @@ type flowMark struct {
 }
 
 func (t *Tunnel) stack() (*netstack.Stack, error) {
-	return netstack.NewWithMTU(t.dialer(), t.opts.MTU)
+	return netstack.New(t.dialer(), t.opts.MTU)
 }
 
 func (t *Tunnel) dialer() routed {
@@ -584,22 +555,12 @@ type routed struct {
 }
 
 func (r routed) with(ctx context.Context) connectdial.Dialer {
-	out := r.inner
-	tag := ""
-	if held := r.route.Load(); held != nil {
-		tag = *held
-	}
-	if r.exit != nil {
-		if flow, ok := netstack.FlowOf(ctx); ok {
-			tag = r.exit(flow.Src, flow.Dst, flow.UDP)
-		}
-	}
-	if tag == "" {
-		tag = qsrv.HereExit
-	}
-	if flow, ok := netstack.FlowOf(ctx); ok && r.took != nil {
+	flow, known := netstack.FlowOf(ctx)
+	tag := exitTag(currentRoute(r.route), r.exit, flow, known)
+	if known {
 		r.took(flow, tag)
 	}
+	out := r.inner
 	out.Header = http.Header{qsrv.HeaderRoute: []string{tag}}
 	return out
 }
@@ -630,22 +591,13 @@ func (t *Tunnel) Stats() Counters {
 }
 
 func (t *Tunnel) markOf(pkt []byte) uint64 {
-	tag := ""
-	if held := t.route.Load(); held != nil {
-		tag = *held
-	}
-	if t.opts.Exit != nil {
-		if src, dst, udp, ok := ippkt.Flow(pkt); ok {
-			tag = t.opts.Exit(src, dst, udp)
-		}
-	}
-	if tag == qsrv.AnyExit {
+	src, dst, udp, ok := ippkt.Flow(pkt)
+	if exitTag(currentRoute(&t.route), t.opts.Exit, netstack.Flow{Src: src, Dst: dst, UDP: udp}, ok) == qsrv.AnyExit {
 		return qsrv.MarkEgress
 	}
 	return qsrv.MarkHere
 }
 
-// Endpoint — точка входа, выигравшая гонку.
 func (t *Tunnel) Endpoint() string { return t.endpoint }
 
 func (t *Tunnel) CanMigrate() bool { return !t.overTCP && t.relay == nil }

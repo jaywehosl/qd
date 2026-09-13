@@ -25,7 +25,7 @@ func (c *Client) announce(op string) {
 	if err != nil {
 		return
 	}
-	heard := clientapi.Announce(op, nodes, c.api.Key(), sub.Key, c.device, c.wire())
+	heard := clientapi.Announce(op, nodes, sub.Key, c.device, c.wire())
 	say("fleet: %s heard by %d of %d nodes", op, heard, len(nodes))
 }
 

@@ -26,9 +26,4 @@ export const keys = {
     lastOnline: () => ['clients', 'lastOnline'] as const,
     groups: () => ['clients', 'groups'] as const,
   },
-  xray: {
-    root: () => ['xray'] as const,
-    config: () => ['xray', 'config'] as const,
-    outboundsTraffic: () => ['xray', 'outboundsTraffic'] as const,
-  },
 } as const;

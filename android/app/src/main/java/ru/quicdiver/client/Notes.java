@@ -8,9 +8,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.net.VpnService;
 
-// Notes собирает уведомление туннеля. Живёт отдельно от службы намеренно:
-// уведомление переживает смерть процесса, и вернуть его на место должен уметь и
-// тот, кто службу не поднимал, — экран приложения и приёмник загрузки.
 public final class Notes {
 
     static final String CHANNEL = "tunnel-quiet";
@@ -32,26 +29,18 @@ public final class Notes {
         manager.createNotificationChannel(channel);
     }
 
-    // post вешает уведомление, когда службы нет: туннель опущен, а управление
-    // wake поднимает службу вхолостую — только ради уведомления. Обычное
-    // уведомление оболочка стирает вместе с процессом, а уведомление службы
-    // переднего плана живёт, пока живёт служба.
     public static void wake(Context context) {
         Intent idle = new Intent(context, TunnelService.class);
         idle.setAction(TunnelService.ACTION_IDLE);
         try {
             context.startForegroundService(idle);
         } catch (Exception e) {
-            // Система могла не дать поднять службу из фона: тогда хотя бы
-            // повесим обычное уведомление.
             post(context);
         }
     }
 
-    // остаётся под рукой.
     public static void post(Context context) {
         channel(context);
-        // Службы сейчас может не быть вовсе, а флаг выхода нужен: читаем у клиента.
         Core.readExit(context);
         NotificationManager manager = context.getSystemService(NotificationManager.class);
         if (manager != null) {
@@ -72,10 +61,6 @@ public final class Notes {
         boolean up = Core.up();
         String where = Core.where();
 
-        // Вёрстка своя была ровно до тех пор, пока смотрели на неё в HyperOS. У
-        // других оболочек ширина и высота своей карточки другие, и плашка лезла
-        // поверх заголовка. Уведомление службы всё равно нельзя ни спрятать, ни
-        // раскрыть принудительно, поэтому оно теперь штатное и в одну строку.
         Notification.Builder note = new Notification.Builder(context, CHANNEL)
                 .setSmallIcon(R.drawable.ic_tile)
                 .setContentTitle(up
@@ -84,8 +69,6 @@ public final class Notes {
                 .setContentIntent(openIntent(context))
                 .setOngoing(true)
                 .setShowWhen(false)
-                // Без этого система придерживает уведомление службы до десяти
-                // секунд, когда та стартовала из фона — из плитки, например.
                 .setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE);
 
         note.addAction(new Notification.Action.Builder(null,
@@ -103,15 +86,10 @@ public final class Notes {
         return note.build();
     }
 
-    // powerIntent: поднять туннель из уведомления можно, только если согласие на
-    // VPN уже дано. Диалог согласия показывает лишь активность, поэтому в первый
-    // раз кнопка открывает приложение.
     static PendingIntent powerIntent(Context context, boolean up) {
         if (up) {
             return service(context, 1, TunnelService.ACTION_STOP);
         }
-        // Подписки нет — подключаться нечем, поэтому кнопка открывает клиент, а
-        // не молчит в ответ на нажатие.
         if (!Core.ready()) {
             return openIntent(context);
         }

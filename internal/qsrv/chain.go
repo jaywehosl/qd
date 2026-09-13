@@ -25,8 +25,6 @@ type chained struct {
 
 func (c chained) at() where { return where{c.endpoint, c.seat} }
 
-// open просит соседа взять флоу и отдаёт готовый стрим. Освобождение связи
-// привязано к закрытию стрима: пока хоть один флоу жив, сборщик связь не тронет.
 func (c chained) open(ctx context.Context, dst netip.AddrPort, udp bool) (io.ReadCloser, io.WriteCloser, context.CancelFunc, func(), error) {
 	sctx, scancel := context.WithCancel(context.Background())
 	pr, pw := io.Pipe()

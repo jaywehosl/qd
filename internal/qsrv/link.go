@@ -21,13 +21,12 @@ const peerDialTimeout = 8 * time.Second
 type link struct {
 	flows atomic.Int64
 	quiet atomic.Int64
-	// won — эта связь выиграла гонку для своего места. Живёт здесь, а не в
-	// карте рядом: умирает вместе со связью и разойтись с ней не может.
-	won atomic.Bool
+	won   atomic.Bool
 
 	mu       sync.Mutex
 	endpoint string
 	seat     uint32
+	session  uint32
 	self     string
 	token    string
 	cc       *http3.ClientConn
@@ -89,16 +88,15 @@ func (l *link) dial(ctx context.Context) (*http3.ClientConn, *http3.Transport, *
 	defer cancel()
 
 	tlsConf := &tls.Config{ServerName: host, NextProtos: []string{http3.NextProtoH3}}
-	raw, err := quicconn.Dialer{TLS: tlsConf}.Dial(dialCtx, l.endpoint)
+	conn, err := quicconn.Dialer{TLS: tlsConf}.Dial(dialCtx, l.endpoint)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	conn := raw.(*quicconn.Conn)
 
 	tr := &http3.Transport{EnableDatagrams: true}
 	cc := tr.NewClientConn(conn.QUIC())
 
-	if err := greetPeer(dialCtx, cc, l.token, l.self, l.seat, "https://"+l.endpoint+AuthPath); err != nil {
+	if err := greetPeer(dialCtx, cc, l.token, l.self, l.seat, l.session, "https://"+l.endpoint+AuthPath); err != nil {
 		tr.Close()
 		conn.Close()
 		return nil, nil, nil, err
@@ -122,7 +120,7 @@ func (l *link) close() {
 	l.dropLocked()
 }
 
-func greetPeer(ctx context.Context, cc *http3.ClientConn, token, self string, seat uint32, url string) error {
+func greetPeer(ctx context.Context, cc *http3.ClientConn, token, self string, seat, session uint32, url string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
@@ -133,6 +131,9 @@ func greetPeer(ctx context.Context, cc *http3.ClientConn, token, self string, se
 	}
 	if seat != 0 {
 		req.Header.Set(HeaderSeat, strconv.FormatUint(uint64(seat), 10))
+	}
+	if session != 0 {
+		req.Header.Set(HeaderSession, strconv.FormatUint(uint64(session), 10))
 	}
 
 	rsp, err := cc.RoundTrip(req)
@@ -147,8 +148,6 @@ func greetPeer(ctx context.Context, cc *http3.ClientConn, token, self string, se
 	return nil
 }
 
-// where — куда и для кого связь. Раньше ключом была склеенная строка, и она
-// строилась заново на каждом флоу; здесь склеивать нечего.
 type where struct {
 	endpoint string
 	seat     uint32
@@ -166,13 +165,6 @@ func newLinks(token, self string, say func(string, ...any)) *links {
 	return &links{token: token, self: self, say: say, held: map[where]*link{}}
 }
 
-// standing отдаёт уже живую связь с одним из кандидатов: сперва ту, что выиграла
-// прошлую гонку для этого места, иначе первую живую по порядку узлов. Порядок
-// стабилен, поэтому выход не скачет от флоу к флоу.
-//
-// Победа — свойство самой связи, а не отдельная карта рядом. Пока она жила
-// отдельно, её приходилось чистить руками вместе со связью, и стоило забыть —
-// память показывала один выход, а трафик шёл в другой.
 func (ls *links) standing(runners []Peer, seat uint32) (*http3.ClientConn, string, bool) {
 	for _, p := range runners {
 		l := ls.find(where{p.Endpoint, seat})
@@ -217,8 +209,6 @@ func (l *link) alive() (*http3.ClientConn, bool) {
 	}
 }
 
-// chose помечает победителя и снимает пометку с остальных связей этого места:
-// победитель у места ровно один.
 func (ls *links) chose(seat uint32, endpoint string) {
 	ls.mu.Lock()
 	defer ls.mu.Unlock()
@@ -229,14 +219,14 @@ func (ls *links) chose(seat uint32, endpoint string) {
 	}
 }
 
-func (ls *links) to(at where) *link {
+func (ls *links) to(at where, session uint32) *link {
 	ls.mu.Lock()
 	defer ls.mu.Unlock()
 
 	if l, ok := ls.held[at]; ok {
 		return l
 	}
-	l := &link{endpoint: at.endpoint, seat: at.seat, token: ls.token, self: ls.self}
+	l := &link{endpoint: at.endpoint, seat: at.seat, session: session, token: ls.token, self: ls.self}
 	ls.held[at] = l
 	return l
 }

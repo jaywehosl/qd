@@ -32,7 +32,6 @@ CERT=""
 KEYFILE=""
 WANT_CERT=1
 CERT_ISSUED=0
-UNDO=()
 DNS1="1.1.1.1"
 DNS2="8.8.8.8"
 DNS_CACHE=4096
@@ -176,8 +175,6 @@ ask_number() {
     done
 }
 
-# ---------------------------------------------------------------- environment
-
 require_root() { [ "$(id -u)" -eq 0 ] || die "run this as root"; }
 
 require_tools() {
@@ -192,8 +189,6 @@ require_tools() {
     command -v systemctl >/dev/null 2>&1 || die "no systemd here, this installer needs it"
     [ "$(uname -m)" = "x86_64" ] || die "the release carries linux/amd64 only, this is $(uname -m)"
 }
-
-# ---------------------------------------------------------------- the machine
 
 need_package() {
     local tool="$1" pkg="$2"
@@ -215,7 +210,6 @@ has_ipv6() {
     ip -6 route get 2606:4700:4700::1111 >/dev/null 2>&1
 }
 
-# resolve_records печатает адреса, на которые указывает домен: A, а следом AAAA.
 resolve_records() {
     local name="$1" kind="$2"
     getent ahostsv4 "$name" 2>/dev/null | awk '{print $1}' | sort -u > /tmp/qd-a.$$
@@ -227,9 +221,6 @@ resolve_records() {
     rm -f /tmp/qd-a.$$ /tmp/qd-aaaa.$$
 }
 
-# check_domain держит одно правило: сертификат выпишут только на имя, которое
-# указывает сюда. Проверяем это до certbot, иначе он упрётся сам и оставит за
-# собой мусор в /etc/letsencrypt.
 check_domain() {
     local name="$1"
     step "checking $name"
@@ -277,9 +268,6 @@ port_taken() {
     ss -ln"${proto}" 2>/dev/null | awk 'NR>1 {print $4}' | grep -qE "[:.]$port$"
 }
 
-# check_ports смотрит на то, что нам нужно занять: udp — сам туннель, tcp —
-# сайт-прикрытие, 80 — certbot на время выпуска. Занятый порт лучше назвать
-# сейчас, чем узнать о нём из журнала после установки.
 check_ports() {
     step "checking ports"
     local busy=""
@@ -304,8 +292,6 @@ check_ports() {
     die "free those ports and run again"
 }
 
-# ---------------------------------------------------------------- certificate
-
 certbot_paths() {
     CERT="/etc/letsencrypt/live/$1/fullchain.pem"
     KEYFILE="/etc/letsencrypt/live/$1/privkey.pem"
@@ -315,8 +301,6 @@ have_certificate() {
     [ -f "/etc/letsencrypt/live/$1/fullchain.pem" ] && [ -f "/etc/letsencrypt/live/$1/privkey.pem" ]
 }
 
-# issue_certificate: сперва вхолостую, потом всерьёз. Холостой заход ловит
-# упавший DNS и закрытый 80 до того, как Let's Encrypt посчитает попытки.
 issue_certificate() {
     local name="$1"
     if have_certificate "$name"; then
@@ -348,8 +332,6 @@ issue_certificate() {
     certbot_paths "$name"
     good "certificate in /etc/letsencrypt/live/$name"
 
-    # Обновление certbot делает сам таймером; узлу остаётся перечитать файлы,
-    # а перечитывает он их только при старте.
     mkdir -p /etc/letsencrypt/renewal-hooks/deploy
     cat >/etc/letsencrypt/renewal-hooks/deploy/qd-node.sh <<'HOOK'
 #!/bin/sh
@@ -358,8 +340,6 @@ HOOK
     chmod 0755 /etc/letsencrypt/renewal-hooks/deploy/qd-node.sh
     good "renewal restarts the node"
 }
-
-# ---------------------------------------------------------------- release
 
 resolve_version() {
     if [ -n "$LOCAL_DIR" ]; then printf "local"; return 0; fi
@@ -374,8 +354,6 @@ resolve_version() {
             | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
     fi
 
-    # /releases/latest молчит, пока все релизы помечены пререлизами: пока проект
-    # в альфе, это норма, а не отсутствие релиза.
     if [ -z "$tag" ]; then
         tag="$(curl -fsSL "https://api.github.com/repos/$REPO/releases?per_page=1" 2>/dev/null \
             | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
@@ -442,8 +420,6 @@ fetch_release() {
     chmod 0755 "$STAGE/qd-node"
 }
 
-# ---------------------------------------------------------------- state
-
 has_unit()   { [ -f "$UNIT" ]; }
 has_files()  { [ -e "$PREFIX/qd-node" ]; }
 has_db()     { [ -f "$DB" ]; }
@@ -459,8 +435,14 @@ anything_here() {
 stamp() { date +%Y%m%d-%H%M%S; }
 
 running_port() {
-    command -v ss >/dev/null 2>&1 || return 0
-    ss -lunp 2>/dev/null | awk '/qd-node/ {n=split($4,a,":"); print a[n]; exit}'
+    local port=""
+    if [ -r "$CONF" ]; then
+        port="$(awk -F= '/^[[:space:]]*port[[:space:]]*=/ {gsub(/[[:space:]]/, "", $2); print $2; exit}' "$CONF")"
+    fi
+    if [ -z "$port" ] && command -v ss >/dev/null 2>&1; then
+        port="$(ss -lunp 2>/dev/null | awk '/qd-node/ {n=split($4,a,":"); p=a[n]+0; if (!m || p<m) m=p} END {if (m) print m}' || true)"
+    fi
+    printf '%s' "$port"
 }
 
 backup_database() {
@@ -551,8 +533,6 @@ left() {
 
 yesno() { if "$@" >/dev/null 2>&1; then echo yes; else echo no; fi; }
 
-# ---------------------------------------------------------------- install
-
 write_unit() {
     cat >"$UNIT" <<UNITFILE
 [Unit]
@@ -635,10 +615,6 @@ open_firewall() {
     return 0
 }
 
-
-# verify_live проверяет не «процесс запустился», а три факта, по которым клиент
-# и решает, живой ли узел: слушает udp, отдаёт сайт-прикрытие по tcp и отвечает
-# на управляющий запрос. Первое без второго значит, что клиент упрётся в TLS.
 verify_live() {
     local name="$1" port="$2" ok=1
 
@@ -721,9 +697,6 @@ ask_domain() {
     done
 }
 
-# Всё, что не спрошено здесь, приезжает дефолтами базы и правится в панели. Тут
-# остаётся только то, чего база знать не может: имя этой машины, кому писать о
-# сертификате, и как зовут первого администратора.
 ask_install_questions() {
     if joining; then take_join_arguments; return 0; fi
 
@@ -758,8 +731,6 @@ initialise_database() {
 }
 
 field() { printf "%s\n" "$1" | sed -n "s/^$2=//p"; }
-
-# ---------------------------------------------------------------- flows
 
 do_install() {
     ask_install_questions
@@ -935,8 +906,6 @@ do_uninstall() {
     left "$STATE"   "$(yesno test -d "$STATE")"
     printf "\n" >&2
 }
-
-# ---------------------------------------------------------------- main
 
 banner
 require_root

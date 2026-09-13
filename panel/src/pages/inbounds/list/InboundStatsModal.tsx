@@ -5,14 +5,6 @@ import { InfinityIcon } from '@/components/ui';
 import { SizeFormatter, IntlUtil, ColorUtils } from '@/utils';
 import type { NodeRecord } from '@/api/queries/useNodesQuery';
 
-import {
-  readStreamHints,
-  networkLabel,
-  networkL4,
-  shadowsocksNetworkLabel,
-  tunnelNetworkLabel,
-  mixedNetworkLabel,
-} from './helpers';
 import type { ClientCountEntry, DBInboundRecord } from './types';
 
 interface InboundStatsModalProps {
@@ -53,30 +45,6 @@ export default function InboundStatsModal({
           <div className="stat-row">
             <span className="stat-label">{t('pages.inbounds.protocol')}</span>
             <Tag tone="primary">{record.protocol}</Tag>
-            {(record.isWireguard || record.isHysteria) && <Tag tone="success">UDP</Tag>}
-            {record.isSS && (() => {
-              const stream = readStreamHints(record.streamSettings);
-              return (
-                <>
-                  <Tag tone="success">{shadowsocksNetworkLabel(record.settings)}</Tag>
-                  {stream.isTls && <Tag tone="primary">TLS</Tag>}
-                </>
-              );
-            })()}
-            {record.isTunnel && <Tag tone="success">{tunnelNetworkLabel(record.settings)}</Tag>}
-            {record.isMixed && <Tag tone="success">{mixedNetworkLabel(record.settings)}</Tag>}
-            {(record.isVMess || record.isVLess || record.isTrojan) && (() => {
-              const stream = readStreamHints(record.streamSettings);
-              const l4 = networkL4(stream.network);
-              return (
-                <>
-                  <Tag tone="success">{networkLabel(stream.network)}</Tag>
-                  {l4 && <Tag tone="success">{l4}</Tag>}
-                  {stream.isTls && <Tag tone="primary">TLS</Tag>}
-                  {stream.isReality && <Tag tone="primary">Reality</Tag>}
-                </>
-              );
-            })()}
           </div>
           <div className="stat-row">
             <span className="stat-label">{t('pages.inbounds.port')}</span>

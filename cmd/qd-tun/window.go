@@ -197,9 +197,6 @@ type monitorInfo struct {
 	Flags   uint32
 }
 
-// Манифест объявляет per-monitor v2, и Windows окно не масштабирует: заказанные
-// 1280x860 остаются пикселями при любом масштабе, тогда как содержимое WebView2
-// растёт вместе с ним. На 4К со 150% окно выходило втрое меньше своей вёрстки.
 func fit(handle uintptr, wide, tall int32) {
 	if handle == 0 {
 		return

@@ -12,10 +12,9 @@ type Visits struct {
 	db   *clientstate.DB
 	list *adblock.List
 
-	on      atomic.Bool
-	blocked atomic.Uint64
-	ch      chan string
-	done    chan struct{}
+	on   atomic.Bool
+	ch   chan string
+	done chan struct{}
 }
 
 func NewVisits(db *clientstate.DB, list *adblock.List, adblockOn bool) *Visits {
@@ -38,11 +37,8 @@ func NewVisits(db *clientstate.DB, list *adblock.List, adblockOn bool) *Visits {
 
 func (v *Visits) SetAdblock(on bool) { v.on.Store(on) }
 
-func (v *Visits) Blocked() uint64 { return v.blocked.Load() }
-
 func (v *Visits) Query(name string) bool {
 	if v.on.Load() && v.list.Blocked(name) {
-		v.blocked.Add(1)
 		return true
 	}
 

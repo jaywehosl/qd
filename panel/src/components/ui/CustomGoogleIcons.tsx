@@ -1,29 +1,9 @@
 import React from 'react';
 
-// Standard props for SVG components
 export interface IconProps extends React.SVGProps<SVGSVGElement> {
   size?: number;
 }
 
-// 1. Dashboard / Telemetry Icon (Radial dial + needle)
-export function DashboardIcon({ size = 20, ...props }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 32 32"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      {...props}
-    >
-      <circle cx="16" cy="16" r="11" stroke="currentColor" strokeWidth="1.6" strokeDasharray="4 3" />
-      <circle cx="16" cy="16" r="7" stroke="currentColor" strokeWidth="1.6" />
-      <path d="M16 9v7l4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-// 2. Inbounds Icon (Incoming data stream into a bracket)
 export function InboundsIcon({ size = 20, ...props }: IconProps) {
   return (
     <svg
@@ -51,7 +31,6 @@ export function InboundsIcon({ size = 20, ...props }: IconProps) {
   );
 }
 
-// 3. Clients Icon (Connected enterprise/user circles - professional.svg)
 export function ClientsIcon({ size = 20, ...props }: IconProps) {
   return (
     <svg
@@ -91,7 +70,6 @@ export function ClientsIcon({ size = 20, ...props }: IconProps) {
   );
 }
 
-// 4. Groups Icon (Stacked tags/folder categories)
 export function GroupsIcon({ size = 20, ...props }: IconProps) {
   return (
     <svg
@@ -109,7 +87,6 @@ export function GroupsIcon({ size = 20, ...props }: IconProps) {
   );
 }
 
-// 5. Nodes Icon (Futuristic floating isometric layers - fullstack.svg)
 export function NodesIcon({ size = 20, ...props }: IconProps) {
   return (
     <svg
@@ -149,7 +126,6 @@ export function NodesIcon({ size = 20, ...props }: IconProps) {
   );
 }
 
-// 6. Settings Icon (Futuristic sliders)
 export function SettingsIcon({ size = 20, ...props }: IconProps) {
   return (
     <svg
@@ -167,26 +143,6 @@ export function SettingsIcon({ size = 20, ...props }: IconProps) {
   );
 }
 
-// 7. Xray Core Settings Icon (Science beaker - science.svg)
-export function XrayIcon({ size = 20, ...props }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 32 32"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      {...props}
-    >
-      <path
-        d="M20.7618 4.85352C20.9785 4.85352 21.1627 4.92935 21.3143 5.08102C21.466 5.23268 21.5418 5.41686 21.5418 5.63352C21.5418 5.85018 21.466 6.03435 21.3143 6.18602C21.1627 6.33768 20.9785 6.41351 20.7618 6.41352H18.9418V15.156L26.9368 24.321C27.4568 24.8627 27.5651 25.4694 27.2618 26.141C26.9585 26.8127 26.4385 27.1485 25.7018 27.1485H6.13681C5.40015 27.1485 4.88015 26.8127 4.57681 26.141C4.27348 25.4693 4.38181 24.8627 4.90181 24.321L12.8968 15.156V6.41352H11.0768C10.8602 6.41352 10.676 6.33767 10.5243 6.18602C10.3726 6.03435 10.2968 5.85018 10.2968 5.63352C10.2968 5.41685 10.3726 5.23268 10.5243 5.08102C10.676 4.92936 10.8602 4.85352 11.0768 4.85352H20.7618ZM14.4243 15.7085L5.81181 25.5885H26.0268L17.4143 15.7085V6.41352H14.4243V15.7085Z"
-        fill="currentColor"
-      />
-    </svg>
-  );
-}
-
-// 8. API Docs Icon (Frontend code file brackets - frontend.svg)
 export function ApiDocsIcon({ size = 20, ...props }: IconProps) {
   return (
     <svg
@@ -222,22 +178,6 @@ export function ApiDocsIcon({ size = 20, ...props }: IconProps) {
           <rect width="32" height="32" fill="white" />
         </clipPath>
       </defs>
-    </svg>
-  );
-}
-
-// 9. Logout Icon (Sleek standby/power symbol)
-export function LogoutIcon({ size = 20, ...props }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 32 32"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      {...props}
-    >
-      <path d="M16 6v10M23 9.5a10 10 0 1 1-14 0" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
     </svg>
   );
 }

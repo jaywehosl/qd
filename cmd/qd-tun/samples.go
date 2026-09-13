@@ -4,13 +4,10 @@ package main
 
 import (
 	"fmt"
-	"net"
-	"strconv"
 	"time"
 
 	"github.com/jaywehosl/quic-diver/internal/clientdns"
 	"github.com/jaywehosl/quic-diver/internal/clientstate"
-	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
 )
 
 func collectSamples(db *clientstate.DB, tun *tunnel, stop <-chan struct{}) {
@@ -36,9 +33,6 @@ func collectSamples(db *clientstate.DB, tun *tunnel, stop <-chan struct{}) {
 		cur := snapshotStats()
 		dns := snapshotDNS(tun.DNS())
 
-		// Тик приходит не ровно через секунду — в фоне система будит процесс реже.
-		// Делить прибавку на «секунду» значит занижать скорость ровно на опоздание:
-		// отсюда и пила на графике, и разница между окном в фокусе и свёрнутым.
 		span := stamp.Sub(last)
 		last = stamp
 		if span <= 0 {
@@ -133,49 +127,6 @@ func delta(now, before uint64) int64 {
 		return 0
 	}
 	return int64(now - before)
-}
-
-// connectNow поднимает туннель гонкой по всем точкам входа сразу: кандидата не
-// выбираем заранее, побеждает тот, кто первым отдал адрес.
-func connectNow(db *clientstate.DB, tun *tunnel, sub clientstate.Subscription, key *qdcrypt.Key) error {
-	nodes, err := db.Nodes()
-	if err != nil {
-		return err
-	}
-	session := clientstate.SessionID(sub.Key)
-
-	lane := entrypointsOf(nodes)
-	if len(lane) == 0 {
-		return fmt.Errorf("no entrypoint to dial")
-	}
-	if err := tun.Start(lane, nil, session); err != nil {
-		return err
-	}
-
-	db.ClearSelection()
-	won := tun.ServerName()
-	for _, n := range nodes {
-		if net.JoinHostPort(n.Address, strconv.Itoa(n.Port)) != won {
-			continue
-		}
-		db.MarkNode(n.ID, n.LatencyMs, true, true)
-		db.Notify("info", "Connected through "+n.Name+".", time.Now().UnixMilli())
-		break
-	}
-	return nil
-}
-
-// entrypointsOf — все входы подписки. Выходные узлы клиент не набирает: до них
-// добирается ingress, и делает это своей гонкой.
-func entrypointsOf(nodes []clientstate.Node) []string {
-	out := make([]string, 0, len(nodes))
-	for _, n := range nodes {
-		if n.Role == "egress" || n.Address == "" || n.Port == 0 {
-			continue
-		}
-		out = append(out, net.JoinHostPort(n.Address, strconv.Itoa(n.Port)))
-	}
-	return out
 }
 
 func rate(n int64, per float64) int64 {

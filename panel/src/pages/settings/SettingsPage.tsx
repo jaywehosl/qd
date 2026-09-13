@@ -70,8 +70,6 @@ export default function SettingsPage() {
               <div className="loading-spacer" />
             ) : (
               <div className="panel-page">
-                {/* The security-warning and "needs restart" alerts now live in
-                    the global status-bar notification strip, not on-page. */}
                 <BackToTop target={scrollTarget} visibilityHeight={200} />
 
                 <div className="section-header">

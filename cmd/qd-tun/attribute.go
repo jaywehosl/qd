@@ -16,7 +16,7 @@ import (
 	"unsafe"
 
 	"github.com/jaywehosl/quic-diver/internal/clientstate"
-	windivert "github.com/jaywehosl/quic-diver/internal/qcli/wdsource"
+	"github.com/jaywehosl/quic-diver/internal/qcli/windivert"
 	"golang.org/x/sys/windows"
 )
 
@@ -464,12 +464,6 @@ func lookupProcess(pid uint32) procIdent {
 	}
 	full := windows.UTF16ToString(buf[:size])
 	return procIdent{name: filepath.Base(full), path: full}
-}
-
-func (r *procRouter) Forget(pid uint32) {
-	r.pidMu.Lock()
-	delete(r.pids, pid)
-	r.pidMu.Unlock()
 }
 
 func reloadProcessRules(db *clientstate.DB) {

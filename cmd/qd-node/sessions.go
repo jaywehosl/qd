@@ -12,16 +12,13 @@ import (
 )
 
 func (state *controlState) syncSessions() {
-	if state.sessions == nil {
-		return
-	}
-
 	network, err := state.db.LoadState()
 	if err != nil {
 		return
 	}
 	now := time.Now().UnixMilli()
 	want := map[uint32]bool{}
+	peers, exits := 0, 0
 
 	mine, err := netstate.Project(state.id, network)
 	switch {
@@ -34,66 +31,55 @@ func (state *controlState) syncSessions() {
 				continue
 			}
 			want[qdcrypt.SessionID(c.UUID)] = c.AllowExit
+			if c.AllowExit {
+				exits++
+			}
 		}
 		for _, p := range mine.Peers {
 			if p.Role == netstate.RoleIngress && p.Session != 0 {
 				want[p.Session] = false
+				peers++
 			}
 		}
 	}
 
-	live, err := state.sessions.list()
-	if err != nil {
-		return
-	}
-
+	live := state.gate.list()
 	added, removed := 0, 0
 	for id, allowExit := range want {
 		if _, carried := live[id]; !carried {
-			if err := state.sessions.add(id); err != nil {
-				continue
-			}
+			state.gate.add(id)
 			added++
 		}
-		if state.sessions.exit != nil {
-			state.sessions.exit(id, allowExit)
-		}
+		state.gate.exit(id, allowExit)
 	}
 	for id := range live {
 		if _, carried := want[id]; carried {
 			continue
 		}
-		if err := state.sessions.del(id); err == nil {
-			removed++
-		}
+		state.gate.del(id)
+		state.node.Forget(id)
+		removed++
 	}
 
-	exits := 0
-	for _, allowExit := range want {
-		if allowExit {
-			exits++
-		}
-	}
 	if added > 0 || removed > 0 || exits != state.exits {
-		peers := 0
-		for _, p := range mine.Peers {
-			if p.Role == netstate.RoleIngress && p.Session != 0 {
-				peers++
-			}
-		}
 		fmt.Printf("sessions   %d carried (+%d, -%d), %d may take an exit, %d are peer nodes\n",
 			len(want), added, removed, exits, peers)
 	}
 	state.exits = exits
 }
 
-type sessionMap struct {
-	add   func(uint32) error
-	del   func(uint32) error
-	exit  func(uint32, bool) error
-	list  func() (map[uint32]struct{}, error)
-	stat  func() ([]sessionStat, error)
-	reset func(uint32) error
+func (state *controlState) sessionStats() []sessionStat {
+	live := sampleSessions(state.node)
+	out := make([]sessionStat, 0, len(live))
+	for id, s := range live {
+		since, lastSeen, checked, fingerprint, addresses := state.watch.of(id)
+		out = append(out, sessionStat{
+			Session: id, Client: s.Client, Transit: s.Transit, LastSeen: lastSeen,
+			Since: since, Checked: checked, Device: fingerprint, Seen: addresses,
+			Up: s.Up, Down: s.Down, PktUp: s.PktUp, PktDown: s.PktDown,
+		})
+	}
+	return out
 }
 
 type sessionStat struct {

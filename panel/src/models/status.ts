@@ -1,6 +1,6 @@
 import { NumberFormatter } from '@/utils';
 
-export class CurTotal {
+class CurTotal {
   current: number;
   total: number;
 
@@ -21,12 +21,6 @@ export class CurTotal {
     return '#ff4d4f';
   }
 }
-
-const XRAY_STATE_COLORS: Record<string, string> = {
-  running: 'green',
-  stop: 'orange',
-  error: 'red',
-};
 
 export interface NetIO {
   up: number;
@@ -49,13 +43,6 @@ export interface AppStats {
   uptime: number;
 }
 
-export interface XrayInfo {
-  state: 'running' | 'stop' | 'error' | string;
-  errorMsg: string;
-  version: string;
-  color: string;
-}
-
 interface StatusInput {
   cpu?: number;
   cpuCores?: number;
@@ -73,7 +60,6 @@ interface StatusInput {
   uptime?: number;
   appUptime?: number;
   appStats?: AppStats;
-  xray?: Partial<XrayInfo>;
   nodes?: number;
   nodesOnline?: number;
 }
@@ -95,7 +81,6 @@ export class Status {
   uptime = 0;
   appUptime = 0;
   appStats: AppStats = { threads: 0, mem: 0, uptime: 0 };
-  xray: XrayInfo = { state: 'stop', errorMsg: '', version: '', color: '' };
   nodes = 0;
   nodesOnline = 0;
 
@@ -118,8 +103,6 @@ export class Status {
     this.uptime = data.uptime ?? 0;
     this.appUptime = data.appUptime ?? 0;
     this.appStats = data.appStats ?? this.appStats;
-    this.xray = { ...this.xray, ...(data.xray || {}) };
-    this.xray.color = XRAY_STATE_COLORS[this.xray.state] ?? 'gray';
     this.nodes = data.nodes ?? 0;
     this.nodesOnline = data.nodesOnline ?? 0;
   }

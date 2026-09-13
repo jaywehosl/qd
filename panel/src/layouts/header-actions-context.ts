@@ -3,41 +3,16 @@ import {
   useState, createElement, type ReactNode,
 } from 'react';
 
-/**
- * Global registry of "editor" subsystems (panel settings, Xray core, …) that
- * each own a draft with unsaved edits and a post-save restart step.
- *
- * The header surfaces ONE aggregated Save / Restart pair built from every
- * registered editor — NOT a page-scoped pair. This is deliberate: an editor's
- * draft lives in an always-mounted controller (SettingsController /
- * XrayController), so unsaved edits survive navigating away from its page. The
- * header must therefore keep showing Save while ANY editor is dirty, on every
- * page — otherwise you'd lose sight of pending changes the moment you leave.
- *
- * Aggregation rules (per product decision):
- *   • Save  — shown when ANY editor is dirty; clicking saves ALL dirty editors.
- *   • Restart — shown when ANY editor needs a restart (and nothing is dirty).
- *     A 'panel' restart is a superset (it reloads the frontend AND restarts the
- *     core), so when several restarts are pending we run the panel one and let
- *     it cover the rest.
- */
 export interface EditorDescriptor {
-  /** stable subsystem id, e.g. 'settings' | 'xray' */
   id: string;
-  /** unsaved edits exist */
   dirty: boolean;
-  /** an action is in flight */
   busy: boolean;
   saveLabel: string;
   save: () => void | Promise<void>;
-  /** Optional secondary action rendered left of Save — throws the edits away
-   *  instead of persisting them. Only editors whose draft outlives the page
-   *  need it. */
   discardLabel?: string;
   discard?: () => void | Promise<void>;
 }
 
-/** The aggregate the header consumes (shape kept stable for AppSidebar). */
 export interface HeaderActionsState {
   dirty: boolean;
   busy: boolean;
@@ -68,7 +43,7 @@ export function HeaderActionsProvider({ children }: { children: ReactNode }) {
         && ex.saveLabel === d.saveLabel
         && ex.save === d.save
       ) {
-        return prev; // no-op: avoids a re-render storm
+        return prev;
       }
       return { ...prev, [d.id]: d };
     });
@@ -97,10 +72,6 @@ function useRegistry(): HeaderActionsContextValue {
   return ctx;
 }
 
-/**
- * Read the aggregated header actions. Returns null when nothing is pending
- * (no Save and no Restart to show).
- */
 export function useHeaderActions(): HeaderActionsState | null {
   const { editors } = useRegistry();
   return useMemo(() => {
@@ -113,7 +84,6 @@ export function useHeaderActions(): HeaderActionsState | null {
       busy: list.some((e) => e.busy),
       saveText: dirtyEditors[0]?.saveLabel ?? '',
       discardText: dirtyEditors.find((e) => e.discard)?.discardLabel ?? '',
-      // One Save click persists EVERY dirty editor (all pages' changes).
       onSave: () => { dirtyEditors.forEach((e) => { void e.save(); }); },
       onDiscard: dirtyEditors.some((e) => e.discard)
         ? () => { dirtyEditors.forEach((e) => { void e.discard?.(); }); }
@@ -122,13 +92,6 @@ export function useHeaderActions(): HeaderActionsState | null {
   }, [editors]);
 }
 
-/**
- * Register an editor subsystem for as long as the calling controller is
- * mounted (controllers live at the layout level, so this persists across page
- * navigation). Callbacks whose identity changes every render are fine — we keep
- * the latest descriptor in a ref and register STABLE save/restart wrappers, so
- * the registry only churns when the primitive fields actually change.
- */
 export function useRegisterEditor(desc: EditorDescriptor): void {
   const { register, unregister } = useRegistry();
 
@@ -147,6 +110,5 @@ export function useRegisterEditor(desc: EditorDescriptor): void {
     });
   }, [register, id, dirty, busy, saveLabel, save, discardLabel, hasDiscard, discard]);
 
-  // clear on unmount only
   useEffect(() => () => unregister(id), [unregister, id]);
 }

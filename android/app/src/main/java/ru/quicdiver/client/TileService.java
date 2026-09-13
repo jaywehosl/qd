@@ -58,9 +58,6 @@ public class TileService extends android.service.quicksettings.TileService {
         startForegroundService(start);
     }
 
-    // Согласие на VPN даёт только активность, из плитки его не спросить. Способ
-    // её открыть сменился в Android 14: прежний вызов там запрещён, а новый на
-    // Android 13 ещё не существует, и обращение к нему валит плитку.
     @SuppressWarnings("deprecation")
     private void askConsent() {
         Intent open = new Intent(this, MainActivity.class);

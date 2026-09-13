@@ -24,9 +24,6 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
   const [busy, setBusy] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
 
-  // The daemon clears the pending flag when the tunnel is rebuilt, so the banner
-  // has to re-read it — waiting for the poll would leave it claiming a restart
-  // is still owed for up to fifteen seconds after the person did it.
   const doReconnect = useCallback(async () => {
     setReconnecting(true);
     try {
@@ -42,9 +39,6 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
     [t],
   );
 
-  // The default also carries traffic with no process behind it, and the egress
-  // roles only mean something on a rule. Offered here, they read as two more
-  // routing modes while behaving like tunnel.
   const baseOptions = useMemo(
     () => roleOptions.filter((o) => o.value === 'direct' || o.value === 'tunnel'
       || o.value === state?.defaultRole),
@@ -58,8 +52,6 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
 
   const onPick = useCallback((pick: { process: string; path?: string }) => {
     if (!state) return;
-    // A rule is an exception to what everything else already does, so it lands
-    // as the opposite of the default and gets adjusted in the row if wrong.
     const role: RoutingRole = state.defaultRole === 'direct' ? 'tunnel' : 'direct';
     void add({ ...pick, role });
   }, [state, add]);
@@ -82,9 +74,6 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
 
   return (
     <div className="rt">
-      {/* Android builds its per-app rules into VpnService when the tunnel comes
-          up, so a change cannot land live. Restarting is left to the person —
-          doing it automatically would read as a spontaneous drop. */}
       {applyMode === 'restart' && pendingRestart && (
         <Alert
           tone="warning"
@@ -129,8 +118,6 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
           ) : rules.map((r) => (
             <div key={r.id} className="rt-rule">
               <span className={`rt-dot${r.running ? ' is-up' : ''}`} />
-              {/* Same icon the picker showed, read from the executable — so a
-                  rule looks the same whether its program is running or not. */}
               {r.icon
                 ? <img className="rt-proc__icon" src={r.icon} alt="" aria-hidden="true" />
                 : <span className="rt-proc__icon rt-proc__icon--blank" aria-hidden="true" />}

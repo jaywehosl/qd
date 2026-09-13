@@ -14,7 +14,7 @@ import (
 	"sync"
 )
 
-const TokenHeader = "X-QD-Token"
+const tokenHeader = "X-QD-Token"
 
 type Server struct {
 	mu      sync.RWMutex
@@ -68,10 +68,6 @@ func New(cfg Config) (*Server, error) {
 }
 
 const DefaultPort = 48120
-
-func (s *Server) Listen(host string) (net.Listener, error) {
-	return s.ListenOn(host, DefaultPort)
-}
 
 func listenNear(host string, port int) (net.Listener, error) {
 	if port <= 0 {
@@ -204,7 +200,7 @@ func (s *Server) authorised(r *http.Request) bool {
 	if origin := r.Header.Get("Origin"); origin != "" && !allowed[origin] {
 		return false
 	}
-	given := r.Header.Get(TokenHeader)
+	given := r.Header.Get(tokenHeader)
 	return subtle.ConstantTimeCompare([]byte(given), []byte(token)) == 1
 }
 

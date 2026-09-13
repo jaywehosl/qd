@@ -344,9 +344,7 @@
                 "example": {
                   "success": true,
                   "obj": {
-                    "changed": true,
-                    "nodes": 3,
-                    "reconnected": false
+                    "nodes": 3
                   }
                 }
               }

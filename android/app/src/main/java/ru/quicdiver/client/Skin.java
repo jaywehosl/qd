@@ -43,9 +43,6 @@ public final class Skin {
         press = host.getColor(R.color.ink_press);
     }
 
-    // Обратная задача к solid: какой цвет положить с этой прозрачностью, чтобы
-    // поверх основания вышел ровно нужный. Полупрозрачная строка навигации иначе
-    // садится на пару единиц темнее карточек.
     public int over(int want, int alpha) {
         float a = alpha / 255f;
         return Color.argb(alpha,
@@ -56,14 +53,6 @@ public final class Skin {
 
     private static int back(int want, int under, float a) {
         return Math.max(0, Math.min(255, Math.round((want - (1f - a) * under) / a)));
-    }
-
-    public int solid(int over) {
-        float a = Color.alpha(over) / 255f;
-        return Color.argb(255,
-                Math.round(Color.red(over) * a + Color.red(ink) * (1f - a)),
-                Math.round(Color.green(over) * a + Color.green(ink) * (1f - a)),
-                Math.round(Color.blue(over) * a + Color.blue(ink) * (1f - a)));
     }
 
     public GradientDrawable backdrop() {
@@ -101,8 +90,6 @@ public final class Skin {
         bg.setStroke(Math.max(1, dp(1) / 2), edge);
         box.setBackground(bg);
 
-        // Свой контур: GradientDrawable отдаёт системе outline с нулевой альфой,
-        // если обводка полупрозрачна, а тень рисуется ровно по этой альфе.
         final float round = dpf(30f);
         box.setOutlineProvider(new ViewOutlineProvider() {
             @Override
@@ -110,8 +97,6 @@ public final class Skin {
                 shape.setRoundRect(0, 0, view.getWidth(), view.getHeight(), round);
             }
         });
-        // Широкая и мягкая: высоту даёт размытие, а не плотность. Цвет система
-        // домножает на свою альфу, поэтому треть здесь -- треть плотности.
         box.setOutlineSpotShadowColor(0x4D000000);
         box.setOutlineAmbientShadowColor(0x4D000000);
         box.setElevation(dpf(20f));
@@ -126,17 +111,12 @@ public final class Skin {
         return view;
     }
 
-    // Разрешаем надписи ужаться. Ширина экрана в dp у соседних по диагонали
-    // телефонов разнится на десятую часть, а системный масштаб шрифта добавляет
-    // ещё столько же: то, что на одном влезает впритык, на другом обрезается.
     public void shrink(TextView view, int least, int most) {
         view.setMaxLines(1);
         view.setAutoSizeTextTypeUniformWithConfiguration(
                 least, most, 1, TypedValue.COMPLEX_UNIT_SP);
     }
 
-    // Заголовок карточки говорит тем же голосом, что имя узла в шапке: тот
-    // жирный и контрастный, а остальные сидели приглушённым текстовым цветом.
     public TextView title(String value) {
         TextView view = label(value, bold, 17);
         view.setTypeface(Typeface.DEFAULT_BOLD);
@@ -225,8 +205,6 @@ public final class Skin {
         return bg;
     }
 
-    // Диалог по умолчанию шире карточек под ним и живёт со своим радиусом. И то,
-    // и другое выбивается из ряда, стоит ему открыться поверх страницы.
     public void frame(android.app.Dialog box) {
         android.view.Window pane = box.getWindow();
         if (pane == null) {

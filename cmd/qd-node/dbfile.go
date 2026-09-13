@@ -164,3 +164,5 @@ func checkDatabase(path string) error {
 	_, err = probe.Version()
 	return err
 }
+
+const dbChunk = 1 << 20

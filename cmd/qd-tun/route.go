@@ -26,14 +26,15 @@ func setExit(egress bool) {
 	}
 	exitTag.Store(&tag)
 
-	if held := liveTunnel.Load(); held != nil {
+	held := liveTunnel.Load()
+	if held != nil {
 		(*held).SetRoute(tag)
 	}
 
 	if n := routeByProcess.Load().dropInherited(); n > 0 {
 		fmt.Printf("route    %d connections dropped so the new exit takes hold now\n", n)
 	}
-	if held := liveTunnel.Load(); held != nil {
+	if held != nil {
 		(*held).Reroute()
 	}
 }

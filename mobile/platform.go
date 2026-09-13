@@ -9,8 +9,8 @@ import (
 
 	"github.com/jaywehosl/quic-diver/internal/clientapi"
 	"github.com/jaywehosl/quic-diver/internal/clientstate"
-	"github.com/jaywehosl/quic-diver/internal/qcli"
 	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
+	"github.com/jaywehosl/quic-diver/internal/qsrv/uplink/relay"
 )
 
 type platform struct {
@@ -19,7 +19,7 @@ type platform struct {
 
 func (p platform) Running() bool { return p.c.Running() }
 
-func (p platform) Start(servers []string, relays []qcli.RelayLink, session uint32) error {
+func (p platform) Start(servers []string, relays []relay.Link, session uint32) error {
 	if len(servers) == 0 {
 		return fmt.Errorf("no entrypoint to dial")
 	}
@@ -46,6 +46,8 @@ func (p platform) SetExit(egress bool) { p.c.applyExit(egress) }
 func (p platform) SetFixedRate(mbit int) {
 	p.c.rate.Store(int64(mbit))
 }
+
+func (p platform) SyncControlRelays(relays []relay.Link) { p.c.wire().SetRelays(relays) }
 
 func (p platform) ServerName() string {
 	p.c.mu.Lock()
@@ -145,13 +147,6 @@ func (p platform) HoldAutostart(on bool) error { return nil }
 
 func (p platform) AutostartHeld() bool { return false }
 
-// Wire — управляющий канал мобильного клиента. Пока он живёт на старом
-// транспорте: перевод Android идёт отдельным шагом, а сейчас узел ему не
-// отвечает через этот путь и запросы просто не проходят.
-
-// hold просит систему поднять устройство под уже полученный адрес. Порядок здесь
-// важен: адрес выдаёт узел, и настроить интерфейс раньше дозвона значит взять
-// адрес наугад — тогда узел отбрасывает датаграммы как пришедшие не с того адреса.
 func (c *Client) hold(assigned netip.Prefix, mtu int) (int, error) {
 	direct, allowed, carveOut := c.appLists()
 

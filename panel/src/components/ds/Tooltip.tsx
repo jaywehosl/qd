@@ -7,7 +7,6 @@ export interface TooltipProps {
   side?: 'top' | 'right' | 'bottom' | 'left';
 }
 
-/** Wrap once near the app root for shared timing; safe to nest per-tooltip too. */
 export function TooltipProvider({ children }: { children: ReactNode }) {
   return <RTooltip.Provider delayDuration={300}>{children}</RTooltip.Provider>;
 }

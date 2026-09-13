@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -55,11 +57,11 @@ type controlState struct {
 	dnsUp   string
 	dnsDown string
 
-	node     *qsrv.Node
-	sessions *sessionMap
-	exits    int
-	watch    *presence
-	epoch    int64
+	node  *qsrv.Node
+	gate  *gate
+	exits int
+	watch *presence
+	epoch int64
 
 	dns *dnsproxy.Resolver
 }
@@ -101,10 +103,7 @@ func handleControl(state *controlState, req request) response {
 	switch req.Op {
 	case "hello":
 		revision, _ := state.db.Version()
-		var latest sample
-		if state.metrics != nil {
-			latest = state.metrics.Latest()
-		}
+		latest := state.metrics.Latest()
 		return reply(req, nodeInfo{
 			CPUPct:    latest.CPU,
 			MemPct:    latest.Mem,
@@ -124,7 +123,7 @@ func handleControl(state *controlState, req request) response {
 			deviceClaim
 		}
 		json.Unmarshal(req.Body, &body)
-		if body.Token != "" && state.watch != nil {
+		if body.Token != "" {
 			state.watch.Checked(qdcrypt.SessionID(body.Token), body.Fingerprint)
 		}
 		return reply(req, state.whoami(body.Token, body.deviceClaim))
@@ -190,7 +189,7 @@ func handleControl(state *controlState, req request) response {
 		if answer := state.whoami(joining.Token, joining.deviceClaim); answer["carried"] != true {
 			return reply(req, answer)
 		}
-		if joining.Token != "" && state.watch != nil {
+		if joining.Token != "" {
 			state.watch.Joining(qdcrypt.SessionID(joining.Token), joining.Fingerprint)
 		}
 		return reply(req, map[string]bool{"joined": true})
@@ -201,7 +200,7 @@ func handleControl(state *controlState, req request) response {
 			deviceClaim
 		}
 		json.Unmarshal(req.Body, &body)
-		if body.Token != "" && state.watch != nil && state.servesClients() {
+		if body.Token != "" && state.servesClients() {
 			state.watch.Leaving(qdcrypt.SessionID(body.Token), body.Fingerprint)
 		}
 		return reply(req, map[string]bool{"gone": true})
@@ -211,9 +210,6 @@ func handleControl(state *controlState, req request) response {
 			Sessions []uint32 `json:"sessions"`
 		}
 		json.Unmarshal(req.Body, &body)
-		if state.sessions == nil || state.sessions.reset == nil {
-			return response{OK: false, Error: "this node keeps no counters"}
-		}
 		clients, _ := state.db.Clients()
 		owner := map[uint32]int{}
 		for _, c := range clients {
@@ -222,9 +218,7 @@ func handleControl(state *controlState, req request) response {
 			}
 		}
 		for _, id := range body.Sessions {
-			if err := state.sessions.reset(id); err != nil {
-				return response{OK: false, Error: err.Error()}
-			}
+			state.node.Reset(id)
 			if client, known := owner[id]; known {
 				state.db.ResetTraffic(client)
 			}
@@ -310,10 +304,6 @@ func handleControl(state *controlState, req request) response {
 			return response{OK: false, Error: err.Error()}
 		}
 
-		// Запись, которая ничего не меняет, ревизию не двигает. Панель пишет на
-		// все узлы и повторяет попытку, если один не ответил (например, он в этот
-		// момент перезапускался), — каждый такой повтор плодил новый номер, и
-		// счётчик прыгал десятками на одну правку.
 		if body == was {
 			return reply(req, was)
 		}
@@ -327,27 +317,14 @@ func handleControl(state *controlState, req request) response {
 		if err != nil {
 			return response{OK: false, Error: err.Error()}
 		}
-		if state.node != nil {
-			state.node.Retune(tunablesFrom(settings))
-		}
+		state.node.Retune(tunablesFrom(settings))
 
-		// Узел отвечает не только «принял», но и «когда это начнёт действовать»:
-		// часть настроек живёт в слушателе и вступает в силу лишь после
-		// перезапуска. Без такого признака панель считает дело сделанным, пока
-		// узел ещё поднимается, — и её следующий запрос выглядит обрывом.
-		restarting := false
-		if state.restart != nil && datapathMoved(was, settings) {
-			restarting = true
-			fmt.Printf("datapath   %s changed the listener, restarting\n", movedWhat(was, settings))
-			go func() {
-				time.Sleep(300 * time.Millisecond)
-				state.restart()
-			}()
-		}
-
-		said := map[string]any{"settings": settings, "restarting": restarting}
-		if restarting {
-			said["moved"] = movedWhat(was, settings)
+		said := map[string]any{"settings": settings, "restarting": false}
+		if moved := movedWhat(was, settings); moved != "" {
+			fmt.Printf("datapath   %s changed the listener, restarting\n", moved)
+			state.restartSoon()
+			said["restarting"] = true
+			said["moved"] = moved
 		}
 		return reply(req, said)
 
@@ -413,9 +390,6 @@ func handleControl(state *controlState, req request) response {
 		if err != nil {
 			return response{OK: false, Error: err.Error()}
 		}
-		// "traffic" is the whole replica's view, kept for older panels; "mine"
-		// is this node's own share, which a panel can add up across the fleet
-		// without counting the same bytes twice.
 		mine, err := state.db.TrafficFrom(state.id)
 		if err != nil {
 			return response{OK: false, Error: err.Error()}
@@ -430,14 +404,7 @@ func handleControl(state *controlState, req request) response {
 		})
 
 	case "sessions":
-		if state.sessions == nil || state.sessions.stat == nil {
-			return reply(req, []sessionStat{})
-		}
-		stats, err := state.sessions.stat()
-		if err != nil {
-			return response{OK: false, Error: err.Error()}
-		}
-		return reply(req, stats)
+		return reply(req, state.sessionStats())
 
 	case "history":
 		var body struct {
@@ -446,15 +413,9 @@ func handleControl(state *controlState, req request) response {
 			Window int    `json:"window"`
 		}
 		json.Unmarshal(req.Body, &body)
-		if state.metrics == nil {
-			return reply(req, []point{})
-		}
 		return reply(req, state.metrics.Series(body.Key, body.Bucket, body.Window))
 
 	case "history.export":
-		if state.metrics == nil {
-			return reply(req, []sample{})
-		}
 		return reply(req, state.metrics.Export())
 
 	case "logs":
@@ -463,9 +424,6 @@ func handleControl(state *controlState, req request) response {
 			Level string `json:"level"`
 		}
 		json.Unmarshal(req.Body, &body)
-		if state.logs == nil {
-			return reply(req, []string{})
-		}
 		return reply(req, state.logs.Tail(body.Rows, body.Level))
 
 	case "logs.clear":
@@ -473,19 +431,10 @@ func handleControl(state *controlState, req request) response {
 			Level string `json:"level"`
 		}
 		json.Unmarshal(req.Body, &body)
-		if state.logs == nil {
-			return reply(req, map[string]int{"cleared": 0})
-		}
 		return reply(req, map[string]int{"cleared": state.logs.Forget(body.Level)})
 
 	case "restart":
-		if state.restart == nil {
-			return response{OK: false, Error: "this node cannot restart itself"}
-		}
-		go func() {
-			time.Sleep(300 * time.Millisecond)
-			state.restart()
-		}()
+		state.restartSoon()
 		return reply(req, map[string]bool{"restarting": true})
 
 	case "db.get":
@@ -499,28 +448,18 @@ func handleControl(state *controlState, req request) response {
 	}
 }
 
-// datapathMoved — правки, которые узел не умеет подхватить на месте: всё, что
-// уезжает в quic.Config, читается один раз при подъёме слушателя.
-func datapathMoved(was, now store.NetworkSettings) bool {
-	return was.StatsSeconds != now.StatsSeconds ||
-		was.Pool != now.Pool || was.BrutalMbit != now.BrutalMbit ||
-		was.SocketBuffer != now.SocketBuffer ||
-		was.MaxStreams != now.MaxStreams ||
-		was.StreamWindow != now.StreamWindow || was.MaxStreamWindow != now.MaxStreamWindow ||
-		was.ConnWindow != now.ConnWindow || was.MaxConnWindow != now.MaxConnWindow ||
-		was.IdleSeconds != now.IdleSeconds || was.KeepAliveSeconds != now.KeepAliveSeconds
-}
-
 func (state *controlState) servesClients() bool {
 	return state.role != string(netstate.RoleEgress)
 }
 
-func (state *controlState) peerAddresses() []string {
-	network, err := state.db.LoadState()
-	if err != nil {
-		return []string{}
-	}
+func (state *controlState) restartSoon() {
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		state.restart()
+	}()
+}
 
+func peerAddresses(network *netstate.State) []string {
 	seen := map[string]bool{}
 	out := []string{}
 	for _, n := range network.Nodes {
@@ -533,34 +472,18 @@ func (state *controlState) peerAddresses() []string {
 	return out
 }
 
-func (state *controlState) reachableBy(c netstate.Client) []map[string]any {
+func reachableBy(network *netstate.State, group *netstate.Group) []map[string]any {
 	out := []map[string]any{}
-
-	network, err := state.db.LoadState()
-	if err != nil {
+	if group == nil {
 		return out
 	}
-
-	var wanted []int
-	for _, g := range network.Groups {
-		if g.ID == c.GroupID {
-			wanted = g.EntrypointIDs
-			break
-		}
-	}
-
-	nodes := map[int]netstate.Node{}
-	for _, n := range network.Nodes {
-		nodes[n.ID] = n
-	}
-
-	for _, id := range wanted {
+	for _, id := range group.EntrypointIDs {
 		for _, e := range network.Entrypoints {
 			if e.ID != id || !e.Enable {
 				continue
 			}
-			n, known := nodes[e.NodeID]
-			if !known || !n.Enable || n.Address == "" || n.Role == netstate.RoleEgress {
+			n := network.Node(e.NodeID)
+			if n == nil || !n.Enable || n.Address == "" || n.Role == netstate.RoleEgress {
 				continue
 			}
 			out = append(out, map[string]any{
@@ -571,38 +494,37 @@ func (state *controlState) reachableBy(c netstate.Client) []map[string]any {
 	return out
 }
 
-func (state *controlState) relaysFor(c netstate.Client) []map[string]any {
+func relaysFor(network *netstate.State, group *netstate.Group) []map[string]any {
 	out := []map[string]any{}
-	network, err := state.db.LoadState()
-	if err != nil {
+	if group == nil || !group.RelayEnable {
 		return out
 	}
-	var g *netstate.Group
-	for i := range network.Groups {
-		if network.Groups[i].ID == c.GroupID {
-			g = &network.Groups[i]
-			break
-		}
-	}
-	if g == nil || !g.RelayEnable {
-		return out
-	}
-	nodes := map[int]netstate.Node{}
-	for _, n := range network.Nodes {
-		nodes[n.ID] = n
-	}
-	for _, r := range g.Relays {
-		n, ok := nodes[r.NodeID]
-		if !ok || !n.Enable || r.Weblink == "" {
+	for _, r := range group.Relays {
+		n := network.Node(r.NodeID)
+		if n == nil || !n.Enable || r.Weblink == "" {
 			continue
 		}
 		authority := n.Authority
 		if authority == "" {
-			authority = fmt.Sprintf("%s:%d", n.Address, n.Port)
+			authority = net.JoinHostPort(n.Address, strconv.Itoa(n.Port))
 		}
 		out = append(out, map[string]any{"weblink": r.Weblink, "authority": authority})
 	}
 	return out
+}
+
+func (state *controlState) carries(network *netstate.State, group *netstate.Group) bool {
+	if group == nil {
+		return false
+	}
+	for _, id := range group.EntrypointIDs {
+		for _, e := range network.Entrypoints {
+			if e.ID == id && e.Enable && e.NodeID == state.id {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (state *controlState) whoami(token string, claim deviceClaim) map[string]any {
@@ -610,13 +532,13 @@ func (state *controlState) whoami(token string, claim deviceClaim) map[string]an
 		return map[string]any{"admin": false}
 	}
 
-	clients, err := state.db.Clients()
+	network, err := state.db.LoadState()
 	if err != nil {
 		return map[string]any{"admin": false}
 	}
 
 	anyAdmin := false
-	for _, c := range clients {
+	for _, c := range network.Clients {
 		if c.Admin {
 			anyAdmin = true
 		}
@@ -624,11 +546,13 @@ func (state *controlState) whoami(token string, claim deviceClaim) map[string]an
 			continue
 		}
 
+		settings, _ := state.db.NetworkSettings()
+		group := network.Group(c.GroupID)
 		expired := c.ExpiryAt > 0 && c.ExpiryAt < time.Now().UnixMilli()
 		answer := map[string]any{
-			"allowExit":      state.mayExit(c),
-			"refreshMinutes": state.refreshMinutes(),
-			"fixedRate":      state.fixedRate(),
+			"allowExit":      c.MayExit(group),
+			"refreshMinutes": settings.RefreshMinutes,
+			"fixedRate":      settings.BrutalMbit,
 			"known":          true,
 			"admin":          c.Admin && c.Enable,
 			"tag":            c.Tag,
@@ -636,17 +560,17 @@ func (state *controlState) whoami(token string, claim deviceClaim) map[string]an
 			"enable":         c.Enable,
 			"expired":        expired,
 			"expiryTime":     c.ExpiryAt,
-			"carried":        c.Enable && !expired && state.enable && state.servesClients() && state.carries(c),
+			"carried":        c.Enable && !expired && state.enable && state.servesClients() && state.carries(network, group),
+			"entrypoints":    reachableBy(network, group),
+			"relays":         relaysFor(network, group),
 		}
-		answer["entrypoints"] = state.reachableBy(c)
-		answer["relays"] = state.relaysFor(c)
 		if c.Admin && c.Enable {
-			answer["peers"] = state.peerAddresses()
+			answer["peers"] = peerAddresses(network)
 		}
 		if answer["carried"] == true {
-			if seat := state.admit(c, claim); !seat.Allowed {
+			if refused := state.admit(c, group, claim); refused != "" {
 				answer["carried"] = false
-				answer["refused"] = seat.Reason
+				answer["refused"] = refused
 			}
 		} else if c.Enable && !expired {
 			state.seeAgain(c, claim)
@@ -677,9 +601,6 @@ func (state *controlState) wrote(answer response, self bool) response {
 }
 
 func (state *controlState) applyRelays() {
-	if state.node == nil {
-		return
-	}
 	state.node.SetRelays(relaysForNode(state.db, state.id))
 }
 
@@ -736,28 +657,18 @@ func (state *controlState) applySelf() {
 		state.reloadResolver()
 		fmt.Printf("resolver   this node now answers from %s\n", state.upstreamsSaid())
 	}
-	if string(n.Role) != state.role && state.restart != nil {
+	if string(n.Role) != state.role {
 		fmt.Printf("role       changed to %s, restarting\n", n.Role)
-		go func() {
-			time.Sleep(300 * time.Millisecond)
-			state.restart()
-		}()
+		state.restartSoon()
 	}
 }
 
 func (state *controlState) machineStatus() map[string]any {
-	var s sample
-	if state.metrics != nil {
-		s = state.metrics.Latest()
-	}
-	memUsed, memTotal := uint64(0), uint64(0)
-	swapUsed, swapTotal := uint64(0), uint64(0)
-	if state.metrics != nil {
-		mt, st := state.metrics.Totals()
-		memTotal, swapTotal = uint64(mt), uint64(st)
-		memUsed = uint64(mt * s.Mem / 100)
-		swapUsed = uint64(st * s.Swap / 100)
-	}
+	s := state.metrics.Latest()
+	mt, st := state.metrics.Totals()
+	memTotal, swapTotal := uint64(mt), uint64(st)
+	memUsed := uint64(mt * s.Mem / 100)
+	swapUsed := uint64(st * s.Swap / 100)
 	diskUsed, diskTotal := diskBytes("/")
 
 	return map[string]any{
@@ -788,7 +699,7 @@ func read[T any](req request, list func() ([]T, error)) response {
 }
 
 func (state *controlState) followPort() {
-	if state.restart == nil || state.id == 0 {
+	if state.id == 0 {
 		return
 	}
 	rows, err := state.db.Nodes()
@@ -800,10 +711,7 @@ func (state *controlState) followPort() {
 			continue
 		}
 		fmt.Printf("port       moving from %d to %d, restarting\n", state.port, n.Port)
-		go func() {
-			time.Sleep(300 * time.Millisecond)
-			state.restart()
-		}()
+		state.restartSoon()
 		return
 	}
 }
@@ -826,10 +734,6 @@ func merged[T any](state *controlState, req request, list func() ([]T, error),
 		}
 		for _, existing := range rows {
 			if idOf(existing) == head.ID {
-				// Снимок делаем до разбора тела: копия структуры делит слайсы с
-				// исходной, а декодер пишет в тот же массив, если длина совпала.
-				// Сравнение «до и после» тогда всегда показывало равенство — и
-				// замена одного входа группы на другой не сохранялась вовсе.
 				before, _ = json.Marshal(existing)
 				row, found = existing, true
 				break
@@ -840,8 +744,6 @@ func merged[T any](state *controlState, req request, list func() ([]T, error),
 		return response{OK: false, Error: err.Error()}
 	}
 
-	// Повтор той же записи ревизию не двигает: панель пишет на все узлы и
-	// переспрашивает того, кто не ответил, а счётчик от этого прыгал десятками.
 	after, _ := json.Marshal(row)
 	if found && bytes.Equal(before, after) {
 		revision, _ := state.db.Version()
@@ -891,24 +793,6 @@ func (state *controlState) bumpAfterWrite() {
 	state.db.Bump(time.Now().UnixMilli())
 }
 
-func (state *controlState) refreshMinutes() int {
-	settings, err := state.db.NetworkSettings()
-	if err != nil {
-		return 60
-	}
-	return settings.RefreshMinutes
-}
-
-func (state *controlState) fixedRate() int {
-	settings, err := state.db.NetworkSettings()
-	if err != nil {
-		return 0
-	}
-	return settings.BrutalMbit
-}
-
-// mySession — номер, которым этот узел известен соседям: он же номер сессии,
-// под которым узел ходит к ним как клиент.
 func (state *controlState) mySession() uint32 {
 	if state.uuid == "" {
 		return 0
@@ -916,8 +800,6 @@ func (state *controlState) mySession() uint32 {
 	return qdcrypt.SessionID(state.uuid)
 }
 
-// writeOps — операции, которые меняют базу. По ним ведём след: что пришло, что
-// стало с ревизией и сколько это заняло.
 var writeOps = map[string]bool{
 	"nodes.save": true, "nodes.delete": true,
 	"entrypoints.save": true, "entrypoints.delete": true,
@@ -929,9 +811,6 @@ var writeOps = map[string]bool{
 	"sessions.reset": true, "db.put": true,
 }
 
-// traceWrite печатает одну строку на запись: от кого, что, ревизия до и после,
-// сколько времени ушло. Нужен, чтобы видеть, кто в действительности двигает
-// счётчик ревизий и почему их становится много за один приём.
 func (state *controlState) traceWrite(req request) func() {
 	was, _ := state.db.Version()
 	began := time.Now()
@@ -950,9 +829,6 @@ func (state *controlState) traceWrite(req request) func() {
 	}
 }
 
-// movedWhat перечисляет настройки, из-за которых узел уходит в перезапуск.
-// Иначе в журнале видно только «restarting», и остаётся гадать, какое поле его
-// вызвало — а перезапуск стоит клиентам разрыва.
 func movedWhat(was, now store.NetworkSettings) string {
 	moved := []string{}
 	for _, item := range []struct {
@@ -975,14 +851,9 @@ func movedWhat(was, now store.NetworkSettings) string {
 			moved = append(moved, item.name)
 		}
 	}
-	if len(moved) == 0 {
-		return "nothing"
-	}
 	return strings.Join(moved, ", ")
 }
 
-// askNode — одна управляющая операция поверх QUIC. Обработчики остались теми же:
-// изменился только способ, которым запрос сюда приезжает.
 func askNode(state *controlState, op string, body []byte, auth string) (any, error) {
 	answer := handleControl(state, request{Op: op, Body: body, Auth: auth})
 	if !answer.OK {
@@ -992,30 +863,6 @@ func askNode(state *controlState, op string, body []byte, auth string) (any, err
 		return nil, nil
 	}
 	return json.RawMessage(answer.Body), nil
-}
-
-func (state *controlState) carries(c netstate.Client) bool {
-	network, err := state.db.LoadState()
-	if err != nil {
-		return false
-	}
-
-	var wanted []int
-	for _, g := range network.Groups {
-		if g.ID == c.GroupID {
-			wanted = g.EntrypointIDs
-			break
-		}
-	}
-
-	for _, id := range wanted {
-		for _, e := range network.Entrypoints {
-			if e.ID == id && e.Enable && e.NodeID == state.id {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func (state *controlState) lastAdmin(id int, stays bool) string {
@@ -1055,5 +902,3 @@ type response struct {
 	Error string
 	Body  []byte
 }
-
-const dbChunk = 1 << 20

@@ -95,8 +95,6 @@
 
 .qd-page-swap { animation: qd-page-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); }
 
-/* The header and the slide-out under it keep their own name, so a page swap
-   crossfades the content alone and the chrome stays put. */
 .topbar-shell { view-transition-name: qd-topbar; }
 
 ::view-transition-old(qd-topbar),
@@ -110,8 +108,6 @@
   animation: qd-page-in 0.24s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
-/* A theme swap repaints the chrome too, so the header joins the one snapshot
-   and the whole window crossfades instead of the body alone. */
 :root[data-vt='theme'] .topbar-shell { view-transition-name: none; }
 
 :root[data-vt='theme']::view-transition-old(root) {

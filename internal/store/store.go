@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	_ "embed"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -77,9 +76,6 @@ func Open(path string) (*DB, error) {
 	return &DB{sql: h}, nil
 }
 
-// OpenRead открывает базу, не трогая схему. Живой узел держит её открытой, и
-// миграция из читающей команды упирается в SQLITE_BUSY: -status тогда молчал
-// про личность узла и печатал прочерки на исправной машине.
 func OpenRead(path string) (*DB, error) {
 	h, err := sql.Open("sqlite", path+
 		"?_pragma=foreign_keys(1)&_pragma=busy_timeout(2000)&mode=ro")
@@ -98,88 +94,20 @@ func (d *DB) Close() error { return d.sql.Close() }
 func (d *DB) SQL() *sql.DB { return d.sql }
 
 func (d *DB) LoadState() (*netstate.State, error) {
-	s := &netstate.State{
-		Nodes:       []netstate.Node{},
-		Entrypoints: []netstate.Entrypoint{},
-		Groups:      []netstate.Group{},
-		Clients:     []netstate.Client{},
-	}
-
-	if err := d.sql.QueryRow(`SELECT COALESCE(MAX(number), 0) FROM revisions`).Scan(&s.Revision); err != nil {
+	s := &netstate.State{}
+	var err error
+	if s.Nodes, err = d.Nodes(); err != nil {
 		return nil, err
 	}
-
-	if err := scan(d.sql, `SELECT id, tag, address, port, role, enable, uuid, dns_primary, dns_secondary FROM nodes ORDER BY id`,
-		func(r *sql.Rows) error {
-			var n netstate.Node
-			if err := r.Scan(&n.ID, &n.Tag, &n.Address, &n.Port, &n.Role,
-				&n.Enable, &n.UUID, &n.DNSPrimary, &n.DNSSecondary); err != nil {
-				return err
-			}
-			s.Nodes = append(s.Nodes, n)
-			return nil
-		}); err != nil {
+	if s.Entrypoints, err = d.Entrypoints(); err != nil {
 		return nil, err
 	}
-
-	if err := scan(d.sql, `SELECT id, node_id, port, remark, enable FROM entrypoints ORDER BY id`,
-		func(r *sql.Rows) error {
-			var e netstate.Entrypoint
-			if err := r.Scan(&e.ID, &e.NodeID, &e.Port, &e.Remark, &e.Enable); err != nil {
-				return err
-			}
-			s.Entrypoints = append(s.Entrypoints, e)
-			return nil
-		}); err != nil {
+	if s.Groups, err = d.Groups(); err != nil {
 		return nil, err
 	}
-
-	byGroup := map[int][]int{}
-	if err := scan(d.sql, `SELECT group_id, entrypoint_id FROM group_entrypoints ORDER BY group_id, entrypoint_id`,
-		func(r *sql.Rows) error {
-			var g, e int
-			if err := r.Scan(&g, &e); err != nil {
-				return err
-			}
-			byGroup[g] = append(byGroup[g], e)
-			return nil
-		}); err != nil {
+	if s.Clients, err = d.Clients(); err != nil {
 		return nil, err
 	}
-
-	if err := scan(d.sql, `SELECT id, tag, allow_exit, device_limit, relay_enable, relays FROM groups ORDER BY id`,
-		func(r *sql.Rows) error {
-			var g netstate.Group
-			var relays string
-			if err := r.Scan(&g.ID, &g.Tag, &g.AllowExit, &g.DeviceLimit, &g.RelayEnable, &relays); err != nil {
-				return err
-			}
-			g.Relays = parseRelays(relays)
-			g.EntrypointIDs = byGroup[g.ID]
-			s.Groups = append(s.Groups, g)
-			return nil
-		}); err != nil {
-		return nil, err
-	}
-
-	if err := scan(d.sql, `SELECT id, tag, uuid, COALESCE(group_id, 0), enable, expiry_at, comment, admin, device_limit, allow_exit FROM clients ORDER BY id`,
-		func(r *sql.Rows) error {
-			var c netstate.Client
-			if err := r.Scan(&c.ID, &c.Tag, &c.UUID, &c.GroupID, &c.Enable, &c.ExpiryAt, &c.Comment,
-				&c.Admin, &c.DeviceLimit, &c.AllowExit); err != nil {
-				return err
-			}
-			s.Clients = append(s.Clients, c)
-			return nil
-		}); err != nil {
-		return nil, err
-	}
-
-	if err := d.sql.QueryRow(`SELECT key FROM network WHERE id = 1`).Scan(&s.NetworkKey); err != nil &&
-		!errors.Is(err, sql.ErrNoRows) {
-		return nil, err
-	}
-
 	return s, nil
 }
 
@@ -225,12 +153,4 @@ func scan(h *sql.DB, query string, fn func(*sql.Rows) error, args ...any) error 
 		}
 	}
 	return rows.Err()
-}
-
-func marshalState(s *netstate.State) (string, error) {
-	blob, err := json.Marshal(s)
-	if err != nil {
-		return "", err
-	}
-	return string(blob), nil
 }

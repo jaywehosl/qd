@@ -9,19 +9,15 @@ const STORAGE_ULTRA = 'isUltraDarkThemeEnabled';
 
 function applyDom(isDark: boolean) {
   const root = document.documentElement;
-  // Theme lives on <html> so portaled surfaces (Modals, toasts, dropdowns that
-  // mount on document.body) resolve the same theme as in-flow content.
   root.classList.toggle('is-dark', isDark);
   root.classList.remove('is-ultra');
   root.removeAttribute('data-theme');
-  // Legacy `body.dark` / `body.light` convention still used by many rules.
   document.body.classList.toggle('dark', isDark);
   document.body.classList.toggle('light', !isDark);
   const msg = document.getElementById('message');
   if (msg) msg.className = isDark ? 'dark' : 'light';
 }
 
-// Reset localStorage cache to default to Google Antigravity Light Theme on first load of this session
 const CACHE_RESET_KEY = 'antigravity-reset-v3';
 if (localStorage.getItem(CACHE_RESET_KEY) !== 'true') {
   localStorage.setItem(STORAGE_DARK, 'false');
@@ -55,7 +51,7 @@ function crossfade(swap: () => void): void {
   void run.finished.finally(() => root.removeAttribute('data-vt'));
 }
 
-export function pauseAnimationsUntilLeave(elementId: string): void {
+function pauseAnimationsUntilLeave(elementId: string): void {
   document.documentElement.setAttribute('data-theme-animations', 'off');
   const el = document.getElementById(elementId);
   if (!el) return;

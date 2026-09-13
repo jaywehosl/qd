@@ -1,12 +1,3 @@
-// Package connectdial — исходящие соединения клиента через надёжный стрим
-// (HTTP CONNECT, RFC 9114 / RFC 9113) до узла.
-//
-// Это клиентская половина гибрида: TCP-флоу терминируется локальным gVisor и
-// уезжает в CONNECT-стрим, где потери туннеля закрывает ретрансмит транспорта —
-// внутренний TCP приложения их не видит (в отличие от датаграмм connect-ip).
-//
-// Реализует netstack.Dialer, поэтому серверный forwarder-код переиспользуется
-// на клиенте без изменений — меняется только способ выхода наружу.
 package connectdial
 
 import (
@@ -26,7 +17,6 @@ import (
 	"github.com/jaywehosl/quic-diver/internal/qsrv"
 )
 
-// Dialer открывает CONNECT-стримы через существующее соединение с узлом.
 type Dialer struct {
 	CC     *http3.ClientConn
 	H2     *http2.ClientConn
@@ -60,18 +50,14 @@ func (d Dialer) roundTrip(ctx context.Context, req *http.Request) (*http.Respons
 	}
 }
 
-// open просит узел соединиться с dst и отдаёт половинки стрима.
-//
-// ВАЖНО: стрим живёт ровно столько, сколько живёт контекст запроса, поэтому
-// переданный ctx НЕЛЬЗЯ отдавать в запрос — вызывающий (netstack.handleTCP)
-// отменяет его сразу после дозвона (что верно для net.Dial, но убило бы стрим).
-// Здесь ctx ограничивает только фазу дозвона, а стрим завязан на собственный
-// контекст, который отменяется при Close.
 func (d Dialer) open(ctx context.Context, dst netip.AddrPort, udp bool) (io.ReadCloser, io.WriteCloser, context.CancelFunc, error) {
 	sctx, scancel := context.WithCancel(context.Background())
 	pr, pw := io.Pipe()
 
-	head := d.headers()
+	head := d.Header.Clone()
+	if head == nil {
+		head = http.Header{}
+	}
 	if udp {
 		head.Set(qsrv.HeaderProto, "udp")
 	}
@@ -96,7 +82,7 @@ func (d Dialer) open(ctx context.Context, dst netip.AddrPort, udp bool) (io.Read
 	}
 	if rsp.StatusCode != http.StatusOK {
 		rsp.Body.Close()
-		return give(fmt.Errorf("CONNECT %s: статус %d", dst, rsp.StatusCode))
+		return give(fmt.Errorf("CONNECT %s: status %d", dst, rsp.StatusCode))
 	}
 	return rsp.Body, pw, scancel, nil
 }
@@ -111,19 +97,11 @@ func (d Dialer) DialTCP(ctx context.Context, dst netip.AddrPort) (net.Conn, erro
 
 func (d Dialer) DialUDP(ctx context.Context, dst netip.AddrPort) (net.Conn, error) {
 	if !d.Packets() {
-		return nil, errors.New("connectdial: UDP идёт датаграммами, не CONNECT-стримом")
+		return nil, errors.New("connectdial: UDP travels as datagrams, not as a CONNECT stream")
 	}
 	r, w, stop, err := d.open(ctx, dst, true)
 	if err != nil {
 		return nil, err
 	}
 	return costream.NewPackets(r, w, stop, dst, nil), nil
-}
-
-func (d Dialer) headers() http.Header {
-	out := make(http.Header, len(d.Header))
-	for k, v := range d.Header {
-		out[k] = v
-	}
-	return out
 }

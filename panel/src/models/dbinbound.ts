@@ -1,6 +1,5 @@
 import dayjs, { type Dayjs } from 'dayjs';
 import { ObjectUtil, NumberFormatter, SizeFormatter } from '@/utils';
-import { Protocols } from '@/schemas/primitives';
 
 export type RawJsonField = string | Record<string, unknown> | unknown[];
 
@@ -121,42 +120,6 @@ export class DBInbound {
 
     set totalGB(gb: number) {
         this.total = NumberFormatter.toFixed(gb * SizeFormatter.ONE_GB, 0);
-    }
-
-    get isVMess() {
-        return this.protocol === Protocols.VMESS;
-    }
-
-    get isVLess() {
-        return this.protocol === Protocols.VLESS;
-    }
-
-    get isTrojan() {
-        return this.protocol === Protocols.TROJAN;
-    }
-
-    get isSS() {
-        return this.protocol === Protocols.SHADOWSOCKS;
-    }
-
-    get isMixed() {
-        return this.protocol === Protocols.MIXED;
-    }
-
-    get isHTTP() {
-        return this.protocol === Protocols.HTTP;
-    }
-
-    get isWireguard() {
-        return this.protocol === Protocols.WIREGUARD;
-    }
-
-    get isHysteria() {
-        return this.protocol === Protocols.HYSTERIA;
-    }
-
-    get isTunnel() {
-        return this.protocol === Protocols.TUNNEL;
     }
 
     get address(): string {

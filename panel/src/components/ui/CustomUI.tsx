@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { toast as dsToast } from '@/components/ds/Toast';
 
-// Generate responsive grid styles dynamically at runtime to support all standard breakpoints and layout spans
 if (typeof document !== 'undefined') {
   const styleId = 'custom-ui-grid-styles';
   if (!document.getElementById(styleId)) {
@@ -55,29 +54,6 @@ if (typeof document !== 'undefined') {
 }
 
 
-// Card replacement
-export function Card({ title, extra, children, actions, className = '', ...props }: any) {
-  return (
-    <div className={`custom-card ${className}`} {...props}>
-      {(title || extra) && (
-        <div className="custom-card-header">
-          {title && <div className="custom-card-title">{title}</div>}
-          {extra && <div className="custom-card-extra">{extra}</div>}
-        </div>
-      )}
-      <div className="custom-card-body">{children}</div>
-      {actions && (
-        <div className="custom-card-actions">
-          {actions.map((act: any, i: number) => (
-            <div key={i} className="custom-card-action-item">{act}</div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Button replacement
 export function Button({ type = 'default', children, className = '', icon, loading, ...props }: any) {
   return (
     <button className={`custom-btn custom-btn-${type} ${className}`} disabled={loading} {...props}>
@@ -88,7 +64,6 @@ export function Button({ type = 'default', children, className = '', icon, loadi
   );
 }
 
-// Row replacement
 export function Row({ gutter = [0, 0], children, className = '', style, ...props }: any) {
   const rowStyle = {
     display: 'flex',
@@ -105,7 +80,6 @@ export function Row({ gutter = [0, 0], children, className = '', style, ...props
   );
 }
 
-// Col replacement
 export function Col({ span, xs, sm, md, lg, children, className = '', style, ...props }: any) {
   const colClass = [
     'custom-col',
@@ -132,36 +106,6 @@ export function Col({ span, xs, sm, md, lg, children, className = '', style, ...
   );
 }
 
-// Space replacement
-export function Space({ direction = 'horizontal', align = 'center', size = 8, children, className = '', style, ...props }: any) {
-  const spaceStyle = {
-    display: 'inline-flex',
-    flexDirection: direction === 'vertical' ? 'column' : 'row',
-    alignItems: align,
-    gap: typeof size === 'number' ? size : 8,
-    ...style,
-  };
-  return (
-    <div className={`custom-space ${className}`} style={spaceStyle as any} {...props}>
-      {children}
-    </div>
-  );
-}
-
-Space.Compact = function SpaceCompact({ children, className = '', style, ...props }: any) {
-  const compactStyle = {
-    display: 'flex',
-    width: '100%',
-    ...style,
-  };
-  return (
-    <div className={`custom-space-compact ant-space-compact ${className}`} style={compactStyle} {...props}>
-      {children}
-    </div>
-  );
-};
-
-// Spin replacement (Loader)
 export function Spin({ spinning = true, children, description, size = 'default' }: any) {
   if (!spinning) return children || null;
   return (
@@ -177,7 +121,6 @@ export function Spin({ spinning = true, children, description, size = 'default' 
   );
 }
 
-// Tag replacement
 export function Tag({ color, children, className = '', ...props }: any) {
   return (
     <span className={`custom-tag color-${color} ${className}`} {...props}>
@@ -186,18 +129,6 @@ export function Tag({ color, children, className = '', ...props }: any) {
   );
 }
 
-// Alert replacement
-export function Alert({ type = 'info', title, description, showIcon, className = '', ...props }: any) {
-  return (
-    <div className={`custom-alert type-${type} ${className}`} {...props}>
-      {title && <div className="custom-alert-title">{title}</div>}
-      {description && <div className="custom-alert-desc">{description}</div>}
-    </div>
-  );
-}
-
-
-// Custom Modal Dialog
 export function Modal({
   open,
   title,
@@ -250,7 +181,6 @@ export function Modal({
   );
 }
 
-// Custom hook matching Ant Design's Modal.useModal()
 Modal.useModal = function useModal() {
   const [modals, setModals] = useState<any[]>([]);
 
@@ -308,120 +238,6 @@ Modal.useModal = function useModal() {
 };
 
 
-// Custom Popover
-export function Popover({ title, content, children }: any) {
-  const [visible, setVisible] = useState(false);
-  return (
-    <div
-      className="custom-popover-wrapper"
-      onMouseEnter={() => setVisible(true)}
-      onMouseLeave={() => setVisible(false)}
-      style={{ position: 'relative', display: 'inline-block' }}
-    >
-      {children}
-      {visible && (
-        <div className="custom-popover-content">
-          {title && <div className="custom-popover-title">{title}</div>}
-          <div className="custom-popover-body">{content}</div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Radio Group buttons
-export const Radio = {
-  Group: ({ value, onChange, children, style }: any) => {
-    return (
-      <div className="custom-radio-group" style={style}>
-        {React.Children.map(children, (child: any) => {
-          if (!child) return null;
-          return React.cloneElement(child, {
-            checked: child.props.value === value,
-            onClick: () => onChange && onChange({ target: { value: child.props.value } }),
-          });
-        })}
-      </div>
-    );
-  },
-  Button: ({ checked, onClick, children }: any) => {
-    return (
-      <button
-        type="button"
-        className={`custom-radio-button ${checked ? 'is-checked' : ''}`}
-        onClick={onClick}
-      >
-        {children}
-      </button>
-    );
-  },
-};
-
-// Result error pages
-export function Result({ status, title, subTitle, extra }: any) {
-  return (
-    <div className={`custom-result status-${status}`}>
-      <div className="custom-result-icon">⚠️</div>
-      <h2 className="custom-result-title">{title}</h2>
-      <p className="custom-result-subtitle">{subTitle}</p>
-      {extra && <div className="custom-result-extra">{extra}</div>}
-    </div>
-  );
-}
-
-// Back top floating button
-export function FloatButton() {
-  return null;
-}
-
-FloatButton.BackTop = function BackTop({ target }: any) {
-  const [visible, setVisible] = useState(false);
-  useEffect(() => {
-    const el = target ? target() : window;
-    const handleScroll = () => {
-      const top = el === window ? window.scrollY : el.scrollTop;
-      setVisible(top > 200);
-    };
-    if (el) {
-      el.addEventListener('scroll', handleScroll);
-      return () => el.removeEventListener('scroll', handleScroll);
-    }
-  }, [target]);
-
-  const scrollToTop = () => {
-    const el = target ? target() : window;
-    if (el) {
-      el.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-  };
-
-  if (!visible) return null;
-  return (
-    <button className="custom-back-top" onClick={scrollToTop}>
-      ↑
-    </button>
-  );
-};
-
-// Pass-through Layout
-export const Layout = ({ children, className = '' }: any) => {
-  return <div className={`custom-layout ${className}`}>{children}</div>;
-};
-
-Layout.Content = ({ children, className = '', id }: any) => {
-  return (
-    <div id={id} className={`custom-layout-content ${className}`}>
-      {children}
-    </div>
-  );
-};
-
-// Pass-through ConfigProvider
-export function ConfigProvider({ children }: any) {
-  return children;
-}
-
-// Toast — delegate to the unified DS toaster (single message system).
 export const message = {
   success: (msg: React.ReactNode) => dsToast.success(msg),
   error: (msg: React.ReactNode) => dsToast.error(msg),
@@ -431,7 +247,6 @@ export const message = {
   useMessage: () => [message, null] as const,
 };
 
-// Tooltip replacement
 export function Tooltip({ title, children, placement = 'top' }: any) {
   const [visible, setVisible] = useState(false);
   return (
@@ -450,17 +265,3 @@ export function Tooltip({ title, children, placement = 'top' }: any) {
     </div>
   );
 }
-
-// Badge replacement
-export function Badge({ status, text, color }: any) {
-  return (
-    <span className="custom-badge">
-      <span
-        className={`custom-badge-dot ${status === 'processing' ? 'is-processing' : ''}`}
-        style={color ? { backgroundColor: color } : undefined}
-      />
-      {text && <span className="custom-badge-text">{text}</span>}
-    </span>
-  );
-}
-

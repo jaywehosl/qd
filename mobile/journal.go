@@ -33,25 +33,6 @@ func markJournal(dir string) {
 	holdStderr(dir)
 }
 
-func (c *Client) LogTo(dir string) {
-	if dir == "" {
-		return
-	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return
-	}
-	if kept := book.Swap(nil); kept != nil {
-		kept.mu.Lock()
-		if kept.file != nil {
-			kept.file.Close()
-		}
-		kept.mu.Unlock()
-	}
-	path := filepath.Join(dir, "qd.log")
-	where.Store(&path)
-	c.Verbose(true)
-}
-
 func (c *Client) Verbose(on bool) {
 	loud.Store(on)
 	spot := where.Load()

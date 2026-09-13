@@ -1,9 +1,3 @@
-// Package roads — общая память о том, каким путём узел отвечает: датаграммами
-// поверх QUIC или стримами поверх TCP.
-//
-// Память одна на клиента намеренно. Туннель и управляющий канал ходят к одному
-// и тому же узлу; когда каждый вёл свой список, на сети без UDP оба честно
-// ждали свою фору, и цена блокировки платилась дважды.
 package roads
 
 import (
@@ -17,9 +11,7 @@ import (
 	"github.com/jaywehosl/quic-diver/internal/qsrv/uplink/quicconn"
 )
 
-// QUICHeadStart — фора датаграммному пути. Он лучше, поэтому TCP выходит на
-// дистанцию только если за это время QUIC не ответил.
-const QUICHeadStart = 300 * time.Millisecond
+const quicHeadStart = 300 * time.Millisecond
 
 var (
 	only      atomic.Bool
@@ -27,22 +19,16 @@ var (
 	relayMode atomic.Bool
 )
 
-// Only заставляет ходить только стримами. Нужно для отладки: обычно путь
-// выбирается гонкой.
 func Only(on bool) { only.Store(on) }
 
 func OnlyTCP() bool { return only.Load() }
 
 func Remember(endpoint string, overTCP bool) { seen.Store(endpoint, overTCP) }
 
-// SetRelay помнит, что прямой путь к узлу мёртв и добрались только релеем: дальше
-// дозвон идёт сразу в релей, без пятисекундного ожидания прямого таймаута.
 func SetRelay(on bool) { relayMode.Store(on) }
 
 func RelayMode() bool { return relayMode.Load() }
 
-// Forget сбрасывает память о путях: после смены сети прежний ответ ничего не
-// значит, UDP мог и открыться, и закрыться.
 func Forget() {
 	seen.Range(func(k, _ any) bool {
 		seen.Delete(k)
@@ -51,8 +37,6 @@ func Forget() {
 	relayMode.Store(false)
 }
 
-// HeadStart — сколько ждать перед попыткой по TCP. Ноль, если этот узел уже
-// отвечал стримами: второй раз ждать впустую незачем.
 func HeadStart(endpoint string) time.Duration {
 	if only.Load() {
 		return 0
@@ -60,11 +44,9 @@ func HeadStart(endpoint string) time.Duration {
 	if held, ok := seen.Load(endpoint); ok && held.(bool) {
 		return 0
 	}
-	return QUICHeadStart
+	return quicHeadStart
 }
 
-// ReachTCP дозванивается по всем адресам имени в том порядке, в каком их даёт
-// quicconn: сперва то семейство, до которого у машины есть путь.
 func ReachTCP(ctx context.Context, dialer *net.Dialer, endpoint string) (net.Conn, error) {
 	if dialer == nil {
 		dialer = &net.Dialer{}

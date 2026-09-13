@@ -72,7 +72,7 @@ The installer calls it; you rarely need it by hand.
 `)
 }
 
-func cliDatabase(cfg nodeConfig, dbFlag string) (*store.DB, string, error) {
+func cliDatabase(cfg nodeConfig, dbFlag string, open func(string) (*store.DB, error)) (*store.DB, string, error) {
 	path := dbFlag
 	if cfg.DB != "" && (path == "" || path == "node.db") {
 		path = cfg.DB
@@ -80,30 +80,12 @@ func cliDatabase(cfg nodeConfig, dbFlag string) (*store.DB, string, error) {
 	if path == "" {
 		return nil, "", fmt.Errorf("no database path: pass -db or fix %s", configPath)
 	}
-	db, err := store.Open(path)
-	if err != nil {
-		return nil, path, err
-	}
-	return db, path, nil
-}
-
-func cliDatabaseRead(cfg nodeConfig, dbFlag string) (*store.DB, string, error) {
-	path := dbFlag
-	if cfg.DB != "" && (path == "" || path == "node.db") {
-		path = cfg.DB
-	}
-	if path == "" {
-		return nil, "", fmt.Errorf("no database path: pass -db or fix %s", configPath)
-	}
-	db, err := store.OpenRead(path)
-	if err != nil {
-		return nil, path, err
-	}
-	return db, path, nil
+	db, err := open(path)
+	return db, path, err
 }
 
 func runAdmins(cfg nodeConfig, dbFlag string) error {
-	db, path, err := cliDatabase(cfg, dbFlag)
+	db, path, err := cliDatabase(cfg, dbFlag, store.Open)
 	if err != nil {
 		return err
 	}
@@ -150,7 +132,7 @@ func runAdminAdd(cfg nodeConfig, dbFlag, tag, groupTag string) error {
 		return err
 	}
 
-	db, path, err := cliDatabase(cfg, dbFlag)
+	db, path, err := cliDatabase(cfg, dbFlag, store.Open)
 	if err != nil {
 		return err
 	}
@@ -450,7 +432,7 @@ func selfFromDatabase(cfg nodeConfig, db *store.DB) netstate.Node {
 
 func runStatus(cfg nodeConfig, dbFlag string) error {
 	self := netstate.Node{}
-	db, path, err := cliDatabaseRead(cfg, dbFlag)
+	db, path, err := cliDatabase(cfg, dbFlag, store.OpenRead)
 	if err == nil {
 		self = selfFromDatabase(cfg, db)
 		defer db.Close()

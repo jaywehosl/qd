@@ -176,7 +176,7 @@ func main() {
 	var netKey qdcrypt.Key
 	raw, err := hex.DecodeString(key)
 	if err != nil || len(raw) != qdcrypt.KeySize {
-		log.Fatalf("network key must be %d hex chars", qdcrypt.KeySize*2)
+		fatal("network key must be %d hex chars", qdcrypt.KeySize*2)
 	}
 	copy(netKey[:], raw)
 
@@ -184,7 +184,6 @@ func main() {
 	if host == "" {
 		host = self.Address
 	}
-	// Порт живёт в карточке узла: в имени он был бы вторым источником правды.
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h
 	}
@@ -242,7 +241,7 @@ func main() {
 		Log: func(format string, args ...any) { log.Printf(format, args...) },
 	})
 
-	watch := watchPresence(func() (map[uint32]seen, error) { return sampleSessions(node) })
+	watch := watchPresence(func() map[uint32]seen { return sampleSessions(node) })
 
 	state = &controlState{
 		tag: self.Tag, role: string(self.Role), address: self.Address, uuid: self.UUID,
@@ -254,30 +253,7 @@ func main() {
 		watch:   watch,
 		epoch:   time.Now().Unix(),
 		node:    node,
-		sessions: &sessionMap{
-			add:   func(id uint32) error { admission.add(id); return nil },
-			del:   func(id uint32) error { admission.del(id); node.Forget(id); return nil },
-			exit:  func(id uint32, allow bool) error { admission.exit(id, allow); return nil },
-			reset: func(id uint32) error { node.Reset(id); return nil },
-			list:  func() (map[uint32]struct{}, error) { return admission.list(), nil },
-			stat: func() ([]sessionStat, error) {
-				live, err := sampleSessions(node)
-				if err != nil {
-					return nil, err
-				}
-
-				out := make([]sessionStat, 0, len(live))
-				for id, s := range live {
-					since, lastSeen, checked, fingerprint, addresses := watch.of(id)
-					out = append(out, sessionStat{
-						Session: id, Client: s.Client, Transit: s.Transit, LastSeen: lastSeen,
-						Since: since, Checked: checked, Device: fingerprint, Seen: addresses,
-						Up: s.Up, Down: s.Down, PktUp: s.PktUp, PktDown: s.PktDown,
-					})
-				}
-				return out, nil
-			},
-		},
+		gate:    admission,
 		restart: func() {
 			binary, err := os.Executable()
 			if err != nil {
@@ -345,10 +321,7 @@ func relaysForNode(db *store.DB, selfID int) []relay.Config {
 }
 
 func mustSettings(db *store.DB) store.NetworkSettings {
-	s, err := db.NetworkSettings()
-	if err != nil {
-		return store.NetworkSettings{}
-	}
+	s, _ := db.NetworkSettings()
 	return s
 }
 
@@ -422,7 +395,7 @@ func fatal(format string, args ...any) {
 	os.Exit(1)
 }
 
-func sampleSessions(node *qsrv.Node) (map[uint32]seen, error) {
+func sampleSessions(node *qsrv.Node) map[uint32]seen {
 	out := map[uint32]seen{}
 	for _, s := range node.Sessions() {
 		where := s.Peer
@@ -442,7 +415,7 @@ func sampleSessions(node *qsrv.Node) (map[uint32]seen, error) {
 		}
 		out[s.Session] = total
 	}
-	return out, nil
+	return out
 }
 
 func missingFile(paths ...string) string {

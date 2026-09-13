@@ -101,7 +101,7 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/client/api/subscription/refresh',
         summary: 'Fetch the subscription now instead of waiting for the interval. Works with or without the tunnel up — it rides the same transport but does not need it. If the node list changed but the node currently carrying the tunnel is still in it, the tunnel is left alone.',
-        response: '{\n  "success": true,\n  "obj": {\n    "changed": true,\n    "nodes": 3,\n    "reconnected": false\n  }\n}',
+        response: '{\n  "success": true,\n  "obj": {\n    "nodes": 3\n  }\n}',
       },
       {
         method: 'GET',

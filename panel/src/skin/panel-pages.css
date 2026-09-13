@@ -79,8 +79,6 @@
 
 .online-dot { background: var(--good); }
 
-/* Takes the pill's own colour, so it stays visible on a filled pill instead of
-   disappearing into it. */
 .state-dot { background: currentColor; opacity: 0.75; }
 
 .status-tag {
@@ -474,8 +472,6 @@
   color: var(--bold);
 }
 
-/* The two roles share one full-width card now, so the switch stands where the
-   second column used to be. */
 .inb-roles {
   display: flex;
   justify-content: center;
@@ -483,8 +479,6 @@
 
 .inb-roles .vertical-tabs-container { min-width: 260px; }
 
-/* Ingress and egress hold different rows, so an auto layout re-measures every
-   column on each switch and the headers jump. Fixed shares hold them still. */
 .inbound-table .ds-table { table-layout: fixed; }
 
 .inbound-table .ds-table th:nth-child(1),
@@ -505,10 +499,6 @@
 .inbound-table .ds-table th:nth-child(6),
 .inbound-table .ds-table td:nth-child(6) { width: 18%; }
 
-/* Clients ------------------------------------------------------------------ */
-
-/* The name leads, the comment sits under it — clipped rather than pushing the
-   row wide. The key itself belongs in the client's own card, not the list. */
 .email-cell {
   display: flex;
   flex-direction: column;
@@ -531,8 +521,6 @@
 }
 
 
-/* Same reason as the entrypoint table: the set of rows changes under filters
-   and sorting, and an auto layout re-measures every column each time. */
 .client-table .ds-table { table-layout: fixed; }
 
 .client-table .ds-table th:nth-child(1),
@@ -557,8 +545,6 @@
 .row-delete:hover { background: #e03a2f; color: #fff; }
 
 
-/* Pills sized by their text come out ragged down a column — an "∞" against a
-   date, a dot against a bare word. Give each status column one width. */
 .client-table .ds-table td:nth-child(3) .ds-tag {
   min-width: 84px;
   justify-content: center;
@@ -614,8 +600,6 @@
   justify-content: center;
 }
 
-/* The filter row: search and sort on the left, the count and the reset pushed
-   to the far edge so they read as a summary rather than another control. */
 .filter-count {
   color: var(--text);
   font-size: var(--size-note);
@@ -691,12 +675,8 @@
 
 .toolbar-sort { min-width: 190px; }
 
-/* Pushed to the far end so the row reads left to right: act, search, sort,
-   then where you are. */
 .toolbar-pages { margin-inline-start: auto; }
 
-/* Every control in the row lines up on one baseline: the input, the select and
-   the pager each brought their own height and the strip came out stepped. */
 .card-toolbar > *,
 .card-toolbar .ds-btn,
 .card-toolbar .ds-input,
@@ -717,16 +697,11 @@
 
 .card-toolbar .ds-pagination { gap: var(--step-2); }
 
-/* The pager carries a top padding for its usual place under a table; in the
-   toolbar that padding is what pushes it off the line. */
 .card-toolbar .ds-pagination {
   padding: 0;
   gap: var(--step-2);
 }
 
-/* The action buttons carried their own light fill, which sat brighter than the
-   highlighted row. They go bare and share one travelling highlight instead —
-   the same behaviour as the header. */
 .row-actions {
   position: relative;
   display: flex;
@@ -734,8 +709,6 @@
   gap: 2px;
 }
 
-/* Both tables draw the same highlight, so their buttons carry the same box —
-   the clients table was a size larger. */
 .row-actions .ds-btn {
   width: 30px;
   height: 30px;
@@ -753,9 +726,6 @@
 
 .row-actions .chp-glow { background: var(--press); }
 
-/* A neutral pill is filled with --card, which on a card of the same colour
-   leaves it barely there at rest and lighter than the row under the cursor.
-   A translucent tint reads as a pill either way, and deepens on hover. */
 .client-table .ds-table .ds-tag:not([class*='--']),
 .group-table .ds-table .ds-tag:not([class*='--']),
 .node-table .ds-table .ds-tag:not([class*='--']),
@@ -770,8 +740,6 @@
   background: var(--press);
 }
 
-/* Figures about the network wear the network's colour; grey was reading as
-   "nothing here". */
 .inbound-table .ds-table td:nth-child(4) .ds-tag,
 .inbound-table .ds-table td:nth-child(5) .ds-tag,
 .inbound-table .ds-table td:nth-child(6) .ds-tag,
@@ -782,14 +750,11 @@
   color: #fff;
 }
 
-/* Room for three digits: the count is a live figure and must not resize the
-   column when it grows. */
 .inbound-table .ds-table td:nth-child(4) .ds-tag {
   min-width: 54px;
   justify-content: center;
 }
 
-/* Deleting still gets its own warning colour, above the shared highlight. */
 .row-actions .row-delete:hover {
   background: #e03a2f;
   color: #fff;

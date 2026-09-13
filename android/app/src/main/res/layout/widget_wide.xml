@@ -1,7 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Значения здесь стоят ради превью в списке виджетов: там разметка
-     разворачивается как есть, без нашего кода, и пустая выглядела бы дырой.
-     В работе всё это перезаписывается. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_pill"
     android:layout_width="match_parent"

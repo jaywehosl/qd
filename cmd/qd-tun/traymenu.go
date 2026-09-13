@@ -9,13 +9,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jaywehosl/quic-diver/internal/clientapi"
 	"github.com/jaywehosl/quic-diver/internal/clientstate"
 	"github.com/jaywehosl/quic-diver/internal/localapi"
-	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
 	"github.com/jaywehosl/quic-diver/internal/tray"
 )
 
-func startTray(db *clientstate.DB, tun *tunnel, ui *localapi.Server, key *qdcrypt.Key, quit chan struct{}) (*tray.Icon, error) {
+func startTray(db *clientstate.DB, tun *tunnel, ui *localapi.Server, api *clientapi.API, quit chan struct{}) (*tray.Icon, error) {
 	var once sync.Once
 
 	return tray.Run(appName, tray.Menu{
@@ -27,13 +27,13 @@ func startTray(db *clientstate.DB, tun *tunnel, ui *localapi.Server, key *qdcryp
 				openPage(ui.URL())
 				return
 			}
-			if err := connectNow(db, tun, sub, key); err != nil {
+			if err := api.Connect(); err != nil {
 				fmt.Printf("connect  %v\n", err)
 			}
 		},
 
 		Disconnect: func() {
-			if err := tun.Stop(); err != nil {
+			if err := api.Disconnect(); err != nil {
 				fmt.Printf("disconnect %v\n", err)
 			}
 		},

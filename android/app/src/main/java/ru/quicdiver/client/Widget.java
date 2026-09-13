@@ -6,11 +6,6 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.widget.RemoteViews;
 
-// Widget — та же кнопка на рабочем столе. Рисуется тем же RemoteViews, что и
-// уведомление, и нажатия шлёт туда же: подключение — службе, выход — приёмнику.
-//
-// Размеров два, и это два поставщика, а не один тянущийся: в списке виджетов
-// одному поставщику отводится одна карточка, и выбрать размер там нельзя.
 public class Widget extends AppWidgetProvider {
 
     int layout() {
@@ -25,8 +20,6 @@ public class Widget extends AppWidgetProvider {
         }
     }
 
-    // refresh зовётся, когда состояние поменялось: система сама виджет не
-    // обновляет, updatePeriodMillis у нас ноль.
     public static void refresh(Context context) {
         AppWidgetManager manager = AppWidgetManager.getInstance(context);
         if (manager == null) {
@@ -71,8 +64,6 @@ public class Widget extends AppWidgetProvider {
         return view;
     }
 
-    // Mid — три клетки: слово и знак помещаются, но места в обрез, поэтому у
-    // него своя раскладка с текстом по центру свободной части.
     public static class Mid extends Widget {
         @Override
         int layout() {
@@ -80,8 +71,6 @@ public class Widget extends AppWidgetProvider {
         }
     }
 
-    // Small — тот же виджет на две клетки: слово туда не помещается, поэтому в
-    // его раскладке остаётся только знак выхода и плашка под нажатие.
     public static class Small extends Widget {
         @Override
         int layout() {

@@ -30,8 +30,6 @@ public class SettingsPage {
     private final Runnable onUnlinked;
 
     private TextView subLine;
-    // Уведомления сюда не входят: туннель переживает и сон, и очистку памяти с
-    // отозванным разрешением на них -- служба остаётся передней и без показа.
     private final int[] guardWhat = {Guard.BATTERY, Guard.VPN, Guard.AUTOSTART};
     private final TextView[] guardDot = new TextView[3];
     private final TextView[] guardSaid = new TextView[3];
@@ -267,16 +265,6 @@ public class SettingsPage {
         push(body.toString(), false);
     }
 
-    private void patchFlag(String key, boolean value) {
-        JSONObject body = new JSONObject();
-        try {
-            body.put(key, value);
-        } catch (Exception e) {
-            return;
-        }
-        push(body.toString(), false);
-    }
-
     private void push(final String body, final boolean clears) {
         writing = true;
         new Thread(new Runnable() {
@@ -469,8 +457,6 @@ public class SettingsPage {
         }
     }
 
-    // boast говорит о сделанном на самой кнопке: отдельная строка под ней жила
-    // ниже всякого ритма карточки и оставалась там навсегда.
     private void boast(final View button, String news) {
         final TextView caps = (TextView) ((LinearLayout) button).getChildAt(1);
         if (button.getTag() == null) {
@@ -517,8 +503,6 @@ public class SettingsPage {
         lp.leftMargin = skin.dp(6);
         row.addView(caps, lp);
 
-        // Пустая распорка справа шириной со значок: без неё текст считает своей
-        // серединой всё, что осталось от значка, и уезжает вправо.
         row.addView(new View(host), new LinearLayout.LayoutParams(
                 skin.dp(15) + skin.dp(6), skin.dp(1)));
 

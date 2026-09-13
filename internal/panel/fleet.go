@@ -3,7 +3,9 @@ package panel
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -44,8 +46,6 @@ type NodeHealth struct {
 }
 
 type Fleet struct {
-	// key — ключ сети как значение для ссылок подписки: транспорт им больше
-	// ничего не шифрует, кадры управления несёт TLS.
 	key   qdcrypt.Key
 	token string
 	tag   string
@@ -56,8 +56,6 @@ type Fleet struct {
 	seen  map[int]NodeHealth
 }
 
-// NewFleet: wire — общий QUIC-диалер до узлов. Ключ сети больше не нужен:
-// кадры управления не шифруются отдельно, их несёт TLS.
 func NewFleet(key qdcrypt.Key, wire *qwire.Dialer) *Fleet {
 	return &Fleet{
 		key:   key,
@@ -112,19 +110,13 @@ func (f *Fleet) Nodes() []NodeAddress {
 	return out
 }
 
-// ask — одна операция на узле. Никаких долгоживущих клиентов с таблицей
-// ожидающих ответов: каждый запрос уезжает своим потоком QUIC.
 func (f *Fleet) ask(addr NodeAddress, op string, body any) (json.RawMessage, error) {
 	if f.wire == nil {
 		return nil, fmt.Errorf("no way to reach %s", addr.Tag)
 	}
-	return f.wire.Raw(fmt.Sprintf("%s:%d", addr.Address, addr.Port), op, f.Token(), body)
+	return f.wire.Raw(net.JoinHostPort(addr.Address, strconv.Itoa(addr.Port)), op, f.Token(), body)
 }
 
-// Discover: адреса узлов берутся из сетевой базы и только оттуда. Затравка — это
-// вход из подписки, её номер принадлежит клиентскому списку входов и с номерами
-// узлов сети не совпадает: подменяя адрес «по совпадению номера», панель
-// приписывала одному узлу адрес другого.
 func (f *Fleet) Discover(seed NodeAddress) error {
 	body, err := f.ask(seed, "nodes.list", nil)
 	if err != nil {
@@ -163,18 +155,24 @@ func (f *Fleet) Live() []NodeAddress {
 	nodes := f.Nodes()
 	out := make([]NodeAddress, 0, len(nodes))
 	for _, n := range nodes {
-		if f.everAnswered(n.ID) {
+		if f.answeredLately(n.ID) {
 			out = append(out, n)
 		}
 	}
 	return out
 }
 
-func (f *Fleet) everAnswered(id int) bool {
+func (f *Fleet) answeredLately(id int) bool {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	return f.seen[id].Heartbeat > 0
+	seen, known := f.seen[id]
+	if !known || !seen.Online || seen.Heartbeat <= 0 {
+		return false
+	}
+	return time.Since(time.Unix(seen.Heartbeat, 0)) < liveWindow
 }
+
+const liveWindow = 90 * time.Second
 
 func (f *Fleet) byFreshness(nodes []NodeAddress) []NodeAddress {
 	f.mu.RLock()
@@ -197,12 +195,6 @@ func (f *Fleet) Read(op string, body any) (json.RawMessage, error) {
 		nodes = live
 	}
 	nodes = f.byFreshness(nodes)
-	if len(nodes) > 1 {
-		if answer, err := f.ask(nodes[0], op, body); err == nil {
-			return answer, nil
-		}
-		nodes = nodes[1:]
-	}
 
 	type reply struct {
 		body json.RawMessage
@@ -228,6 +220,51 @@ func (f *Fleet) Read(op string, body any) (json.RawMessage, error) {
 	return nil, last
 }
 
+func (f *Fleet) TagOf(id int) string {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.nodes[id].Tag
+}
+
+func (f *Fleet) Gather(op string, body any) map[int]json.RawMessage {
+	live := f.Live()
+	out := make(map[int]json.RawMessage, len(live))
+	if len(live) == 0 {
+		return out
+	}
+
+	type got struct {
+		id   int
+		body json.RawMessage
+	}
+	answers := make(chan got, len(live))
+	for _, n := range live {
+		go func(n NodeAddress) {
+			answer, err := f.ask(n, op, body)
+			if err != nil {
+				answers <- got{id: n.ID}
+				return
+			}
+			answers <- got{id: n.ID, body: answer}
+		}(n)
+	}
+
+	deadline := time.After(gatherWait)
+	for range live {
+		select {
+		case g := <-answers:
+			if g.body != nil {
+				out[g.id] = g.body
+			}
+		case <-deadline:
+			return out
+		}
+	}
+	return out
+}
+
+const gatherWait = 5 * time.Second
+
 func (f *Fleet) Ask(id int, op string, body any) (json.RawMessage, error) {
 	f.mu.RLock()
 	node, known := f.nodes[id]
@@ -239,14 +276,11 @@ func (f *Fleet) Ask(id int, op string, body any) (json.RawMessage, error) {
 }
 
 type WriteResult struct {
-	NodeID  int    `json:"nodeId"`
-	Tag     string `json:"tag"`
-	OK      bool   `json:"ok"`
-	Skipped bool   `json:"skipped,omitempty"`
-	Error   string `json:"error,omitempty"`
-	// Restarting — узел принял правку, но она вступит в силу, когда он поднимется
-	// заново. Пока панель этого не знала, она считала дело законченным и
-	// принимала следующий свой запрос, попавший в перезапуск, за обрыв.
+	NodeID     int    `json:"nodeId"`
+	Tag        string `json:"tag"`
+	OK         bool   `json:"ok"`
+	Skipped    bool   `json:"skipped,omitempty"`
+	Error      string `json:"error,omitempty"`
 	Restarting bool   `json:"restarting,omitempty"`
 	Moved      string `json:"moved,omitempty"`
 }
@@ -272,17 +306,28 @@ func (f *Fleet) WriteExcept(op string, body any, skip int) ([]WriteResult, error
 
 	body = f.numbered(body)
 
+	live := map[int]bool{}
+	for _, n := range f.Live() {
+		live[n.ID] = true
+	}
+	anyLive := false
+	for _, n := range nodes {
+		anyLive = anyLive || live[n.ID]
+	}
+
 	results := make([]WriteResult, len(nodes))
 	var wg sync.WaitGroup
 
 	for i, n := range nodes {
+		if anyLive && !live[n.ID] {
+			results[i] = WriteResult{NodeID: n.ID, Tag: n.Tag, Skipped: true,
+				Error: "has not answered lately, it catches up when it is back"}
+			continue
+		}
 		wg.Add(1)
 		go func(i int, n NodeAddress) {
 			defer wg.Done()
 			results[i] = WriteResult{NodeID: n.ID, Tag: n.Tag, OK: true}
-			// Пишем всем и судим по ответу. Раньше узел, о котором панель ещё не
-			// слышала в этом запуске, объявлялся «не развёрнутым» — хотя он мог
-			// просто перезапускаться, а панель — только что открыться.
 			said, err := f.ask(n, op, body)
 			if err != nil {
 				results[i].OK = false
@@ -301,10 +346,21 @@ func (f *Fleet) WriteExcept(op string, body any, skip int) ([]WriteResult, error
 	}
 	wg.Wait()
 
+	took, missed := 0, ""
 	for _, r := range results {
-		if !r.OK {
-			return results, fmt.Errorf("%s did not take the change: %s", r.Tag, r.Error)
+		if r.OK {
+			took++
+			continue
 		}
+		if r.Skipped {
+			continue
+		}
+		if missed == "" {
+			missed = fmt.Sprintf("%s did not take the change: %s", r.Tag, r.Error)
+		}
+	}
+	if took == 0 {
+		return results, fmt.Errorf("%s", missed)
 	}
 	return results, nil
 }
@@ -373,30 +429,37 @@ func (f *Fleet) Refresh() {
 	}
 }
 
-// Health опрашивает узлы разом и не ждёт отставших дольше healthWait. Узел за
-// белым списком мобильной сети не ответит никогда, а панель из-за него открывалась
-// только после его таймаута.
 func (f *Fleet) Health() []NodeHealth {
 	f.Refresh()
 	nodes := f.Nodes()
 	out := make([]NodeHealth, len(nodes))
-	var wg sync.WaitGroup
-	var filling sync.Mutex
+
+	live := map[int]bool{}
+	for _, n := range f.Live() {
+		live[n.ID] = true
+	}
+
+	type probed struct {
+		i      int
+		health NodeHealth
+	}
+	answers := make(chan probed, len(nodes))
+	awaited := make([]bool, len(nodes))
+	awaiting := 0
 
 	for i, n := range nodes {
-		wg.Add(1)
+		if len(live) == 0 || live[n.ID] {
+			awaited[i] = true
+			awaiting++
+		}
 		go func(i int, n NodeAddress) {
-			defer wg.Done()
-
 			health := NodeHealth{NodeAddress: n}
 			started := time.Now()
 			body, err := f.ask(n, "hello", nil)
 			if err != nil {
 				health.Error = err.Error()
 				health.Status = "offline"
-				filling.Lock()
-				out[i] = health
-				filling.Unlock()
+				answers <- probed{i, health}
 				return
 			}
 
@@ -421,24 +484,34 @@ func (f *Fleet) Health() []NodeHealth {
 			health.CPUPct = info.CPUPct
 			health.MemPct = info.MemPct
 			health.Carrying = info.Carrying
-			filling.Lock()
-			out[i] = health
-			filling.Unlock()
+			f.mu.Lock()
+			f.seen[n.ID] = health
+			f.mu.Unlock()
+			answers <- probed{i, health}
 		}(i, n)
 	}
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
 
-	select {
-	case <-done:
-	case <-time.After(healthWait):
+	deadline := time.After(healthWait)
+waiting:
+	for awaiting > 0 {
+		select {
+		case p := <-answers:
+			out[p.i] = p.health
+			if awaited[p.i] {
+				awaiting--
+			}
+		case <-deadline:
+			break waiting
+		}
 	}
-
-	filling.Lock()
-	defer filling.Unlock()
+	for drained := false; !drained; {
+		select {
+		case p := <-answers:
+			out[p.i] = p.health
+		default:
+			drained = true
+		}
+	}
 
 	f.mu.Lock()
 	for i, h := range out {
@@ -455,6 +528,7 @@ func (f *Fleet) Health() []NodeHealth {
 				late.Error = "the node did not answer in time"
 			}
 			out[i] = late
+			f.seen[late.ID] = late
 			continue
 		}
 		f.seen[h.ID] = h
@@ -463,13 +537,6 @@ func (f *Fleet) Health() []NodeHealth {
 	return out
 }
 
-// Settled ждёт, пока правка действительно вступит в силу на узлах, и говорит,
-// чем дело кончилось.
-//
-// Половина договора — узнать, что узел правку принял; вторая — что он с ней
-// поднялся. Настройки слушателя применяются только после перезапуска, и без
-// этой проверки «сохранено» означало лишь «записано в базу»: узел мог не
-// подняться вовсе, а панель считала бы дело сделанным.
 func (f *Fleet) Settled(want map[string]any, wait time.Duration) (bool, string) {
 	if len(want) == 0 {
 		return true, ""
@@ -505,7 +572,6 @@ func (f *Fleet) Settled(want map[string]any, wait time.Duration) (bool, string) 
 	return false, last
 }
 
-// disagreeing называет первое поле, которое узел не принял.
 func disagreeing(want, now map[string]any) string {
 	for key, wanted := range want {
 		got, carried := now[key]

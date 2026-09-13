@@ -15,6 +15,7 @@ import (
 	"github.com/jaywehosl/quic-diver/internal/clientstate"
 	"github.com/jaywehosl/quic-diver/internal/netstate"
 	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
+	"github.com/jaywehosl/quic-diver/internal/qsrv/uplink/relay"
 )
 
 type groupRow struct {
@@ -111,14 +112,14 @@ func (a *API) buildClients() ([]map[string]any, []string, error) {
 			}
 		}
 	}
-	relayByGroup := make(map[int][]clientstate.LinkRelay, len(groups))
+	relayByGroup := make(map[int][]relay.Link, len(groups))
 	for _, g := range groups {
 		for _, r := range g.Relays {
 			auth := nodeAuthority[r.NodeID]
 			if auth == "" || r.Weblink == "" {
 				continue
 			}
-			relayByGroup[g.ID] = append(relayByGroup[g.ID], clientstate.LinkRelay{Authority: auth, Weblink: r.Weblink})
+			relayByGroup[g.ID] = append(relayByGroup[g.ID], relay.Link{Authority: auth, Weblink: r.Weblink})
 		}
 	}
 
@@ -191,8 +192,6 @@ func (a *API) buildClients() ([]map[string]any, []string, error) {
 			"lastOnline": lastOnline,
 		}
 
-		// Kept beside the network-wide figure so an entrypoint can show what
-		// crossed its own node rather than the whole fleet's total.
 		perNode := map[string]map[string]uint64{}
 		for id, t := range saved.ByNode {
 			perNode[strconv.Itoa(id)] = map[string]uint64{"up": t.Up, "down": t.Down}
@@ -256,17 +255,18 @@ func (a *API) buildClients() ([]map[string]any, []string, error) {
 }
 
 type sessionStat struct {
-	Session  uint32    `json:"session"`
-	Client   string    `json:"client"`
-	Transit  bool      `json:"transit"`
-	LastSeen int64     `json:"lastSeen"`
-	Since    int64     `json:"since"`
-	Checked  int64     `json:"checked"`
-	Device   string    `json:"device"`
-	Up       uint64    `json:"up"`
-	Down     uint64    `json:"down"`
-	Seen     []address `json:"seen"`
-	NodeID   int       `json:"-"`
+	Session  uint32       `json:"session"`
+	Client   string       `json:"client"`
+	Transit  bool         `json:"transit"`
+	LastSeen int64        `json:"lastSeen"`
+	Since    int64        `json:"since"`
+	Checked  int64        `json:"checked"`
+	Device   string       `json:"device"`
+	Up       uint64       `json:"up"`
+	Down     uint64       `json:"down"`
+	Seen     []address    `json:"seen"`
+	NodeID   int          `json:"-"`
+	On       map[int]bool `json:"-"`
 }
 
 type address struct {
@@ -283,8 +283,6 @@ type keptStats struct {
 		Down uint64 `json:"down"`
 		At   int64  `json:"at"`
 	}
-	// The same figure split by the node that carried it: a client's row wants
-	// the whole network, an entrypoint's row wants only its own node.
 	ByNode    map[int]carriedTotals
 	Addresses []address
 	Devices   []deviceRow
@@ -361,11 +359,7 @@ func (a *API) carried() map[int]carriedTotals {
 func (a *API) askCarried() any {
 	out := map[int]carriedTotals{}
 
-	for _, n := range a.fleet.Live() {
-		body, err := a.fleet.Ask(n.ID, "clients.stats", nil)
-		if err != nil {
-			continue
-		}
+	for _, body := range a.fleet.Gather("clients.stats", nil) {
 		var answer struct {
 			Carried map[string]carriedTotals `json:"carried"`
 		}
@@ -389,10 +383,6 @@ func (a *API) askCarried() any {
 	return out
 }
 
-// Traffic is counted per node, so a figure for the whole network is the sum of
-// what each node carried — not whatever one node's replica happens to hold.
-// Nothing here is written back: the totals live only in this answer, so handing
-// the database to a node never overwrites a client's history.
 func (a *API) askStored() any {
 	out := map[int]keptStats{}
 
@@ -411,17 +401,13 @@ func (a *API) askStored() any {
 
 	answers := map[int]stats{}
 	nodeOf := map[int]bool{}
-	for _, n := range a.fleet.Live() {
-		nodeOf[n.ID] = true
-		body, err := a.fleet.Ask(n.ID, "clients.stats", nil)
-		if err != nil {
-			continue
-		}
+	for id, body := range a.fleet.Gather("clients.stats", nil) {
+		nodeOf[id] = true
 		var answer stats
 		if json.Unmarshal(body, &answer) != nil {
 			continue
 		}
-		answers[n.ID] = answer
+		answers[id] = answer
 	}
 	if len(answers) == 0 {
 		return out
@@ -436,8 +422,6 @@ func (a *API) askStored() any {
 	}
 
 	for nodeID, answer := range answers {
-		// A node that predates the split reports no share of its own; falling
-		// back to its whole replica beats showing nothing.
 		counted := answer.Mine
 		if !shares {
 			counted = answer.Traffic
@@ -500,8 +484,6 @@ func (a *API) askStored() any {
 		}
 	}
 
-	// Only one node can be asked without the split, and then its replica already
-	// holds every node's rows — adding them again would double the bytes.
 	if !shares && len(answers) > 1 {
 		best := map[int]totals{}
 		for _, answer := range answers {
@@ -565,11 +547,7 @@ func (a *API) sessions() map[uint32]sessionStat {
 func (a *API) askSessions() any {
 	out := map[uint32]sessionStat{}
 
-	for _, node := range a.fleet.Live() {
-		body, err := a.fleet.Ask(node.ID, "sessions", nil)
-		if err != nil {
-			continue
-		}
+	for id, body := range a.fleet.Gather("sessions", nil) {
 		var rows []sessionStat
 		if json.Unmarshal(body, &rows) != nil {
 			continue
@@ -583,16 +561,22 @@ func (a *API) askSessions() any {
 				total.LastSeen = row.LastSeen
 				total.Client = row.Client
 				total.Since = row.Since
-				total.NodeID = node.ID
+				total.NodeID = id
 			}
 			if row.Checked > total.Checked {
 				total.Checked = row.Checked
+			}
+			if row.Since > 0 {
+				if total.On == nil {
+					total.On = map[int]bool{}
+				}
+				total.On[id] = true
 			}
 			if row.Device != "" {
 				total.Device = row.Device
 			}
 			for _, ip := range row.Seen {
-				ip.NodeID = node.ID
+				ip.NodeID = id
 				if ip.Fingerprint == "" {
 					ip.Fingerprint = row.Device
 				}
@@ -633,7 +617,7 @@ func (a *API) entrypointAddresses() map[int]string {
 			continue
 		}
 		if host, known := hosts[e.NodeID]; known {
-			out[e.ID] = fmt.Sprintf("%s:%d", host, e.Port)
+			out[e.ID] = net.JoinHostPort(host, strconv.Itoa(e.Port))
 		}
 	}
 	return out
@@ -666,7 +650,7 @@ func (a *API) groupsList(w http.ResponseWriter, r *http.Request) {
 		out = append(out, map[string]any{
 			"id": g.ID, "name": g.Name, "clientCount": counts[g.ID],
 			"entrypointIds": g.EntrypointIDs, "deviceLimit": g.DeviceLimit,
-			"allowExit": g.AllowExit,
+			"allowExit":   g.AllowExit,
 			"relayEnable": g.RelayEnable, "relays": g.Relays,
 		})
 	}
@@ -690,9 +674,6 @@ func (a *API) clientsPaged(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The panel has always sent ?search=; nothing here ever read it, so typing a
-	// name filtered nothing. Matching is case-insensitive over the fields a
-	// person would type: the tag and the comment.
 	if needle := strings.TrimSpace(r.URL.Query().Get("search")); needle != "" {
 		needle = strings.ToLower(needle)
 		kept := make([]map[string]any, 0, len(rows))
@@ -747,8 +728,6 @@ func (a *API) clientsPaged(w http.ResponseWriter, r *http.Request) {
 			online = append(online, email)
 		}
 
-		// Active means still carrying traffic: enabled and not run out. A client
-		// about to expire is warned about, not counted as gone.
 		if expiry > 0 && expiry < now {
 			depleted = append(depleted, email)
 			continue

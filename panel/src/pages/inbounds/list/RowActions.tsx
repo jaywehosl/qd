@@ -1,8 +1,6 @@
 import type { ReactNode } from 'react';
-import { useTranslation } from 'react-i18next';
-import { Button, DropdownMenu, type MenuEntry } from '@/components/ds';
+import { type MenuEntry } from '@/components/ds';
 import {
-  MoreOutlined,
   CopyOutlined,
   ExportOutlined,
   RetweetOutlined,
@@ -17,18 +15,6 @@ import {
 import { isInboundMultiUser } from './helpers';
 import type { DBInboundRecord, RowAction } from './types';
 
-interface RowActionsMenuProps {
-  record: DBInboundRecord;
-  subEnable: boolean;
-  hasClients: boolean;
-  onClick: (key: RowAction) => void;
-  isMobile?: boolean;
-}
-
-/**
- * Build the row-action menu as DS MenuEntry[]. Each entry's onSelect dispatches
- * the corresponding RowAction through the supplied handler.
- */
 export function buildRowActionsMenu({
   record,
   subEnable,
@@ -70,16 +56,4 @@ export function buildRowActionsMenu({
   }
   add('delete', <DeleteOutlined />, t('delete'), true);
   return items;
-}
-
-export function RowActionsCell({ record, subEnable, hasClients, onClick }: RowActionsMenuProps) {
-  const { t } = useTranslation();
-  return (
-    <div className="action-buttons">
-      <DropdownMenu
-        items={buildRowActionsMenu({ record, subEnable, t, hasClients, onClick })}
-        trigger={<Button variant="text" size="sm" icon={<MoreOutlined />} />}
-      />
-    </div>
-  );
 }

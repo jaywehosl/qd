@@ -79,13 +79,7 @@ func bucketByTime(raw []Sample, since, until int64, points int) []Sample {
 		span = 1
 	}
 	width := (span + int64(points) - 1) / int64(points)
-	if width < 1 {
-		width = 1
-	}
 	count := int((span + width - 1) / width)
-	if count < 1 {
-		count = 1
-	}
 
 	out := make([]Sample, 0, count)
 	for i := 0; i < count; i++ {

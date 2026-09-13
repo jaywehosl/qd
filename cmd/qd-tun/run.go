@@ -92,8 +92,7 @@ func runClient(opts runOptions) error {
 	var admin *adminUI
 	var api *clientapi.API
 
-	var tun *tunnel
-	tun = newTunnel(tunnelConfig{
+	tun := newTunnel(tunnelConfig{
 		MTU:     mtu,
 		Workers: opts.Readers,
 		DNS:     opts.DNS,
@@ -127,10 +126,10 @@ func runClient(opts runOptions) error {
 		Lost: func() {
 			time.Sleep(3 * time.Second)
 			sub, err := db.Subscription()
-			if err != nil || !sub.Imported {
+			if err != nil || !sub.Imported || api == nil {
 				return
 			}
-			if err := connectNow(db, tun, sub, opts.key); err != nil {
+			if err := api.Connect(); err != nil {
 				fmt.Printf("carry    could not come back: %v\n", err)
 			}
 		},
@@ -146,7 +145,7 @@ func runClient(opts runOptions) error {
 			if api == nil {
 				return
 			}
-			clientapi.Announce(op, nodes, api.Key(), sub.Key, deviceOf(), nodeTalk)
+			clientapi.Announce(op, nodes, sub.Key, deviceOf(), nodeTalk)
 		},
 		Key: key,
 	})
@@ -199,7 +198,7 @@ func runClient(opts runOptions) error {
 	go answerKnocks(func() { openPage(pageURL) }, stop)
 
 	quit := make(chan struct{})
-	icon, err := startTray(db, tun, ui, key, quit)
+	icon, err := startTray(db, tun, ui, api, quit)
 	if err != nil {
 		fmt.Printf("tray     %v\n", err)
 	} else {
@@ -209,7 +208,7 @@ func runClient(opts runOptions) error {
 	}
 
 	if opts.Connect && sub.Imported {
-		if err := connectNow(db, tun, sub, opts.key); err != nil {
+		if err := api.Connect(); err != nil {
 			fmt.Printf("connect  %v\n", err)
 		}
 	}
@@ -239,7 +238,7 @@ func runClient(opts runOptions) error {
 	}
 
 	close(stop)
-	tun.Release()
+	tun.Stop()
 	return nil
 }
 

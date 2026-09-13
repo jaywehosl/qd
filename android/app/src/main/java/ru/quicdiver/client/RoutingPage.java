@@ -480,8 +480,6 @@ public class RoutingPage {
             LinearLayout item = new LinearLayout(host);
             item.setOrientation(LinearLayout.HORIZONTAL);
             item.setGravity(Gravity.CENTER_VERTICAL);
-            // Справа место под рельсу прокрутки: она выезжает поверх ряда и иначе
-            // ложится прямо на отметку о правиле.
             item.setPadding(skin.dp(8), skin.dp(8), skin.dp(18), skin.dp(8));
 
             ImageView face = new ImageView(host);
@@ -542,9 +540,6 @@ public class RoutingPage {
         }
     }
 
-    // wear достаёт иконку приложения не в потоке отрисовки: их сотни, и каждая
-    // распаковывается из чужого apk. Уже добытые лежат в faces, поэтому набор в
-    // поиске перестраивает список без единого обращения к PackageManager.
     private void wear(final ImageView face, final String pkg) {
         Drawable known = faces.get(pkg);
         if (known != null) {
@@ -644,12 +639,6 @@ public class RoutingPage {
         }).start();
     }
 
-    // В списке те, кому есть куда ходить, и те, кого человек видит у себя на
-    // экране. Одного разрешения INTERNET мало: Gemini, например, его не просит
-    // вовсе, потому что сам в сеть не ходит, — а правило для него всё равно
-    // нужно. Одного значка тоже мало: фоновые службы ходят в сеть без значка.
-    // Вместе эти два условия оставляют снаружи ровно мусор — оверлеи ресурсов
-    // и прошивочные службы, у которых нет ни того, ни другого.
     private List<App> installed() {
         if (catalogue != null) {
             return catalogue;
@@ -689,8 +678,6 @@ public class RoutingPage {
         return out;
     }
 
-    // Одним запросом, а не вопросом про каждый пакет: их на телефоне сотни, и
-    // каждый такой вопрос — обращение к системе.
     private static Set<String> launchable(PackageManager packages) {
         Set<String> out = new HashSet<>();
         Intent home = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);

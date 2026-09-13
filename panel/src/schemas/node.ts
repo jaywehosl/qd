@@ -13,7 +13,6 @@ export const NodeRecordSchema = z.object({
   latencyMs: z.number().optional(),
   cpuPct: z.number().optional(),
   memPct: z.number().optional(),
-  xrayVersion: z.string().optional(),
   panelVersion: z.string().optional(),
   uptimeSecs: z.number().optional(),
   inboundCount: z.number().optional(),
@@ -38,11 +37,9 @@ export const NodeListSchema = z.array(NodeRecordSchema);
 export const ProbeResultSchema = z.object({
   status: z.string(),
   latencyMs: z.number().optional(),
-  xrayVersion: z.string().optional(),
   error: z.string().optional(),
 }).loose();
 
-// Everything an operator can change once the node is deployed and reporting.
 export const NodeEditSchema = z.object({
   id: z.number().optional(),
   name: z.string().trim().min(1, 'pages.nodes.toasts.fillRequired'),

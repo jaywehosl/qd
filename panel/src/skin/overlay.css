@@ -12,8 +12,6 @@
   overflow-y: auto;
 }
 
-/* The width each dialog asks for is set inline; this cap only keeps it inside
-   the window. A fixed 560 here quietly overrode every wider request. */
 .ds-dialog__content {
   width: 100%;
   max-width: min(94vw, 1040px);
@@ -213,9 +211,6 @@ html.is-dark .ds-toast { border: 1px solid var(--edge); }
 
 .ds-popover--padded { padding: var(--step-3); }
 
-/* Client form ---------------------------------------------------------------
-   Every row is the same pair of halves, so fields line up down the dialog and
-   a long label has room instead of being squeezed by an 'auto' column. */
 .cf-form {
   display: flex;
   flex-direction: column;
@@ -262,8 +257,6 @@ html.is-dark .ds-toast { border: 1px solid var(--edge); }
   flex-wrap: wrap;
 }
 
-/* Sized to its own content: any fixed width left a gap between the choice and
-   the confirmation standing next to it. */
 .cf-foot__group { flex: 0 0 auto; }
 .cf-foot__actions {
   margin-inline-start: auto;
@@ -272,8 +265,6 @@ html.is-dark .ds-toast { border: 1px solid var(--edge); }
   flex: 0 0 auto;
 }
 
-/* The title row carries the admin switch, so it spans the header and keeps the
-   close button at the far edge. */
 .cf-title {
   display: flex;
   align-items: center;
@@ -301,8 +292,6 @@ html.is-dark .ds-toast { border: 1px solid var(--edge); }
   white-space: nowrap;
 }
 
-/* A confirm is a sentence and two buttons; it reads better with the question
-   given room and the footer close under it rather than a strip away. */
 .ds-confirm__text {
   margin: 0;
   padding-bottom: var(--step-2);
@@ -311,8 +300,6 @@ html.is-dark .ds-toast { border: 1px solid var(--edge); }
   line-height: 1.5;
 }
 
-/* The node's name belongs to the title, so it is set at the title's weight
-   rather than at chip size. */
 .ef-title {
   display: inline-flex;
   align-items: center;

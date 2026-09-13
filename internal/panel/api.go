@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/jaywehosl/quic-diver/internal/netstate"
+	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
 )
 
 type Prefs interface {
@@ -281,6 +282,20 @@ func (a *API) countPerNode(rows []map[string]any) {
 		nodeOfEntry[int(numberOf(e["id"]))] = node
 	}
 
+	groupExit := map[string]bool{}
+	if groups, err := a.groups(); err == nil {
+		for _, g := range groups {
+			groupExit[g.Name] = g.AllowExit
+		}
+	}
+	exits := []int{}
+	for _, row := range rows {
+		if textOf(row["role"]) == string(netstate.RoleEgress) {
+			exits = append(exits, int(numberOf(row["id"])))
+		}
+	}
+	live := a.sessions()
+
 	reach := map[int]int{}
 	online := map[int]int{}
 	for _, c := range clients {
@@ -290,55 +305,27 @@ func (a *API) countPerNode(rows []map[string]any) {
 				here[nodeOfEntry[id]] = true
 			}
 		}
-		on := numberOf(c["onlineSince"]) > 0
+		client := netstate.Client{AllowExit: int(numberOf(c["allowExit"]))}
+		if len(here) > 0 && client.MayExit(&netstate.Group{AllowExit: groupExit[textOf(c["group"])]}) {
+			for _, id := range exits {
+				here[id] = true
+			}
+		}
+		on := live[qdcrypt.SessionID(textOf(c["uuid"]))].On
 		for node := range here {
 			reach[node]++
-			if on {
+			if on[node] {
 				online[node]++
 			}
 		}
 	}
-
-	carrying := a.carrying()
-	feeders := a.mayReachExit(rows, nodeOfEntry)
 
 	for _, row := range rows {
 		id := int(numberOf(row["id"]))
 		row["inboundCount"] = entriesOn[id]
 		row["clientCount"] = reach[id]
 		row["onlineCount"] = online[id]
-
-		if textOf(row["role"]) == string(netstate.RoleEgress) {
-			row["clientCount"] = feeders
-			row["onlineCount"] = carrying[id]
-		}
 	}
-}
-
-func (a *API) mayReachExit(rows []map[string]any, nodeOfEntry map[int]int) int {
-	groups, err := a.groups()
-	if err != nil {
-		return 0
-	}
-
-	role := map[int]string{}
-	for _, row := range rows {
-		role[int(numberOf(row["id"]))] = textOf(row["role"])
-	}
-
-	feeding := map[int]bool{}
-	for _, g := range groups {
-		if !g.AllowExit {
-			continue
-		}
-		for _, entry := range g.EntrypointIDs {
-			node := nodeOfEntry[entry]
-			if node != 0 && role[node] != string(netstate.RoleEgress) {
-				feeding[node] = true
-			}
-		}
-	}
-	return len(feeding)
 }
 
 func (a *API) health(w http.ResponseWriter, r *http.Request) {

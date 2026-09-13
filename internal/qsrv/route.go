@@ -1,14 +1,16 @@
 package qsrv
 
 const (
-	HeaderRoute  = "Qd-Route"
-	HeaderToken  = "Qd-Token"
-	HeaderHops   = "Qd-Hops"
-	HeaderNode   = "Qd-Node"
-	HeaderSeat   = "Qd-Seat"
-	HeaderProto  = "Qd-Proto"
-	HeaderDevice = "Qd-Device"
-	HeaderAddr   = "Qd-Addr"
+	HeaderRoute   = "Qd-Route"
+	HeaderToken   = "Qd-Token"
+	HeaderAuth    = "Qd-Auth"
+	HeaderHops    = "Qd-Hops"
+	HeaderNode    = "Qd-Node"
+	HeaderSeat    = "Qd-Seat"
+	HeaderSession = "Qd-Session"
+	HeaderProto   = "Qd-Proto"
+	HeaderDevice  = "Qd-Device"
+	HeaderAddr    = "Qd-Addr"
 
 	AnyExit  = "egress"
 	HereExit = "here"

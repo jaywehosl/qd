@@ -9,13 +9,6 @@ const (
 	RoleEgress  Role = "egress"
 )
 
-const (
-	QDHeaderLen = 8
-	ipv4HdrLen  = 20
-	udpHdrLen   = 8
-	EncapLen    = ipv4HdrLen + udpHdrLen + QDHeaderLen
-)
-
 var (
 	ErrNoSuchNode  = errors.New("netstate: no such node")
 	ErrNodeOff     = errors.New("netstate: node is disabled")
@@ -77,12 +70,10 @@ type Client struct {
 }
 
 type State struct {
-	Revision    int
 	Nodes       []Node
 	Entrypoints []Entrypoint
 	Groups      []Group
 	Clients     []Client
-	NetworkKey  string
 }
 
 const (

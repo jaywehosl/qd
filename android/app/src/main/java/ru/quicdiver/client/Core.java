@@ -109,16 +109,10 @@ public final class Core {
         return mayExit;
     }
 
-    // ready — есть ли подписка. Без неё подключаться нечем, и кнопке остаётся
-    // только открыть клиент.
     public static boolean ready() {
         return ready;
     }
 
-    // readExit спрашивает состояние у самого клиента, а не у кэша экрана: кнопку
-    // в уведомлении жмут и с закрытым приложением, когда кэш пуст или устарел.
-    // Зовётся редко — после подъёма и после переключения, — поэтому обращение к
-    // базе здесь ничего не стоит.
     public static void readExit(Context context) {
         try {
             Client client = client(context);
@@ -151,8 +145,6 @@ public final class Core {
         return said;
     }
 
-    // turning — идёт переход. Дозвон занимает до двадцати секунд, и без этого
-    // признака кнопка выглядела мёртвой: нажал и ничего.
     public static boolean turning() {
         return turning;
     }
@@ -162,9 +154,6 @@ public final class Core {
         repaint(context);
     }
 
-    // repaint — единственное место, где обновляется всё, что показывает
-    // состояние. Пока их было три, вызовы разъезжались: уведомление знало про
-    // выход, а виджет ещё нет.
     public static void repaint(Context context) {
         TunnelService.refreshNote(context);
         TileService.refresh();

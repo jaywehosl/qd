@@ -57,8 +57,11 @@ func (n *Node) verified(r *http.Request) (Grant, bool) {
 			return Grant{}, false
 		}
 		grant.Seat = grant.Session
-		if seat := seatOf(r); seat != 0 {
+		if seat := numberIn(r, HeaderSeat); seat != 0 {
 			grant.Session = seat
+			if client := numberIn(r, HeaderSession); client != 0 {
+				grant.Session = client
+			}
 			grant.Seat = seat
 			grant.Client = r.Header.Get(HeaderNode)
 		} else if device := r.Header.Get(HeaderDevice); device != "" {
@@ -80,8 +83,8 @@ func seatFor(session uint32, device string) uint32 {
 	return seat
 }
 
-func seatOf(r *http.Request) uint32 {
-	text := r.Header.Get(HeaderSeat)
+func numberIn(r *http.Request, header string) uint32 {
+	text := r.Header.Get(header)
 	if text == "" {
 		return 0
 	}
@@ -162,10 +165,6 @@ func (h *held) quic() *quic.Conn {
 	return h.conn
 }
 
-// counting находит сессию, которой принадлежит этот флоу. Клиент на QUIC уже
-// заведён connect-ip'ом; сосед по сети — транзитом; клиент, пришедший стримом,
-// заводится здесь, иначе его трафик не считает никто и в панели он висит
-// подключённым без единого байта.
 func (n *Node) counting(grant Grant, r *http.Request, route string) *live {
 	n.mu.Lock()
 	s := n.held[grant.Seat]
@@ -197,9 +196,6 @@ func (n *Node) streamSession(grant Grant, r *http.Request, route string) *live {
 	return s
 }
 
-// sweepStreams убирает стримовых клиентов, замолчавших надолго. У QUIC о конце
-// сессии сообщает само соединение, у стримового пути такого сигнала нет: клиент
-// просто перестаёт открывать флоу и здороваться.
 func (n *Node) sweepStreams(quiet time.Duration) {
 	cut := time.Now().Add(-quiet).Unix()
 
@@ -221,9 +217,6 @@ func (n *Node) sweepStreams(quiet time.Duration) {
 
 const streamQuiet = 2 * time.Minute
 
-// newLive заводит сессию. Один конструктор на все три случая — connect-ip,
-// транзит соседа и стримовый клиент: пока их было три, каждый помнил свой набор
-// полей, и забытое lastSeen означало сессию, которую уборка считает молчащей.
 func newLive(grant Grant, address netip.Prefix, peer, route string) *live {
 	now := time.Now().Unix()
 	s := &live{grant: grant, address: address, peer: peer, since: now}

@@ -173,8 +173,6 @@ export default function ClientFormModal({
       <Dialog
         open={open}
         onOpenChange={(o) => { if (!o && !submitting) onOpenChange(false); }}
-        // Admin is a property of the client as a whole, not one field among the
-        // others, so it rides in the header beside the name.
         title={(
           <div className="cf-title">
             <span className="ef-title">
@@ -237,8 +235,6 @@ export default function ClientFormModal({
           </div>
         }
       >
-        {/* One grid of equal halves throughout: mixed 'auto 1fr' templates made
-            every row a different shape and squeezed the longer labels. */}
         <div className="cf-form">
           <div className="cf-pair">
             <Field label={t('pages.clients.tag', { defaultValue: 'Tag' })}>

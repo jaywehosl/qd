@@ -31,7 +31,7 @@ export const ClientIpEntrySchema = z.object({
 }).loose();
 
 const nullableDeviceArray = z.array(ClientDeviceSchema).nullable().transform((v) => v ?? []);
-export const ClientExitEntrySchema = z.object({
+const ClientExitEntrySchema = z.object({
   nodeId: z.number(),
   firstSeen: z.number().optional(),
   lastOnline: z.number().optional(),
@@ -163,7 +163,7 @@ export const ActiveInboundsByNodeSchema = z
   .nullable()
   .transform((v) => v ?? {});
 
-export const GroupRelaySchema = z.object({
+const GroupRelaySchema = z.object({
   nodeId: z.number(),
   weblink: z.string(),
 }).loose();
@@ -181,7 +181,7 @@ export const GroupSummarySchema = z.object({
 
 export const GroupSummaryListSchema = z.array(GroupSummarySchema).nullable().transform((v) => v ?? []);
 
-export function hasForbiddenClientChars(value: string): boolean {
+function hasForbiddenClientChars(value: string): boolean {
   if (value.includes('/') || value.includes('\\') || value.includes(' ')) return true;
   for (let i = 0; i < value.length; i++) {
     const code = value.charCodeAt(i);
@@ -219,7 +219,7 @@ export const ClientCreateFormSchema = ClientFormSchema.refine(
   { message: 'pages.clients.selectInbound', path: ['inboundIds'] },
 );
 
-export const ClientBulkAdjustFormSchema = z
+const ClientBulkAdjustFormSchema = z
   .object({
     addDays: z.number().int(),
     addGB: z.number(),
@@ -228,7 +228,7 @@ export const ClientBulkAdjustFormSchema = z
     message: 'pages.clients.bulkAdjustNothing',
   });
 
-export const ClientBulkAddFormSchema = z.object({
+const ClientBulkAddFormSchema = z.object({
   emailMethod: z.number().int().min(0).max(4),
   firstNum: z.number().int().min(1),
   lastNum: z.number().int().min(1),

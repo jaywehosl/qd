@@ -5,8 +5,8 @@ package main
 import (
 	"github.com/jaywehosl/quic-diver/internal/clientapi"
 	"github.com/jaywehosl/quic-diver/internal/clientstate"
-	"github.com/jaywehosl/quic-diver/internal/qcli"
 	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
+	"github.com/jaywehosl/quic-diver/internal/qsrv/uplink/relay"
 )
 
 type winPlatform struct {
@@ -16,7 +16,7 @@ type winPlatform struct {
 
 func (p winPlatform) Running() bool { return p.tun.Running() }
 
-func (p winPlatform) Start(servers []string, relays []qcli.RelayLink, session uint32) error {
+func (p winPlatform) Start(servers []string, relays []relay.Link, session uint32) error {
 	return p.tun.Start(servers, relays, session)
 }
 
@@ -29,6 +29,8 @@ func (p winPlatform) ServerName() string { return p.tun.ServerName() }
 func (p winPlatform) SetExit(egress bool) { setExit(egress) }
 
 func (p winPlatform) SetFixedRate(mbit int) { setFixedRate(mbit) }
+
+func (p winPlatform) SyncControlRelays(relays []relay.Link) { nodeTalk.SetRelays(relays) }
 
 func (p winPlatform) Wire() clientapi.Asker { return nodeTalk }
 

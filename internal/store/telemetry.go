@@ -12,61 +12,14 @@ type Reading struct {
 }
 
 func (d *DB) RecordTraffic(readings []Reading) error {
-	if len(readings) == 0 {
-		return nil
-	}
-
-	tx, err := d.sql.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	for _, r := range readings {
-		var epoch int64
-		var lastUp, lastDown uint64
-		err := tx.QueryRow(
-			`SELECT epoch, last_up, last_down FROM client_traffic WHERE client_id = ? AND node_id = ?`,
-			r.ClientID, r.NodeID).Scan(&epoch, &lastUp, &lastDown)
-
-		switch {
-		case err == sql.ErrNoRows:
-			if _, err := tx.Exec(
-				`INSERT INTO client_traffic (client_id, node_id, epoch, last_up, last_down, up, down, at)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-				r.ClientID, r.NodeID, r.Epoch, r.Up, r.Down, r.Up, r.Down, r.At); err != nil {
-				return err
-			}
-			continue
-		case err != nil:
-			return err
-		}
-
-		addUp, addDown := r.Up, r.Down
-		if epoch == r.Epoch {
-			if r.Up >= lastUp {
-				addUp = r.Up - lastUp
-			}
-			if r.Down >= lastDown {
-				addDown = r.Down - lastDown
-			}
-		}
-
-		if _, err := tx.Exec(
-			`UPDATE client_traffic
-			    SET epoch = ?, last_up = ?, last_down = ?,
-			        up = up + ?, down = down + ?,
-			        at = CASE WHEN ? > 0 THEN ? ELSE at END
-			  WHERE client_id = ? AND node_id = ?`,
-			r.Epoch, r.Up, r.Down, addUp, addDown,
-			addUp+addDown, r.At, r.ClientID, r.NodeID); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
+	return d.recordCounters("client_traffic", "client_id", readings)
 }
 
 func (d *DB) RecordPeerTraffic(readings []Reading) error {
+	return d.recordCounters("peer_traffic", "peer_id", readings)
+}
+
+func (d *DB) recordCounters(table, owner string, readings []Reading) error {
 	if len(readings) == 0 {
 		return nil
 	}
@@ -81,13 +34,13 @@ func (d *DB) RecordPeerTraffic(readings []Reading) error {
 		var epoch int64
 		var lastUp, lastDown uint64
 		err := tx.QueryRow(
-			`SELECT epoch, last_up, last_down FROM peer_traffic WHERE peer_id = ? AND node_id = ?`,
+			`SELECT epoch, last_up, last_down FROM `+table+` WHERE `+owner+` = ? AND node_id = ?`,
 			r.ClientID, r.NodeID).Scan(&epoch, &lastUp, &lastDown)
 
 		switch {
 		case err == sql.ErrNoRows:
 			if _, err := tx.Exec(
-				`INSERT INTO peer_traffic (peer_id, node_id, epoch, last_up, last_down, up, down, at)
+				`INSERT INTO `+table+` (`+owner+`, node_id, epoch, last_up, last_down, up, down, at)
 				 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 				r.ClientID, r.NodeID, r.Epoch, r.Up, r.Down, r.Up, r.Down, r.At); err != nil {
 				return err
@@ -108,32 +61,17 @@ func (d *DB) RecordPeerTraffic(readings []Reading) error {
 		}
 
 		if _, err := tx.Exec(
-			`UPDATE peer_traffic
+			`UPDATE `+table+`
 			    SET epoch = ?, last_up = ?, last_down = ?,
 			        up = up + ?, down = down + ?,
 			        at = CASE WHEN ? > 0 THEN ? ELSE at END
-			  WHERE peer_id = ? AND node_id = ?`,
+			  WHERE `+owner+` = ? AND node_id = ?`,
 			r.Epoch, r.Up, r.Down, addUp, addDown,
 			addUp+addDown, r.At, r.ClientID, r.NodeID); err != nil {
 			return err
 		}
 	}
 	return tx.Commit()
-}
-
-func (d *DB) PeerTraffic() (map[int]Totals, error) {
-	out := map[int]Totals{}
-	err := scan(d.sql, `SELECT node_id, SUM(up), SUM(down), MAX(at) FROM peer_traffic GROUP BY node_id`,
-		func(r *sql.Rows) error {
-			var id int
-			var t Totals
-			if err := r.Scan(&id, &t.Up, &t.Down, &t.At); err != nil {
-				return err
-			}
-			out[id] = t
-			return nil
-		})
-	return out, err
 }
 
 func (d *DB) ResetTraffic(clientID int) error {
@@ -149,36 +87,29 @@ type Totals struct {
 	At   int64  `json:"at"`
 }
 
-// Only the rows this node wrote itself. Every node holds a replica carrying
-// the other nodes' rows too, so a panel that wants a network-wide figure must
-// add up each node's own share rather than read one node's whole table.
+func (d *DB) PeerTraffic() (map[int]Totals, error) {
+	return d.totals(`SELECT node_id, SUM(up), SUM(down), MAX(at) FROM peer_traffic GROUP BY node_id`)
+}
+
 func (d *DB) TrafficFrom(nodeID int) (map[int]Totals, error) {
-	out := map[int]Totals{}
-	err := scan(d.sql, `SELECT client_id, up, down, at FROM client_traffic WHERE node_id = ?`,
-		func(r *sql.Rows) error {
-			var id int
-			var t Totals
-			if err := r.Scan(&id, &t.Up, &t.Down, &t.At); err != nil {
-				return err
-			}
-			out[id] = t
-			return nil
-		}, nodeID)
-	return out, err
+	return d.totals(`SELECT client_id, up, down, at FROM client_traffic WHERE node_id = ?`, nodeID)
 }
 
 func (d *DB) Traffic() (map[int]Totals, error) {
+	return d.totals(`SELECT client_id, SUM(up), SUM(down), MAX(at) FROM client_traffic GROUP BY client_id`)
+}
+
+func (d *DB) totals(query string, args ...any) (map[int]Totals, error) {
 	out := map[int]Totals{}
-	err := scan(d.sql, `SELECT client_id, SUM(up), SUM(down), MAX(at) FROM client_traffic GROUP BY client_id`,
-		func(r *sql.Rows) error {
-			var id int
-			var t Totals
-			if err := r.Scan(&id, &t.Up, &t.Down, &t.At); err != nil {
-				return err
-			}
-			out[id] = t
-			return nil
-		})
+	err := scan(d.sql, query, func(r *sql.Rows) error {
+		var id int
+		var t Totals
+		if err := r.Scan(&id, &t.Up, &t.Down, &t.At); err != nil {
+			return err
+		}
+		out[id] = t
+		return nil
+	}, args...)
 	return out, err
 }
 
@@ -261,8 +192,10 @@ func (d *DB) BlockDevice(clientID int, fingerprint string, blocked bool) error {
 }
 
 func (d *DB) ForgetDevice(clientID int, fingerprint string) (int, error) {
-	res, err := d.sql.Exec(
-		`DELETE FROM devices WHERE client_id = ? AND fingerprint = ?`, clientID, fingerprint)
+	return removed(d.sql.Exec(`DELETE FROM devices WHERE client_id = ? AND fingerprint = ?`, clientID, fingerprint))
+}
+
+func removed(res sql.Result, err error) (int, error) {
 	if err != nil {
 		return 0, err
 	}
@@ -339,21 +272,11 @@ func (d *DB) Addresses() (map[int][]Address, error) {
 }
 
 func (d *DB) ForgetAddress(clientID int, ip string) (int, error) {
-	res, err := d.sql.Exec(`DELETE FROM ip_log WHERE client_id = ? AND ip = ?`, clientID, ip)
-	if err != nil {
-		return 0, err
-	}
-	gone, _ := res.RowsAffected()
-	return int(gone), nil
+	return removed(d.sql.Exec(`DELETE FROM ip_log WHERE client_id = ? AND ip = ?`, clientID, ip))
 }
 
 func (d *DB) ForgetAddresses(clientID int) (int, error) {
-	res, err := d.sql.Exec(`DELETE FROM ip_log WHERE client_id = ?`, clientID)
-	if err != nil {
-		return 0, err
-	}
-	gone, _ := res.RowsAffected()
-	return int(gone), nil
+	return removed(d.sql.Exec(`DELETE FROM ip_log WHERE client_id = ?`, clientID))
 }
 
 type Exit struct {
@@ -397,10 +320,5 @@ func (d *DB) ForgetExit(clientID, nodeID int) (int, error) {
 		query += ` AND node_id = ?`
 		args = append(args, nodeID)
 	}
-	res, err := d.sql.Exec(query, args...)
-	if err != nil {
-		return 0, err
-	}
-	gone, _ := res.RowsAffected()
-	return int(gone), nil
+	return removed(d.sql.Exec(query, args...))
 }

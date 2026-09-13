@@ -93,17 +93,13 @@ func (a *API) dnsRecordDelete(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) dnsStats(w http.ResponseWriter, r *http.Request) {
 	out := []map[string]any{}
-	for _, node := range a.fleet.Live() {
-		body, err := a.fleet.Ask(node.ID, "dns.stats", nil)
-		if err != nil {
-			continue
-		}
+	for id, body := range a.fleet.Gather("dns.stats", nil) {
 		var stats map[string]any
 		if json.Unmarshal(body, &stats) != nil {
 			continue
 		}
-		stats["nodeId"] = node.ID
-		stats["tag"] = node.Tag
+		stats["nodeId"] = id
+		stats["tag"] = a.fleet.TagOf(id)
 		out = append(out, stats)
 	}
 	sendOK(w, out)

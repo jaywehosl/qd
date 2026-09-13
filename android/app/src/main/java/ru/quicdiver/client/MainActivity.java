@@ -54,10 +54,6 @@ public class MainActivity extends Activity {
         }
     };
 
-    // Системный масштаб шрифта множит каждую надпись, а вёрстка здесь плотная:
-    // при полуторном заголовки карточек уезжают в две строки, подписи под ними
-    // выталкивают кнопки, и экран рассыпается. Крупный шрифт уважаем, но до
-    // эталона, на который она нарисована. Мельче системного -- пожалуйста.
     @Override
     protected void attachBaseContext(Context base) {
         Configuration cfg = new Configuration(base.getResources().getConfiguration());
@@ -73,8 +69,6 @@ public class MainActivity extends Activity {
         super.onCreate(saved);
         skin = new Skin(this);
 
-        // Уведомление вешаем сразу: через него подключаются, не открывая
-        // приложения, поэтому висеть оно должно и до первого подключения.
         Core.readExit(this);
         Notes.wake(this);
 
@@ -158,8 +152,6 @@ public class MainActivity extends Activity {
     }
 
     private void handle(Intent intent) {
-        // Долгий тап по плитке шлёт это действие. Без него система показывает
-        // свои параметры приложения, а человек ждёт настроек клиента.
         if (intent != null && android.service.quicksettings.TileService
                 .ACTION_QS_TILE_PREFERENCES.equals(intent.getAction())) {
             pages.show(SETTINGS);
@@ -212,8 +204,6 @@ public class MainActivity extends Activity {
         }
     }
 
-    // Снизу оставляем место под плавающую строку перехода: она лежит поверх
-    // страниц, и без запаса накрывала бы их последнюю карточку.
     private void rest(Sheet held) {
         held.view.setPadding(
                 held.view.getPaddingLeft(), held.top + skin.dp(32) + bars.top,
@@ -277,7 +267,6 @@ public class MainActivity extends Activity {
     }
 
 
-    // seatBar сажает строку перехода над системной полосой жестов, а не под неё.
     private FrameLayout.LayoutParams seatBar() {
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT);
@@ -380,8 +369,6 @@ public class MainActivity extends Activity {
         }
     }
 
-    // warm заполняет соседние страницы сразу, а не в момент перехода: иначе они
-    // въезжают пустыми и на глазах у пользователя доверстываются под свои данные.
     private void warm() {
         routingPage.render();
         settingsPage.render();

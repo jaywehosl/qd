@@ -11,9 +11,6 @@ import android.view.animation.Interpolator;
 import android.view.animation.PathInterpolator;
 import android.widget.ScrollView;
 
-// Scroller — прокрутка со своей рельсой вместо системной полосы. Системная тянется
-// во всю высоту и живёт у самого края экрана; эта повторяет клиент под винду:
-// короткая, выезжает из-за правой границы и убирается обратно, когда её не трогают.
 public class Scroller extends ScrollView {
 
     private static final long HIDE_AFTER = 1400L;
@@ -72,11 +69,6 @@ public class Scroller extends ScrollView {
         gripShade = Math.round(Color.alpha(skin.text) * 0.85f);
     }
 
-    // ScrollView считает диапазон по низу ребёнка, а видимую часть -- во всю свою
-    // высоту, не вычитая отступов. Пока контент длиннее экрана, расхождения не
-    // видно; но стоит ему уложиться между экраном и экраном без нижнего отступа --
-    // и canScrollVertically врёт "некуда", отчего ScrollView перестаёт перехватывать
-    // жест вовсе. Считаем обе величины в одной системе координат.
     @Override
     protected int computeVerticalScrollRange() {
         if (getChildCount() == 0) {
@@ -126,9 +118,6 @@ public class Scroller extends ScrollView {
         }
     }
 
-    // Меряем сами: ScrollView отдаёт extent во всю свою высоту, а range -- по низу
-    // ребёнка вместе с верхним отступом. На странице с большими отступами пара
-    // выходит несогласованной, и рельса считает, что прокручивать нечего.
     private void paint(Canvas canvas) {
         View kid = getChildCount() > 0 ? getChildAt(0) : null;
         if (kid == null) {

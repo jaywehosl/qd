@@ -16,5 +16,3 @@ export async function readyI18n() {
   });
   return i18next;
 }
-
-export { i18next as i18n };

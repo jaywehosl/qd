@@ -7,18 +7,15 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/jaywehosl/quic-diver/internal/qsrv/uplink/relay"
 )
 
-const LinkScheme = "qd"
+const linkScheme = "qd"
 
 type Endpoint struct {
 	Address string
 	Port    int
-}
-
-type LinkRelay struct {
-	Authority string
-	Weblink   string
 }
 
 type Link struct {
@@ -26,20 +23,20 @@ type Link struct {
 	Label      string
 	NetworkKey string
 	Endpoints  []Endpoint
-	Relays     []LinkRelay
+	Relays     []relay.Link
 }
 
-var ErrNotALink = errors.New("that is not a qd:// link")
+var errNotALink = errors.New("that is not a qd:// link")
 
 func ParseLink(raw string) (Link, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return Link{}, ErrNotALink
+		return Link{}, errNotALink
 	}
 
 	u, err := url.Parse(raw)
-	if err != nil || u.Scheme != LinkScheme {
-		return Link{}, ErrNotALink
+	if err != nil || u.Scheme != linkScheme {
+		return Link{}, errNotALink
 	}
 	if u.User == nil || u.User.Username() == "" {
 		return Link{}, errors.New("the link carries no key")
@@ -67,7 +64,7 @@ func ParseLink(raw string) (Link, error) {
 	for _, r := range u.Query()["relay"] {
 		authority, weblink, ok := strings.Cut(r, "|")
 		if ok && authority != "" && weblink != "" {
-			link.Relays = append(link.Relays, LinkRelay{Authority: authority, Weblink: weblink})
+			link.Relays = append(link.Relays, relay.Link{Authority: authority, Weblink: weblink})
 		}
 	}
 	return link, nil
@@ -91,7 +88,7 @@ func parseEndpoint(hostPort string) (Endpoint, error) {
 
 func (l Link) String() string {
 	u := url.URL{
-		Scheme:   LinkScheme,
+		Scheme:   linkScheme,
 		User:     url.User(l.Key),
 		Fragment: l.Label,
 	}

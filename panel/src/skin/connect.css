@@ -34,9 +34,6 @@ html.is-dark .cx-card { border: 1px solid var(--edge); box-shadow: none; }
   color: var(--bold);
 }
 
-/* Sits on the card's own middle, not on the middle of whatever room the
-   neighbours leave. The seam between words and digits is what is centred, so a
-   reading growing from 9:04 to 1:09:04 spills rightwards and the words hold. */
 .cx-refresh-line {
   position: absolute;
   left: 50%;
@@ -51,8 +48,6 @@ html.is-dark .cx-card { border: 1px solid var(--edge); box-shadow: none; }
   pointer-events: none;
 }
 
-/* Room for the longest reading (1:09:04) is held even while it is short, so
-   the whole line keeps one width and the words never shift under it. */
 .cx-refresh-line__value {
   min-width: 52px;
   text-align: left;
@@ -122,8 +117,6 @@ html.is-dark .cx-card { border: 1px solid var(--edge); box-shadow: none; }
 
 .cx-node__name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* The dot is the anchor, not the reading: a two- or three-digit latency grows
-   to the right instead of shoving the dot around. */
 .cx-node__ping {
   flex: 0 0 48px;
   text-align: left;
@@ -186,8 +179,6 @@ html.is-dark .cx-card { border: 1px solid var(--edge); box-shadow: none; }
               transform 0.24s cubic-bezier(0.4, 0.12, 0.28, 1);
 }
 
-/* The whole bar reads as one button, so it lifts and presses as one — the
-   inner button has no chrome of its own to animate. */
 .cx-power:has(.cx-power__main:hover:not(:disabled)) { transform: scale(1.012); }
 
 .cx-power:has(.cx-power__main:active:not(:disabled)) {
@@ -262,9 +253,6 @@ html.is-dark .cx-card { border: 1px solid var(--edge); box-shadow: none; }
 .cx-exit:hover { transform: scale(1.06); }
 .cx-exit:active { transform: scale(0.94); transition-duration: 0.14s; }
 
-/* Scaling re-rasterises the glyphs at the end of the run, so the label lands a
-   fraction late and looks like it snaps. Keeping each button on its own layer
-   makes the browser scale the finished raster instead. */
 .cx-power,
 .cx-again,
 .cx-exit {

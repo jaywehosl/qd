@@ -1,5 +1,3 @@
-// Design System (ds/) — Antigravity glass primitives on a headless core
-// (Radix UI + TanStack Table). Import from '@/components/ds'.
 export { Button } from './Button';
 export type { ButtonProps, ButtonVariant, ButtonSize } from './Button';
 
@@ -48,20 +46,8 @@ export type { TabsProps, TabItem } from './Tabs';
 export { Divider } from './Divider';
 export type { DividerProps } from './Divider';
 
-export { Drawer } from './Drawer';
-export type { DrawerProps } from './Drawer';
-
-export { Segmented } from './Segmented';
-export type { SegmentedProps, SegmentedOption } from './Segmented';
-
 export { ToastViewport, toast } from './Toast';
 export type { ToastApi, ToastType } from './Toast';
-
-export { QrCode } from './QrCode';
-export type { QrCodeProps } from './QrCode';
-
-export { EmptyState } from './EmptyState';
-export type { EmptyStateProps } from './EmptyState';
 
 export { Spin } from './Spin';
 export type { SpinProps } from './Spin';

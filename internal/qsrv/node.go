@@ -27,10 +27,7 @@ const (
 	AuthPath      = "/qd/hello"
 	ConnectIPPath = "/qd/ip"
 	IPOverTCPPath = "/qd/ipt"
-	// RPCPath — управление одним запросом: путь несёт операцию, тело — её данные,
-	// ответ — её результат. Никакого своего кадрирования и шифрования поверх TLS:
-	// это осталось от UDP-датаграмм XDP-эпохи, где иначе было нельзя.
-	RPCPath = "/qd/rpc/"
+	RPCPath       = "/qd/rpc/"
 
 	defaultHops = 2
 )
@@ -43,17 +40,15 @@ type Grant struct {
 }
 
 type Tunables struct {
-	MaxStreams    int64
-	StreamWindow  uint64
-	MaxStreamWin  uint64
-	ConnWindow    uint64
-	MaxConnWin    uint64
-	IdleTimeout   time.Duration
-	KeepAlive     time.Duration
-	SocketBuffer  int
-	MTU           int
-	Brutal        int
-	MaxPacketSize uint16
+	MaxStreams   int64
+	StreamWindow uint64
+	MaxStreamWin uint64
+	ConnWindow   uint64
+	MaxConnWin   uint64
+	IdleTimeout  time.Duration
+	KeepAlive    time.Duration
+	SocketBuffer int
+	MTU          int
 }
 
 func DefaultTunables() Tunables {
@@ -85,7 +80,6 @@ type Config struct {
 	Peers  func() []Peer
 	Tune   func() Tunables
 
-	// Ask выполняет одну управляющую операцию. auth — кто спрашивает.
 	Ask func(op string, body []byte, auth string) (any, error)
 	Log func(format string, args ...any)
 }
@@ -129,13 +123,12 @@ type Node struct {
 	cfg   Config
 	tune  atomic.Pointer[Tunables]
 	pool  *pool
-	nat   *nat64
+	nat   *nat46
 	links *links
 	proxy *connectip.Proxy
 	tmpl  *uritemplate.Template
 	site  http.Handler
 
-	exitTag  atomic.Pointer[string]
 	transits atomic.Uint64
 	refused  atomic.Uint64
 
@@ -158,7 +151,7 @@ func New(cfg Config) *Node {
 	n := &Node{
 		cfg:   cfg,
 		pool:  newPool(cfg.Pool),
-		nat:   newNAT64(),
+		nat:   newNAT46(),
 		links: newLinks(cfg.Token, cfg.SelfID, cfg.Log),
 		proxy: &connectip.Proxy{},
 		tmpl:  Template(cfg.Authority, ConnectIPPath),
@@ -167,7 +160,11 @@ func New(cfg Config) *Node {
 
 		relaySessions: map[string]*relay.Session{},
 	}
-	n.Retune(n.tunables())
+	t := DefaultTunables()
+	if cfg.Tune != nil {
+		t = cfg.Tune()
+	}
+	n.Retune(t)
 	return n
 }
 
@@ -175,52 +172,11 @@ func Template(authority, path string) *uritemplate.Template {
 	return uritemplate.MustNew(fmt.Sprintf("https://%s%s", authority, path))
 }
 
-func (n *Node) tunables() Tunables {
-	if n.cfg.Tune == nil {
-		return DefaultTunables()
-	}
-	t := n.cfg.Tune()
-	base := DefaultTunables()
-	if t.MaxStreams <= 0 {
-		t.MaxStreams = base.MaxStreams
-	}
-	if t.StreamWindow == 0 {
-		t.StreamWindow = base.StreamWindow
-	}
-	if t.MaxStreamWin == 0 {
-		t.MaxStreamWin = base.MaxStreamWin
-	}
-	if t.ConnWindow == 0 {
-		t.ConnWindow = base.ConnWindow
-	}
-	if t.MaxConnWin == 0 {
-		t.MaxConnWin = base.MaxConnWin
-	}
-	if t.IdleTimeout == 0 {
-		t.IdleTimeout = base.IdleTimeout
-	}
-	if t.KeepAlive == 0 {
-		t.KeepAlive = base.KeepAlive
-	}
-	if t.SocketBuffer == 0 {
-		t.SocketBuffer = base.SocketBuffer
-	}
-	if t.MTU == 0 {
-		t.MTU = base.MTU
-	}
-	return t
-}
-
 func (n *Node) Retune(t Tunables) {
 	n.tune.Store(&t)
 }
 
-func (n *Node) Tunables() Tunables {
-	if held := n.tune.Load(); held != nil {
-		return *held
-	}
-	return DefaultTunables()
-}
+func (n *Node) Tunables() Tunables { return *n.tune.Load() }
 
 func (n *Node) SetToken(token string) {
 	n.cfg.Token = token
@@ -263,9 +219,6 @@ func (n *Node) Sessions() []Session {
 	return out
 }
 
-// seatsOf собирает сессии, которых касается запрос панели. Идентификатор там
-// один, а значит два: панель знает клиента по подписке, узел держит сессии по
-// местам, и у одной подписки мест столько, сколько у неё устройств.
 func (n *Node) seatsOf(id uint32, drop bool) []*live {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -426,15 +379,8 @@ func (n *Node) stopRelays() {
 	}
 }
 
-func (n *Node) admit(r *http.Request) (Grant, bool) {
-	if n.cfg.Verify == nil {
-		return Grant{}, false
-	}
-	return n.verified(r)
-}
-
 func (n *Node) carrier(r *http.Request) (Grant, bool) {
-	grant, ok := n.admit(r)
+	grant, ok := n.verified(r)
 	if !ok || grant.Session == 0 || grant.Seat == 0 {
 		return Grant{}, false
 	}
@@ -471,25 +417,6 @@ func (n *Node) serveAuth(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (n *Node) SetExitTag(tag string) {
-	n.exitTag.Store(&tag)
-}
-
-func (n *Node) ExitTag() string {
-	if held := n.exitTag.Load(); held != nil {
-		return *held
-	}
-	return ""
-}
-
-func (n *Node) Probe(ctx context.Context, endpoint string) (int, error) {
-	began := time.Now()
-	if _, err := n.links.to(where{endpoint, 0}).connect(ctx); err != nil {
-		return -1, err
-	}
-	return int(time.Since(began).Milliseconds()), nil
-}
-
 func (s *live) steer(route string) bool {
 	if s.heading() == route {
 		return false
@@ -507,11 +434,7 @@ func (s *live) shutFlows() {
 		}
 		return true
 	})
-	s.marks.Range(func(key, _ any) bool {
-		s.marks.Delete(key)
-		return true
-	})
-	s.marked.Store(0)
+	s.forgetStaleMarks()
 }
 
 func (s *live) heading() string {
@@ -541,8 +464,6 @@ func (s *live) noteMark(pkt []byte, mark uint64) {
 	s.shutFlow(port)
 }
 
-// shutFlow обрывает один UDP-флоу, чтобы следующий пакет открыл его заново уже
-// через новый выход. Стек и остальные флоу сессии не трогаются.
 func (s *live) shutFlow(port uint16) {
 	held, ok := s.flows.LoadAndDelete(port)
 	if !ok {
@@ -574,9 +495,6 @@ func (s *live) forgetStaleMarks() {
 
 const markCeiling = 4096
 
-// serveSite держит на том же порту обычный HTTPS. Узел говорит по QUIC, но порт
-// без TCP выдаёт себя: у настоящего сайта TCP отвечает всегда. Здесь он отдаёт
-// только decoy — служебные пути живут в HTTP/3 и снаружи не видны.
 func (n *Node) serveSite(ctx context.Context, quicSrv *http3.Server, served http.Handler) {
 	conf := n.cfg.TLS.Clone()
 	conf.NextProtos = []string{"h2", "http/1.1"}
@@ -597,9 +515,7 @@ func (n *Node) serveSite(ctx context.Context, quicSrv *http3.Server, served http
 			return newSessionContext(ctx, nil)
 		},
 		ReadHeaderTimeout: 10 * time.Second,
-		// Открытый 443 сканируют круглосуточно: чужой мусор вместо TLS — не наша
-		// ошибка, а в журнале он топит настоящие.
-		ErrorLog: log.New(io.Discard, "", 0),
+		ErrorLog:          log.New(io.Discard, "", 0),
 	}
 
 	go func() {
@@ -623,9 +539,7 @@ func (s *live) where() string {
 var v6Once sync.Once
 var v6Held bool
 
-// holdsV6 говорит, есть ли у машины путь в IPv6. Спрашиваем один раз: адреса
-// интерфейсов за время жизни узла не меняются.
-func (n *Node) holdsV6() bool {
+func HoldsV6() bool {
 	v6Once.Do(func() {
 		addrs, err := net.InterfaceAddrs()
 		if err != nil {

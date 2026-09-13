@@ -242,7 +242,6 @@ export default function ClientsPage() {
     const expired = (row.expiryTime ?? 0) > 0 && (row.expiryTime ?? 0) <= now;
     if (expired) return 'depleted';
     if (!row.enable) return 'deactive';
-    // No traffic quota exists in the model, so only the clock can end a client.
     const nearExpiry = (row.expiryTime ?? 0) > 0 && (row.expiryTime ?? 0) - now < (expireDiff || 0);
     if (nearExpiry) return 'expiring';
     return 'active';
@@ -380,8 +379,6 @@ export default function ClientsPage() {
               <Tooltip title={t('pages.clients.clientInfo')}><Button size="sm" icon={<InfoCircleOutlined />} onClick={() => onShowInfo(record)} /></Tooltip>
               <Tooltip title={t('pages.inbounds.resetTraffic')}><Button size="sm" icon={<RetweetOutlined />} onClick={() => onResetTraffic(record)} /></Tooltip>
               <Tooltip title={t('edit')}><Button size="sm" icon={<EditOutlined />} onClick={() => onEdit(record)} /></Tooltip>
-              {/* Plain until pointed at: a row of four buttons should not have
-                  one shouting red among them. */}
               <Tooltip title={t('delete')}>
                 <Button size="sm" className="row-delete" icon={<DeleteOutlined />} onClick={() => onDelete(record)} />
               </Tooltip>
@@ -400,9 +397,6 @@ export default function ClientsPage() {
           const bucket = clientBucket(record);
           const lastOnline = record.traffic?.lastOnline ?? 0;
           const title = `${t('lastOnline')}: ${lastOnline > 0 ? IntlUtil.formatDate(lastOnline, datepicker) : '-'}`;
-          // Every state carries the same dot so the column reads down one line;
-          // it inherits the pill's own colour, which keeps it visible on the
-          // filled pills where a green dot on green would vanish.
           const dot = <span className="state-dot" />;
           if (bucket === 'depleted') return <Tooltip title={title}><Tag tone="danger">{dot}{t('depleted')}</Tag></Tooltip>;
           if (record.enable && isOnline(record.email)) return <Tag tone="success">{dot}{t('pages.clients.online')}</Tag>;
@@ -467,8 +461,6 @@ export default function ClientsPage() {
     );
   }
 
-  // Header clicks can land on a column the preset list does not cover — leave
-  // the Select unset in that case so it falls back to its placeholder.
   const presetSortValue = useMemo(() => {
     const value = sortValueFor(sortColumn, sortOrder);
     return SORT_OPTIONS.some((o) => o.value === value) ? value : undefined;
@@ -542,9 +534,6 @@ export default function ClientsPage() {
             </div>
 
             <Card flush>
-              {/* One row: what you do, what you look for, and where you are in
-                  the list — the search and sort had a strip of their own with
-                  nothing else on it. */}
               <div className={`card-toolbar${isMobile ? ' is-stacked' : ''}`}>
                 <div className="toolbar-search">
                   <SearchOutlined className="toolbar-search__icon" />
@@ -567,8 +556,6 @@ export default function ClientsPage() {
 
               {(activeCount > 0 || debouncedSearch.trim().length > 0) && (
                 <div className="filter-chips">
-                  {/* Both belong to the filtering, so they sit on the filter row
-                      rather than among the controls above. */}
                   <span className="filter-count">{t('pages.clients.showingCount', { shown: filtered, total })}</span>
                   {activeCount > 0 && (
                     <Button size="sm" onClick={() => setFilters(emptyFilters())}>

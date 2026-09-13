@@ -45,17 +45,16 @@ var (
 )
 
 const (
-	wmDestroy     = 0x0002
-	wmCommand     = 0x0111
-	wmLButtonUp   = 0x0202
-	wmRButtonUp   = 0x0205
-	wmTrayIcon    = 0x0400 + 1
-	wmSetStatus   = 0x0400 + 2
-	wmCloseTray   = 0x0400 + 3
-	wmNull        = 0x0000
-	csHRedraw     = 0x0002
-	idiApplication = 32512
-	idcArrow      = 32512
+	wmDestroy   = 0x0002
+	wmCommand   = 0x0111
+	wmLButtonUp = 0x0202
+	wmRButtonUp = 0x0205
+	wmTrayIcon  = 0x0400 + 1
+	wmSetStatus = 0x0400 + 2
+	wmCloseTray = 0x0400 + 3
+	wmNull      = 0x0000
+	csHRedraw   = 0x0002
+	idcArrow    = 32512
 
 	nimAdd    = 0x00000000
 	nimModify = 0x00000001
@@ -69,7 +68,7 @@ const (
 	mfSeparator = 0x00000800
 	mfGrayed    = 0x00000001
 
-	tpmLeftAlign  = 0x0000
+	tpmLeftAlign   = 0x0000
 	tpmRightButton = 0x0002
 
 	idConnect    = 1001
@@ -133,21 +132,21 @@ type wndClassEx struct {
 }
 
 type notifyIconData struct {
-	size            uint32
-	hWnd            uintptr
-	uID             uint32
-	uFlags          uint32
-	uCallbackMsg    uint32
-	hIcon           uintptr
-	szTip           [128]uint16
-	dwState         uint32
-	dwStateMask     uint32
-	szInfo          [256]uint16
-	uVersion        uint32
-	szInfoTitle     [64]uint16
-	dwInfoFlags     uint32
-	guidItem        [16]byte
-	hBalloonIcon    uintptr
+	size         uint32
+	hWnd         uintptr
+	uID          uint32
+	uFlags       uint32
+	uCallbackMsg uint32
+	hIcon        uintptr
+	szTip        [128]uint16
+	dwState      uint32
+	dwStateMask  uint32
+	szInfo       [256]uint16
+	uVersion     uint32
+	szInfoTitle  [64]uint16
+	dwInfoFlags  uint32
+	guidItem     [16]byte
+	hBalloonIcon uintptr
 }
 
 type bitmapInfoHeader struct {
@@ -195,7 +194,8 @@ func (i *Icon) loop(ready chan<- error) {
 	defer close(i.done)
 
 	instance, _, _ := procGetModuleHandle.Call(0)
-	className := syscall.StringToUTF16Ptr("QuicDiverTray")
+	className, _ := syscall.UTF16PtrFromString("QuicDiverTray")
+	title, _ := syscall.UTF16PtrFromString("qd")
 	cursor, _, _ := procLoadCursor.Call(0, idcArrow)
 
 	class := wndClassEx{
@@ -215,7 +215,7 @@ func (i *Icon) loop(ready chan<- error) {
 	hwnd, _, err := procCreateWindowEx.Call(
 		0,
 		uintptr(unsafe.Pointer(className)),
-		uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("qd"))),
+		uintptr(unsafe.Pointer(title)),
 		0, 0, 0, 0, 0, 0, 0, instance, 0)
 	if hwnd == 0 {
 		ready <- fmt.Errorf("create tray window: %w", err)
@@ -274,7 +274,7 @@ func (i *Icon) notifyData(flags uint32) notifyIconData {
 }
 
 func copyTip(dst *[128]uint16, text string) {
-	encoded := syscall.StringToUTF16(text)
+	encoded, _ := syscall.UTF16FromString(text)
 	if len(encoded) > len(dst) {
 		encoded = encoded[:len(dst)]
 		encoded[len(encoded)-1] = 0
@@ -367,8 +367,8 @@ func (i *Icon) showMenu() {
 }
 
 func appendItem(hmenu, flags uintptr, id uint32, text string) {
-	procAppendMenu.Call(hmenu, flags, uintptr(id),
-		uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(text))))
+	label, _ := syscall.UTF16PtrFromString(text)
+	procAppendMenu.Call(hmenu, flags, uintptr(id), uintptr(unsafe.Pointer(label)))
 }
 
 func (i *Icon) SetStatus(s Status) {

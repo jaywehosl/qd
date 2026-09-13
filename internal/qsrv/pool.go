@@ -6,17 +6,13 @@ import (
 	"sync"
 )
 
-var ErrPoolFull = errors.New("qsrv: no address left in the pool")
+var errPoolFull = errors.New("qsrv: no address left in the pool")
 
 type pool struct {
-	mu    sync.Mutex
-	base  netip.Prefix
-	next  netip.Addr
-	taken map[netip.Addr]struct{}
-	// held — какой адрес у какой сессии был в прошлый раз. Клиент подключается
-	// заново десятки раз за вечер (переподключение, гонка входов, смена сети), и
-	// без этой памяти каждый раз выдавался бы новый адрес: журнал адресов пух бы
-	// на ровном месте, а один клиент выглядел бы двадцатью.
+	mu      sync.Mutex
+	base    netip.Prefix
+	next    netip.Addr
+	taken   map[netip.Addr]struct{}
 	mine    map[uint32]netip.Addr
 	streams netip.Prefix
 }
@@ -55,7 +51,6 @@ func (p *pool) stream(seat uint32) netip.Prefix {
 	return netip.PrefixFrom(addr, addr.BitLen())
 }
 
-// take выдаёт адрес сессии: тот же, что и раньше, если он свободен.
 func (p *pool) take(session uint32) (netip.Prefix, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -86,7 +81,7 @@ func (p *pool) take(session uint32) (netip.Prefix, error) {
 		}
 		return netip.PrefixFrom(addr, addr.BitLen()), nil
 	}
-	return netip.Prefix{}, ErrPoolFull
+	return netip.Prefix{}, errPoolFull
 }
 
 func (p *pool) give(prefix netip.Prefix) {

@@ -1,10 +1,3 @@
-// Package costream — net.Conn поверх CONNECT-стрима: чтение из тела ответа,
-// запись в тело запроса. Один и тот же стрим несёт и TCP-флоу (байты как есть),
-// и UDP-флоу (каждая датаграмма с 2-байтовой длиной впереди).
-//
-// Живёт отдельно от обеих сторон намеренно: узел открывает такие стримы к
-// соседу, клиент — к узлу, и раньше это были две почти одинаковые копии, в
-// одной из которых UDP-конец забывал сообщить о закрытии.
 package costream
 
 import (
@@ -43,8 +36,6 @@ type Stream struct {
 	dst netip.AddrPort
 }
 
-// NewStream — TCP-флоу. done зовётся ровно один раз при закрытии: по нему
-// вызывающий считает, сколько флоу ещё держат связь.
 func NewStream(r io.ReadCloser, w io.WriteCloser, cancel context.CancelFunc, dst netip.AddrPort, done func()) *Stream {
 	return &Stream{shared: shared{r: r, w: w, cancel: cancel, done: done}, dst: dst}
 }
@@ -52,8 +43,6 @@ func NewStream(r io.ReadCloser, w io.WriteCloser, cancel context.CancelFunc, dst
 func (s *Stream) Read(b []byte) (int, error)  { return s.r.Read(b) }
 func (s *Stream) Write(b []byte) (int, error) { return s.w.Write(b) }
 
-// CloseWrite закрывает только запись (полу-закрытие TCP): та сторона увидит EOF
-// и дошлёт остаток ответа.
 func (s *Stream) CloseWrite() error { return s.w.Close() }
 
 func (s *Stream) Close() error { return s.shut() }
@@ -61,8 +50,6 @@ func (s *Stream) Close() error { return s.shut() }
 func (s *Stream) LocalAddr() net.Addr  { return &net.TCPAddr{} }
 func (s *Stream) RemoteAddr() net.Addr { return net.TCPAddrFromAddrPort(s.dst) }
 
-// Дедлайны на CONNECT-стриме не нужны: временем управляет контекст стрима и его
-// закрытие.
 func (s *Stream) SetDeadline(time.Time) error      { return nil }
 func (s *Stream) SetReadDeadline(time.Time) error  { return nil }
 func (s *Stream) SetWriteDeadline(time.Time) error { return nil }

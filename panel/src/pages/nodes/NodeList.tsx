@@ -48,7 +48,6 @@ interface NodeRow extends NodeRecord {
   key: number;
 }
 
-/** Inline horizontal stack (replaces antd <Space>). */
 function HStack({ gap = 8, children }: { gap?: number; children: ReactNode }) {
   return <span style={{ display: 'inline-flex', alignItems: 'center', gap }}>{children}</span>;
 }
@@ -229,9 +228,6 @@ export default function NodeList({
       header: () => t('pages.nodes.revision'),
       cell: ({ row }) => {
         const applied = row.original.appliedRevision || 0;
-        // Drift is measured against what the panel last published, not against
-        // the node's own `revision` — a node that never took the push reports a
-        // stale pair and would otherwise look consistent with itself.
         if (!published) return <Tag>{applied || '—'}</Tag>;
         if (!applied) return <Tag tone="warning">{t('pages.nodes.neverApplied')}</Tag>;
         if (applied >= published) return <Tag tone="success">{applied}</Tag>;

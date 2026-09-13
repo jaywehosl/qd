@@ -17,12 +17,6 @@ export type { RoutingRole, RoutingRule, RoutingState, RunningProcess };
 const KEY = ['client', 'routing'];
 const JSON_HEADERS = { headers: { 'Content-Type': 'application/json' } } as const;
 
-/**
- * Per-process routing rules. Unlike the network draft these never leave the
- * machine, so they apply as they are set rather than waiting on a Save — the
- * same rule panel preferences follow. Every write sends the whole set: it is a
- * handful of rows, and a full replace cannot half-apply.
- */
 export function useClientRouting() {
   const queryClient = useQueryClient();
 
@@ -67,8 +61,6 @@ export function useClientRouting() {
 
   const add = useCallback((rule: { process: string; path?: string; role: RoutingRole }) => {
     if (!state) return Promise.resolve(null);
-    // Same target twice is an edit, not a second row — otherwise the list grows
-    // rows that can never both win.
     const target = (r: { process: string; path?: string }) => (r.path || r.process).toLowerCase();
     const kept = state.rules.filter((r) => target(r) !== target(rule));
     return write([...kept, { id: -1, ...rule }], state.defaultRole);

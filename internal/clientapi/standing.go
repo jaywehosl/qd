@@ -1,12 +1,13 @@
 package clientapi
 
 import (
-	"fmt"
+	"errors"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/jaywehosl/quic-diver/internal/clientstate"
-	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
+	"github.com/jaywehosl/quic-diver/internal/qsrv/uplink/relay"
 )
 
 type Entrypoint struct {
@@ -14,11 +15,6 @@ type Entrypoint struct {
 	Name    string `json:"name"`
 	Address string `json:"address"`
 	Port    int    `json:"port"`
-}
-
-type RelayLink struct {
-	Weblink   string `json:"weblink"`
-	Authority string `json:"authority"`
 }
 
 type Standing struct {
@@ -31,7 +27,7 @@ type Standing struct {
 	RefreshMinutes int          `json:"refreshMinutes"`
 	Denied         string       `json:"refused"`
 	Entrypoints    []Entrypoint `json:"entrypoints"`
-	Relays         []RelayLink  `json:"relays"`
+	Relays         []relay.Link `json:"relays"`
 	Admin          bool         `json:"admin"`
 	FixedRate      int          `json:"fixedRate"`
 	Peers          []string     `json:"peers"`
@@ -60,69 +56,103 @@ func claim(me Device, token string) map[string]any {
 	}
 }
 
-// Asker — способ задать узлу один вопрос. За ним стоит общий QUIC-диалер: свои
-// кадры, номера запросов и таблица ожидающих ответов ушли вместе с UDP.
 type Asker interface {
 	Ask(endpoint, op, auth string, body any, out any) error
 }
 
-func Announce(op string, nodes []clientstate.Node, key *qdcrypt.Key, token string, me Device,
-	wire Asker) int {
+func Announce(op string, nodes []clientstate.Node, token string, me Device, wire Asker) int {
 	if wire == nil || token == "" {
 		return 0
 	}
 
+	body := claim(me, token)
 	var heard atomic.Int32
 	var wg sync.WaitGroup
 	for _, n := range nodes {
 		wg.Add(1)
 		go func(where string) {
 			defer wg.Done()
-			if err := wire.Ask(where, op, token, claim(me, token), nil); err == nil {
+			if err := wire.Ask(where, op, token, body, nil); err == nil {
 				heard.Add(1)
 			}
-		}(fmt.Sprintf("%s:%d", n.Address, n.Port))
+		}(n.Endpoint())
 	}
 	wg.Wait()
 	return int(heard.Load())
 }
 
-func AskStanding(nodes []clientstate.Node, key *qdcrypt.Key, token string, me Device,
-	wire Asker) (Standing, bool) {
-	if wire == nil || token == "" || len(nodes) == 0 {
-		return Standing{}, false
+func (a *API) sweep() (int, Standing) {
+	sub, err := a.db.Subscription()
+	if err != nil || !sub.Imported {
+		return 0, Standing{}
+	}
+	nodes, err := a.db.Nodes()
+	wire := a.platform.Wire()
+	if err != nil || wire == nil || len(nodes) == 0 {
+		return 0, Standing{}
 	}
 
-	type reply struct {
+	type result struct {
+		id       int
+		latency  int
 		standing Standing
-		heard    bool
 	}
-	answers := make(chan reply, len(nodes))
+	results := make(chan result, len(nodes))
+	body := claim(a.platform.Identify(), sub.Key)
 
 	for _, n := range nodes {
-		go func(where string) {
+		go func(n clientstate.Node) {
 			var answer Standing
-			if err := wire.Ask(where, "whoami", token, claim(me, token), &answer); err != nil {
-				answers <- reply{}
+			began := time.Now()
+			if err := wire.Ask(n.Endpoint(), "whoami", sub.Key, body, &answer); err != nil {
+				results <- result{id: n.ID, latency: -1}
 				return
 			}
-			answers <- reply{standing: answer, heard: true}
-		}(fmt.Sprintf("%s:%d", n.Address, n.Port))
+			results <- result{n.ID, int(time.Since(began).Milliseconds()), answer}
+		}(n)
 	}
 
-	var fallback Standing
-	heard := false
+	reached := 0
+	var best Standing
+	answered := make(map[int]bool, len(nodes))
+	deadline := time.After(sweepWait)
+collect:
 	for range nodes {
-		got := <-answers
-		if !got.heard {
-			continue
-		}
-		if got.standing.Known {
-			return got.standing, true
-		}
-		if !heard {
-			fallback, heard = got.standing, true
+		select {
+		case r := <-results:
+			answered[r.id] = true
+			a.db.MarkReach(r.id, r.latency, r.latency >= 0)
+			if r.latency < 0 {
+				continue
+			}
+			if reached == 0 || (r.standing.Known && !best.Known) {
+				best = r.standing
+			}
+			reached++
+		case <-deadline:
+			break collect
 		}
 	}
-	return fallback, heard
+	for _, n := range nodes {
+		if !answered[n.ID] {
+			a.db.MarkReach(n.ID, -1, false)
+		}
+	}
+	return reached, best
+}
+
+const sweepWait = 4 * time.Second
+
+func (a *API) take() (int, error) {
+	reached, answer := a.sweep()
+	if reached == 0 {
+		return 0, nil
+	}
+	a.adoptNetworkDefaults(answer)
+	if answer.Refused() {
+		a.platform.Stop()
+		a.db.Notify("error", answer.Why(), time.Now().UnixMilli())
+		return reached, errors.New(answer.Why())
+	}
+	return reached, nil
 }

@@ -1,37 +1,30 @@
 import { z } from 'zod';
 
-export const CurTotalInputSchema = z.object({
+const CurTotalInputSchema = z.object({
   current: z.number().optional(),
   total: z.number().optional(),
 });
 
-export const NetIOSchema = z.object({
+const NetIOSchema = z.object({
   up: z.number(),
   down: z.number(),
 });
 
-export const NetTrafficSchema = z.object({
+const NetTrafficSchema = z.object({
   sent: z.number(),
   recv: z.number(),
 });
 
-export const PublicIPSchema = z.object({
+const PublicIPSchema = z.object({
   ipv4: z.union([z.string(), z.number()]),
   ipv6: z.union([z.string(), z.number()]),
 });
 
-export const AppStatsSchema = z.object({
+const AppStatsSchema = z.object({
   threads: z.number(),
   mem: z.number(),
   uptime: z.number(),
 });
-
-export const XrayInfoSchema = z.object({
-  state: z.string(),
-  errorMsg: z.string(),
-  version: z.string(),
-  color: z.string(),
-}).partial();
 
 export const StatusSchema = z.object({
   cpu: z.number().optional(),
@@ -50,7 +43,6 @@ export const StatusSchema = z.object({
   uptime: z.number().optional(),
   appUptime: z.number().optional(),
   appStats: AppStatsSchema.optional(),
-  xray: XrayInfoSchema.optional(),
   nodes: z.number().optional(),
   nodesOnline: z.number().optional(),
 });

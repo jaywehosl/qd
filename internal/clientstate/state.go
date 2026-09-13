@@ -5,10 +5,12 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
 
+	"github.com/jaywehosl/quic-diver/internal/qsrv/uplink/relay"
 	_ "modernc.org/sqlite"
 )
 
@@ -42,7 +44,6 @@ func Open(path string) (*DB, error) {
 }
 
 func (d *DB) Close() error { return d.sql.Close() }
-func (d *DB) SQL() *sql.DB { return d.sql }
 
 type Subscription struct {
 	URI         string
@@ -73,7 +74,7 @@ func (d *DB) Subscription() (Subscription, error) {
 	return s, nil
 }
 
-func (d *DB) RelayLinks() []LinkRelay {
+func (d *DB) RelayLinks() []relay.Link {
 	sub, err := d.Subscription()
 	if err != nil || sub.URI == "" {
 		return nil
@@ -128,6 +129,8 @@ type Node struct {
 	Reachable bool
 	Selected  bool
 }
+
+func (n Node) Endpoint() string { return net.JoinHostPort(n.Address, strconv.Itoa(n.Port)) }
 
 func (d *DB) Nodes() ([]Node, error) {
 	rows, err := d.sql.Query(
@@ -205,22 +208,16 @@ type Settings struct {
 	RatePinned bool `json:"ratePinned"`
 }
 
-func DefaultSettings() Settings {
+func defaultSettings() Settings {
 	return Settings{
 		RefreshMinutes:     60,
-		RefreshPinned:      false,
-		Autostart:          false,
 		AutostartBehaviour: "tray",
 		ManualBehaviour:    "open",
-		Egress:             false,
-		Adblock:            false,
-		FixedRate:          0,
-		RatePinned:         false,
 	}
 }
 
 func (d *DB) Settings() (Settings, error) {
-	s := DefaultSettings()
+	s := defaultSettings()
 
 	rows, err := d.sql.Query(`SELECT key, value FROM settings`)
 	if err != nil {

@@ -8,15 +8,8 @@ import { useAllSettings } from '@/api/queries/useAllSettings';
 import { AllSettingSchema } from '@/schemas/setting';
 import { SettingsControllerContext, type SettingsControllerValue } from '@/layouts/settings-controller-context';
 
-// The "Settings Implementation Plan" diff modal (PlanVerificationModal) is a
-// bespoke frontend feature of ours (not from upstream 3x-ui). It's kept but
-// OFF by default — Save applies directly. This flag will later be driven by a
-// frontend-only settings store (planned: a layer of our own UI prefs on top of
-// the backend settings). Flip to true to re-enable the pre-save diff review.
 const PLAN_VERIFICATION_ENABLED = false;
 
-// Nothing the panel exposes can lock the operator out any more — it serves no
-// port of its own — so no save needs the danger-confirm gate.
 const ACCESS_CRITICAL_FIELDS: { key: string; label: string }[] = [];
 
 export function SettingsControllerProvider({ children }: { children: ReactNode }) {
@@ -47,7 +40,6 @@ export function SettingsControllerProvider({ children }: { children: ReactNode }
     }
   }, [saveAll, setSpinning]);
 
-  // Access-critical fields whose draft value differs from the saved server value.
   const changedDangerFields = useMemo(() => {
     if (!originalSetting) return [] as string[];
     const orig = originalSetting as unknown as Record<string, unknown>;
@@ -69,9 +61,6 @@ export function SettingsControllerProvider({ children }: { children: ReactNode }
       message.error(`${fieldPath}: ${t(msgKey, { defaultValue: msgKey })}`);
       return;
     }
-    // A Save that touches port/path/domain/cert (panel or sub) must clear the
-    // hard confirmation gate first — those can lock the operator out behind the
-    // reverse proxy.
     if (changedDangerFields.length > 0) {
       setShowDanger(true);
       return;
@@ -79,9 +68,6 @@ export function SettingsControllerProvider({ children }: { children: ReactNode }
     proceedSave();
   }, [allSetting, message, t, changedDangerFields, proceedSave]);
 
-  // Panel preferences never leave this machine, so they persist as soon as they
-  // settle. The header belongs to the network draft — the state that has to be
-  // handed to the nodes deliberately.
   useEffect(() => {
     if (saveDisabled) return undefined;
     const id = window.setTimeout(() => { requestSave(); }, 600);

@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"net/netip"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -83,56 +84,36 @@ func (g *gate) verify(raw string) (qsrv.Grant, bool) {
 }
 
 func tunablesFrom(s store.NetworkSettings) qsrv.Tunables {
-	t := qsrv.DefaultTunables()
-
-	if s.MaxStreams > 0 {
-		t.MaxStreams = int64(s.MaxStreams)
+	return qsrv.Tunables{
+		MaxStreams:   int64(s.MaxStreams),
+		StreamWindow: uint64(s.StreamWindow) << 10,
+		MaxStreamWin: uint64(s.MaxStreamWindow) << 10,
+		ConnWindow:   uint64(s.ConnWindow) << 10,
+		MaxConnWin:   uint64(s.MaxConnWindow) << 10,
+		IdleTimeout:  time.Duration(s.IdleSeconds) * time.Second,
+		KeepAlive:    time.Duration(s.KeepAliveSeconds) * time.Second,
+		SocketBuffer: s.SocketBuffer << 10,
+		MTU:          s.MTU,
 	}
-	if s.StreamWindow > 0 {
-		t.StreamWindow = uint64(s.StreamWindow) << 10
-	}
-	if s.MaxStreamWindow > 0 {
-		t.MaxStreamWin = uint64(s.MaxStreamWindow) << 10
-	}
-	if s.ConnWindow > 0 {
-		t.ConnWindow = uint64(s.ConnWindow) << 10
-	}
-	if s.MaxConnWindow > 0 {
-		t.MaxConnWin = uint64(s.MaxConnWindow) << 10
-	}
-	if s.IdleSeconds > 0 {
-		t.IdleTimeout = time.Duration(s.IdleSeconds) * time.Second
-	}
-	if s.KeepAliveSeconds > 0 {
-		t.KeepAlive = time.Duration(s.KeepAliveSeconds) * time.Second
-	}
-	if s.SocketBuffer > 0 {
-		t.SocketBuffer = s.SocketBuffer << 10
-	}
-	if s.MTU > 0 {
-		t.MTU = s.MTU
-	}
-	t.Brutal = s.BrutalMbit
-	return t
 }
 
 func peersFrom(db *store.DB, selfID int) func() []qsrv.Peer {
 	return func() []qsrv.Peer {
-		network, err := db.LoadState()
+		nodes, err := db.Nodes()
 		if err != nil {
 			log.Printf("peers      the network database will not read: %v", err)
 			return nil
 		}
 
 		out := []qsrv.Peer{}
-		for _, n := range network.Nodes {
+		for _, n := range nodes {
 			if n.ID == selfID || !n.Enable || n.Role != netstate.RoleEgress || n.Address == "" {
 				continue
 			}
 			out = append(out, qsrv.Peer{
 				ID:       n.UUID,
 				Tag:      n.Tag,
-				Endpoint: fmt.Sprintf("%s:%d", n.Address, n.Port),
+				Endpoint: net.JoinHostPort(n.Address, strconv.Itoa(n.Port)),
 			})
 		}
 		return out
@@ -155,13 +136,7 @@ func loadTLS(certFile, keyFile, authority string) (*tls.Config, error) {
 }
 
 func poolOf(text string) netip.Prefix {
-	if text == "" {
-		return netip.MustParsePrefix("10.7.0.0/16")
-	}
-	p, err := netip.ParsePrefix(text)
-	if err != nil {
-		return netip.MustParsePrefix("10.7.0.0/16")
-	}
+	p, _ := netip.ParsePrefix(text)
 	return p
 }
 

@@ -17,9 +17,9 @@ import (
 	"github.com/jaywehosl/quic-diver/internal/qcli"
 	"github.com/jaywehosl/quic-diver/internal/qcli/guard"
 	"github.com/jaywehosl/quic-diver/internal/qcli/packet"
-	windivert "github.com/jaywehosl/quic-diver/internal/qcli/wdsource"
+	"github.com/jaywehosl/quic-diver/internal/qcli/windivert"
 	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
-	"github.com/jaywehosl/quic-diver/internal/qwire"
+	"github.com/jaywehosl/quic-diver/internal/qsrv/uplink/relay"
 )
 
 type tunnelConfig struct {
@@ -52,12 +52,9 @@ type tunnel struct {
 	liveStop context.CancelFunc
 	dns      *clientdns.Resolver
 
-	assigned  netip.Prefix
-	serverIP  string
-	endpoint  string
-	sessionID uint32
-	since     time.Time
-	lastErr   error
+	endpoint string
+	since    time.Time
+	lastErr  error
 }
 
 var errAlreadyUp = errors.New("tunnel is already up")
@@ -74,30 +71,6 @@ func (t *tunnel) Running() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.running
-}
-
-func (t *tunnel) Since() time.Time {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.since
-}
-
-func (t *tunnel) MTU() int {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.cfg.MTU
-}
-
-func (t *tunnel) SetMTU(mtu int) {
-	t.mu.Lock()
-	t.cfg.MTU = mtu
-	t.mu.Unlock()
-}
-
-func (t *tunnel) ServerIP() string {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.serverIP
 }
 
 func (t *tunnel) Failed() bool {
@@ -118,8 +91,6 @@ func (t *tunnel) DNS() *clientdns.Resolver {
 	return t.dns
 }
 
-func (t *tunnel) ReclaimDNS() {}
-
 func (t *tunnel) servesDNS() bool { return t.cfg.DNS && t.cfg.Key != nil }
 
 func (t *tunnel) token() string {
@@ -131,7 +102,7 @@ func (t *tunnel) token() string {
 	return hex.EncodeToString(t.cfg.Key[:])
 }
 
-func (t *tunnel) Start(servers []string, relays []qcli.RelayLink, sessionID uint32) error {
+func (t *tunnel) Start(servers []string, relays []relay.Link, sessionID uint32) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -142,11 +113,7 @@ func (t *tunnel) Start(servers []string, relays []qcli.RelayLink, sessionID uint
 		return fmt.Errorf("no network key yet")
 	}
 
-	wr := make([]qwire.RelayLink, 0, len(relays))
-	for _, r := range relays {
-		wr = append(wr, qwire.RelayLink{Weblink: r.Weblink, Authority: r.Authority})
-	}
-	nodeTalk.SetRelays(wr)
+	nodeTalk.SetRelays(relays)
 
 	dll, err := unpackDriver()
 	if err != nil {
@@ -187,8 +154,6 @@ func (t *tunnel) Start(servers []string, relays []qcli.RelayLink, sessionID uint
 			t.cfg.Lost()
 		}
 	}
-	// Фильтр захвата строится под уже поднятый туннель: в нём должны стоять
-	// адреса узлов, а их называет только выигравший вход.
 	plan.Source = func(ctx context.Context, live *qcli.Tunnel) (packet.Source, error) {
 		filter := windivert.BuildFilter(windivert.CaptureConfig{
 			TCP: true, UDP: true, DNS: t.servesDNS(),
@@ -210,14 +175,6 @@ func (t *tunnel) Start(servers []string, relays []qcli.RelayLink, sessionID uint
 		return err
 	}
 
-	serverIP := ""
-	for _, p := range held.Live.Peers() {
-		if p.Is4() {
-			serverIP = p.String()
-			break
-		}
-	}
-
 	t.wg.Add(1)
 	go func() {
 		defer t.wg.Done()
@@ -229,10 +186,7 @@ func (t *tunnel) Start(servers []string, relays []qcli.RelayLink, sessionID uint
 	t.stop = held.Halt
 	t.live = held.Live
 	t.liveStop = held.Quit
-	t.assigned = held.Assigned
-	t.serverIP = serverIP
 	t.endpoint = held.Endpoint
-	t.sessionID = sessionID
 	t.since = time.Now()
 	t.lastErr = nil
 	t.dns = held.DNS
@@ -297,10 +251,6 @@ func addressesOf(host string) []netip.Addr {
 const lookupWait = 3 * time.Second
 
 func (t *tunnel) Stop() error {
-	if t.cfg.Announce != nil {
-		go t.cfg.Announce("bye")
-	}
-
 	t.mu.Lock()
 	if !t.running {
 		t.mu.Unlock()
@@ -314,6 +264,10 @@ func (t *tunnel) Stop() error {
 	t.lastErr = nil
 	t.mu.Unlock()
 
+	if t.cfg.Announce != nil {
+		go t.cfg.Announce("bye")
+	}
+
 	liveTunnel.Store(nil)
 	close(stop)
 	if cancel != nil {
@@ -322,15 +276,10 @@ func (t *tunnel) Stop() error {
 	if dns != nil {
 		dns.Interrupt()
 	}
-	// Закрытие QUIC шлёт прощание и ждёт ядро: на мёртвой сети это может стоить
-	// десятков секунд, а кнопка «Отключиться» столько ждать не должна.
 	if live != nil {
 		go live.Close()
 	}
 
-	// Ждём остановку, но не бесконечно: кнопка «Отключиться» не должна зависеть
-	// ни от узла, ни от того, разгрёб ли очереди датапуть. Не уложились — отпускаем
-	// интерфейс, остатки дойдут сами.
 	done := make(chan struct{})
 	go func() {
 		t.wg.Wait()
@@ -361,8 +310,6 @@ func holdToken(key *qdcrypt.Key) {
 	nodeTalk.SetToken(hex.EncodeToString(key[:]))
 }
 
-func (t *tunnel) Release() { t.Stop() }
-
 func unpackDriver() (string, error) {
 	dir, err := windivert.DefaultDir()
 	if err != nil {
@@ -375,7 +322,6 @@ func unpackDriver() (string, error) {
 	return dll, nil
 }
 
-// ServerName — точка входа, через которую туннель сейчас поднят.
 func (t *tunnel) ServerName() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()

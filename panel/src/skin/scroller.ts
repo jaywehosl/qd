@@ -2,12 +2,9 @@ const HIDE_AFTER = 1400;
 const MIN_THUMB = 10;
 const THUMB_SHARE = 0.3;
 const THUMB_INSET = 2;
-// The rail is a miniature of the scroll, not a full-height gutter: it occupies
-// this share of the area it belongs to, centred on its right edge.
 const RAIL_SHARE = 0.2;
 const RAIL_MIN = 64;
 
-// Everything the skin scrolls with its native bar hidden.
 const AREAS = '.ds-dialog__body, .notif-list, .rt-picker__list, .log-body, .log-container, .ds-table-wrap';
 const AREAS_X = '.deploy-script__text';
 
@@ -35,9 +32,6 @@ function readWindow(): Area {
 
 function readElement(el: HTMLElement, axis: Axis): Area {
   const box = el.getBoundingClientRect();
-  // A list inside a dialog runs the full width of its body, so a rail on the
-  // list's own edge would sit on top of the rows. The dialog's edge is the one
-  // the rail slides out from — its padding leaves the content clear.
   const frame = axis === 'y'
     ? el.closest('.ds-dialog__content')?.getBoundingClientRect()
     : el.closest('.deploy-script')?.getBoundingClientRect();
@@ -64,8 +58,6 @@ function scroller(target: HTMLElement | null, axis: Axis = 'y') {
     else target.scrollLeft = to;
   };
 
-  // Three layers: a clip that hides everything past the edge, the track that
-  // slides out of it, and the thumb riding the track.
   const rail = document.createElement('div');
   rail.className = axis === 'y' ? 'qd-scroll' : 'qd-scroll qd-scroll--x';
 
@@ -160,7 +152,7 @@ function scroller(target: HTMLElement | null, axis: Axis = 'y') {
     if (!dragging) return;
     dragging = false;
     rail.classList.remove('is-held');
-    try { thumb.releasePointerCapture(e.pointerId); } catch { /* уже отпущен */ }
+    try { thumb.releasePointerCapture(e.pointerId); } catch {}
     show();
   };
 
@@ -177,8 +169,6 @@ export function mountScroller() {
   const page = scroller(null);
   page.rail.id = 'qd-scroll';
 
-  // Modals and lists come and go, so each one gets its own rail when it appears
-  // and loses it when it leaves.
   const held = new Map<HTMLElement, ReturnType<typeof scroller>>();
 
   const sweep = () => {

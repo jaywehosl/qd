@@ -31,9 +31,7 @@ export const ClientStateSchema = z.object({
 }).loose();
 
 export const RefreshResultSchema = z.object({
-  changed: z.boolean().optional(),
   nodes: z.number().optional(),
-  reconnected: z.boolean().optional(),
 }).loose();
 
 export type ClientState = z.infer<typeof ClientStateSchema>;

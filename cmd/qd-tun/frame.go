@@ -130,9 +130,6 @@ func chromeProc(handle uintptr, message uint32, wParam, lParam uintptr) uintptr 
 		if wParam == 0 {
 			break
 		}
-		// Client area takes the whole window, so the system caption is gone —
-		// but a maximised window still has to keep the border out, or it spills
-		// past the screen edges by the frame thickness.
 		if zoomed, _, _ := isZoomedCall.Call(handle); zoomed != 0 {
 			edge := metric(smCXFrame) + metric(smCXPaddedBorder)
 			top := metric(smCYFrame) + metric(smCXPaddedBorder)
@@ -147,10 +144,6 @@ func chromeProc(handle uintptr, message uint32, wParam, lParam uintptr) uintptr 
 	case wmNCHitTest:
 		return chrome.hit(handle, lParam)
 
-	// Смена масштаба экрана приходит вместе с готовым прямоугольником: манифест
-	// объявляет per-monitor v2, и подогнать окно под новый масштаб должно само
-	// приложение. Без этого окно остаётся прежних размеров, а webview внутри
-	// перерисовывается кусками -- отсюда и прямоугольные лоскуты.
 	case wmDpiChanged:
 		box := (*rect)(unsafe.Pointer(lParam))
 		setWindowPos.Call(handle, 0,
@@ -172,8 +165,6 @@ func chromeProc(handle uintptr, message uint32, wParam, lParam uintptr) uintptr 
 		result, _, _ = defWindowProc.Call(handle, uintptr(message), wParam, lParam)
 	}
 
-	// Размер webview меняет уже сама библиотека; чего она не делает -- так это
-	// не просит перерисовать то, что оказалось за прежними границами.
 	if message == wmSize {
 		repaint(handle)
 	}

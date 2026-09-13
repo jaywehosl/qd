@@ -19,13 +19,7 @@ func (state *controlState) recordTelemetry() {
 }
 
 func (state *controlState) flush() {
-	if state.sessions == nil || state.sessions.stat == nil {
-		return
-	}
-	stats, err := state.sessions.stat()
-	if err != nil {
-		return
-	}
+	stats := state.sessionStats()
 	clients, err := state.db.Clients()
 	if err != nil {
 		return
@@ -61,15 +55,14 @@ func (state *controlState) flush() {
 			}
 			continue
 		}
-		readings = append(readings, store.Reading{
-			ClientID: id, NodeID: state.id, Epoch: state.epoch,
-			Up: s.Up, Down: s.Down, At: now,
-		})
-
 		if s.Transit {
 			state.db.RecordExit(id, state.id, s.LastSeen, s.Up, s.Down)
 			continue
 		}
+		readings = append(readings, store.Reading{
+			ClientID: id, NodeID: state.id, Epoch: state.epoch,
+			Up: s.Up, Down: s.Down, At: now,
+		})
 		if len(s.Seen) == 0 {
 			continue
 		}

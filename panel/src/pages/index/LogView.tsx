@@ -11,7 +11,7 @@ interface ParsedLog {
 const LEVELS = ['DEBUG', 'INFO', 'NOTICE', 'WARNING', 'ERROR'];
 const LEVEL_CLASSES = ['level-debug', 'level-info', 'level-notice', 'level-warning', 'level-error'];
 
-export function parseLogLine(line: string): ParsedLog {
+function parseLogLine(line: string): ParsedLog {
   const [head, ...rest] = (line || '').split(' - ');
   const message = rest.join(' - ');
   const parts = head.split(' ');

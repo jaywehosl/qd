@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-const Port = "53"
+const port = "53"
 
 type Record struct {
 	Suffix string `json:"suffix"`
@@ -145,18 +145,7 @@ func (r *Resolver) Reconfigure(cfg Config) {
 		}
 		r.upstreams = next
 	}
-	r.mu.Unlock()
-
-	for _, u := range retired {
-		u.Close()
-	}
-	r.evictOverflow()
-}
-
-func (r *Resolver) Close() {
-	r.mu.Lock()
-	retired := r.upstreams
-	r.upstreams = nil
+	r.evictAbove(r.maxSize)
 	r.mu.Unlock()
 
 	for _, u := range retired {
@@ -294,17 +283,11 @@ func age(msg []byte, by uint32) {
 	if len(msg) < 12 {
 		return
 	}
+	i := afterQuestions(msg)
 
 	records := int(binary.BigEndian.Uint16(msg[6:8])) +
 		int(binary.BigEndian.Uint16(msg[8:10])) +
 		int(binary.BigEndian.Uint16(msg[10:12]))
-
-	i := 12
-	questions := int(binary.BigEndian.Uint16(msg[4:6]))
-	for q := 0; q < questions && i < len(msg); q++ {
-		i = skipName(msg, i)
-		i += 4
-	}
 
 	for n := 0; n < records && i+10 <= len(msg); n++ {
 		i = skipName(msg, i)
@@ -312,10 +295,6 @@ func age(msg []byte, by uint32) {
 			return
 		}
 
-		// An OPT record carries the extended rcode, the EDNS version and the
-		// flags where every other record keeps its ttl. Ageing it corrupts the
-		// answer, and a resolver that sees a set Z bit throws the whole reply
-		// away — which is exactly what a browser reports as no internet.
 		if binary.BigEndian.Uint16(msg[i:i+2]) != 41 {
 			left := binary.BigEndian.Uint32(msg[i+4 : i+8])
 			if by == staleTTL || by >= left {
@@ -354,44 +333,27 @@ func (r *Resolver) store(key string, answer []byte, ttl time.Duration) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	now := time.Now()
 	if e, ok := r.cache[key]; ok {
-		e.answer = stored
-		e.stored = time.Now()
-		e.expires = e.stored.Add(ttl)
-		e.refreshing = false
+		e.answer, e.stored, e.expires, e.refreshing = stored, now, now.Add(ttl), false
 		r.lru.MoveToFront(e.elem)
 		return
 	}
 
-	for len(r.cache) >= r.maxSize {
-		back := r.lru.Back()
-		if back == nil {
-			break
-		}
-		victim := back.Value.(*entry)
-		r.lru.Remove(back)
-		delete(r.cache, victim.key)
-		r.stats.evicted.Add(1)
-	}
-
-	now := time.Now()
+	r.evictAbove(r.maxSize - 1)
 	e := &entry{key: key, answer: stored, stored: now, expires: now.Add(ttl)}
 	e.elem = r.lru.PushFront(e)
 	r.cache[key] = e
 }
 
-func (r *Resolver) evictOverflow() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	for len(r.cache) > r.maxSize {
+func (r *Resolver) evictAbove(limit int) {
+	for len(r.cache) > limit {
 		back := r.lru.Back()
 		if back == nil {
-			break
+			return
 		}
-		victim := back.Value.(*entry)
 		r.lru.Remove(back)
-		delete(r.cache, victim.key)
+		delete(r.cache, back.Value.(*entry).key)
 		r.stats.evicted.Add(1)
 	}
 }
@@ -413,7 +375,7 @@ func (r *Resolver) fromRecords(query []byte, name string, qtype uint16) []byte {
 	r.mu.Unlock()
 
 	for _, rec := range rules {
-		if !strings.HasSuffix(name, rec.suffix) {
+		if name != rec.suffix && !strings.HasSuffix(name, "."+rec.suffix) {
 			continue
 		}
 		ip := rec.v4
@@ -444,16 +406,6 @@ func (r *Resolver) Stats() Stats {
 		Entries:   entries,
 		Size:      size,
 	}
-}
-
-func (r *Resolver) Line() string {
-	s := r.Stats()
-	rate := 0.0
-	if s.Queries > 0 {
-		rate = 100 * float64(s.Hits) / float64(s.Queries)
-	}
-	return fmt.Sprintf("dns        %d queries, %.0f%% from cache (%d/%d entries) | upstream %d, refreshed %d, records %d, evicted %d, failed %d",
-		s.Queries, rate, s.Entries, s.Size, s.Upstream, s.Refreshed, s.Records, s.Evicted, s.Failed)
 }
 
 type upstream struct {
@@ -596,26 +548,26 @@ func (u *upstream) exchange(query []byte, timeout time.Duration) ([]byte, error)
 	}
 }
 
-func Address(entry string) string {
+func address(entry string) string {
 	entry = strings.TrimSpace(entry)
 	if entry == "" {
 		return ""
 	}
 
 	if addr, err := netip.ParseAddr(strings.Trim(entry, "[]")); err == nil {
-		return net.JoinHostPort(addr.String(), Port)
+		return net.JoinHostPort(addr.String(), port)
 	}
-	if host, port, err := net.SplitHostPort(entry); err == nil && host != "" && port != "" {
-		return net.JoinHostPort(host, port)
+	if host, p, err := net.SplitHostPort(entry); err == nil && host != "" && p != "" {
+		return net.JoinHostPort(host, p)
 	}
-	return net.JoinHostPort(entry, Port)
+	return net.JoinHostPort(entry, port)
 }
 
 func Addresses(entries ...string) []string {
 	out := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		for _, part := range strings.Split(entry, ",") {
-			if addr := Address(part); addr != "" {
+			if addr := address(part); addr != "" {
 				out = append(out, addr)
 			}
 		}
@@ -655,40 +607,24 @@ func Question(msg []byte) (string, uint16, bool) {
 	return strings.ToLower(sb.String()), qtype, true
 }
 
-func answerTTL(msg []byte, min, max time.Duration) time.Duration {
+func afterQuestions(msg []byte) int {
+	i := 12
+	for q := int(binary.BigEndian.Uint16(msg[4:6])); q > 0 && i < len(msg); q-- {
+		i = skipName(msg, i) + 4
+	}
+	return i
+}
+
+func answerTTL(msg []byte, lo, hi time.Duration) time.Duration {
 	answers := int(binary.BigEndian.Uint16(msg[6:8]))
 	if answers == 0 {
-		return min
+		return lo
 	}
 
-	i := 12
-	questions := int(binary.BigEndian.Uint16(msg[4:6]))
-	for q := 0; q < questions && i < len(msg); q++ {
-		for i < len(msg) {
-			l := int(msg[i])
-			if l == 0 {
-				i++
-				break
-			}
-			if l&0xC0 != 0 {
-				i += 2
-				break
-			}
-			i += 1 + l
-		}
-		i += 4
-	}
-
-	best := max
+	i := afterQuestions(msg)
+	best := hi
 	for a := 0; a < answers && i+12 <= len(msg); a++ {
-		if msg[i]&0xC0 == 0xC0 {
-			i += 2
-		} else {
-			for i < len(msg) && msg[i] != 0 {
-				i += 1 + int(msg[i])
-			}
-			i++
-		}
+		i = skipName(msg, i)
 		if i+10 > len(msg) {
 			break
 		}
@@ -700,14 +636,7 @@ func answerTTL(msg []byte, min, max time.Duration) time.Duration {
 			best = ttl
 		}
 	}
-
-	if best < min {
-		return min
-	}
-	if best > max {
-		return max
-	}
-	return best
+	return min(max(best, lo), hi)
 }
 
 func questionEnd(msg []byte) int {
@@ -737,10 +666,8 @@ func shortReply(query []byte, low byte) []byte {
 	if end < 0 {
 		return nil
 	}
-
 	out := make([]byte, end)
 	copy(out, query[:end])
-
 	out[2] = 0x81
 	out[3] = low
 	binary.BigEndian.PutUint16(out[4:6], 1)
@@ -757,28 +684,11 @@ func Refused(query []byte) []byte { return shortReply(query, 0x83) }
 func ServFail(query []byte) []byte { return shortReply(query, 0x82) }
 
 func Answer(query []byte, ip net.IP, qtype uint16) []byte {
-	qend := 12
-	for qend < len(query) {
-		l := int(query[qend])
-		if l == 0 {
-			qend++
-			break
-		}
-		qend += 1 + l
-	}
-	qend += 4
-	if qend > len(query) {
+	out := NoData(query)
+	if out == nil {
 		return nil
 	}
-
-	out := make([]byte, 0, qend+16)
-	out = append(out, query[:qend]...)
-
-	out[2] = 0x81
-	out[3] = 0x80
 	binary.BigEndian.PutUint16(out[6:8], 1)
-	binary.BigEndian.PutUint16(out[8:10], 0)
-	binary.BigEndian.PutUint16(out[10:12], 0)
 
 	out = append(out, 0xC0, 0x0C)
 	out = append(out, byte(qtype>>8), byte(qtype))
@@ -791,31 +701,23 @@ func Answer(query []byte, ip net.IP, qtype uint16) []byte {
 			return nil
 		}
 		out = append(out, 0x00, 0x04)
-		out = append(out, v4...)
-	} else {
-		v6 := ip.To16()
-		if v6 == nil {
-			return nil
-		}
-		out = append(out, 0x00, 0x10)
-		out = append(out, v6...)
+		return append(out, v4...)
 	}
-	return out
+	v6 := ip.To16()
+	if v6 == nil {
+		return nil
+	}
+	out = append(out, 0x00, 0x10)
+	return append(out, v6...)
 }
 
-// FirstAddr достаёт первый адрес нужного типа из ответа. Нужен для NAT64: узел
-// смотрит, есть ли у имени IPv6, когда IPv4 у него нет вовсе.
 func FirstAddr(msg []byte, qtype uint16) (net.IP, bool) {
 	if len(msg) < 12 {
 		return nil, false
 	}
 	answers := int(binary.BigEndian.Uint16(msg[6:8]))
-	if answers == 0 {
-		return nil, false
-	}
-
 	i := questionEnd(msg)
-	if i < 0 {
+	if answers == 0 || i < 0 {
 		return nil, false
 	}
 
@@ -825,14 +727,7 @@ func FirstAddr(msg []byte, qtype uint16) (net.IP, bool) {
 	}
 
 	for a := 0; a < answers && i+12 <= len(msg); a++ {
-		if msg[i]&0xC0 == 0xC0 {
-			i += 2
-		} else {
-			for i < len(msg) && msg[i] != 0 {
-				i += 1 + int(msg[i])
-			}
-			i++
-		}
+		i = skipName(msg, i)
 		if i+10 > len(msg) {
 			return nil, false
 		}
@@ -852,7 +747,6 @@ func FirstAddr(msg []byte, qtype uint16) (net.IP, bool) {
 	return nil, false
 }
 
-// AskFor переписывает вопрос на другой тип, сохраняя имя и идентификатор.
 func AskFor(query []byte, qtype uint16) []byte {
 	end := questionEnd(query)
 	if end < 4 {
@@ -861,30 +755,5 @@ func AskFor(query []byte, qtype uint16) []byte {
 	out := make([]byte, end)
 	copy(out, query[:end])
 	binary.BigEndian.PutUint16(out[end-4:end-2], qtype)
-	return out
-}
-
-func Empty(query []byte) []byte {
-	qend := 12
-	for qend < len(query) {
-		l := int(query[qend])
-		if l == 0 {
-			qend++
-			break
-		}
-		qend += 1 + l
-	}
-	qend += 4
-	if qend > len(query) {
-		return nil
-	}
-
-	out := make([]byte, 0, qend)
-	out = append(out, query[:qend]...)
-	out[2] = 0x81
-	out[3] = 0x80
-	binary.BigEndian.PutUint16(out[6:8], 0)
-	binary.BigEndian.PutUint16(out[8:10], 0)
-	binary.BigEndian.PutUint16(out[10:12], 0)
 	return out
 }

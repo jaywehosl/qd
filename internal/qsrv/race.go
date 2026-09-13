@@ -8,14 +8,7 @@ import (
 	"github.com/quic-go/quic-go/http3"
 )
 
-// raceExit выбирает выход гонкой, но только когда выбирать действительно нужно.
-// Живая связь с подходящим выходом — уже готовый ответ: гонять её заново значит
-// на каждый флоу дозваниваться до всех выходов и рвать проигравшую связь, по
-// которой в этот же миг едет соседний флоу.
-//
-// Метка может называть конкретный узел (по имени или uuid) — тогда гонки нет,
-// есть один кандидат, и его недоступность означает отказ.
-func (n *Node) raceExit(ctx context.Context, route string, seat uint32) (*http3.ClientConn, string, error) {
+func (n *Node) raceExit(ctx context.Context, route string, seat, session uint32) (*http3.ClientConn, string, error) {
 	known := n.peers()
 	runners := n.exitsFor(route)
 	if len(runners) == 0 {
@@ -38,7 +31,7 @@ func (n *Node) raceExit(ctx context.Context, route string, seat uint32) (*http3.
 
 	for _, peer := range runners {
 		go func(p Peer) {
-			cc, err := n.links.to(where{p.Endpoint, seat}).connect(round)
+			cc, err := n.links.to(where{p.Endpoint, seat}, session).connect(round)
 			if err != nil {
 				line <- finish{err: err}
 				return
@@ -57,9 +50,6 @@ func (n *Node) raceExit(ctx context.Context, route string, seat uint32) (*http3.
 				last = got.err
 				continue
 			}
-			// Запоминает победителя тот, кто его выбрал. Пока это делала сама
-			// горутина, первой добежавшей до once, флоу мог уехать в другой узел:
-			// в памяти стоял один выход, работал второй.
 			n.links.chose(seat, got.endpoint)
 			return got.cc, got.endpoint, nil
 		}
@@ -71,8 +61,6 @@ func (n *Node) raceExit(ctx context.Context, route string, seat uint32) (*http3.
 	return nil, "", last
 }
 
-// exitsFor — соседи, которых метка допускает: назвали конкретного — он один,
-// назвали категорию — все выходы сети.
 func (n *Node) exitsFor(route string) []Peer {
 	peers := n.peers()
 	for _, p := range peers {

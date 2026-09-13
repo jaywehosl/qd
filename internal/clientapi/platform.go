@@ -1,8 +1,8 @@
 package clientapi
 
 import (
-	"github.com/jaywehosl/quic-diver/internal/qcli"
 	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
+	"github.com/jaywehosl/quic-diver/internal/qsrv/uplink/relay"
 )
 
 type Device struct {
@@ -23,12 +23,13 @@ type Process struct {
 
 type Platform interface {
 	Running() bool
-	Start(servers []string, relays []qcli.RelayLink, session uint32) error
+	Start(servers []string, relays []relay.Link, session uint32) error
 	ServerName() string
 	Stop() error
 	SetKey(key *qdcrypt.Key)
 	SetExit(egress bool)
 	SetFixedRate(mbit int)
+	SyncControlRelays(relays []relay.Link)
 	Wire() Asker
 	Identify() Device
 	Processes() []Process

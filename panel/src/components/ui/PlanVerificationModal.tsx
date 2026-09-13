@@ -13,8 +13,7 @@ interface PlanVerificationModalProps {
   confirmLoading?: boolean;
 }
 
-export function generateJsonDiff(oldObj: any, newObj: any) {
-  // Deep clone and clean up internal UI state fields like keys or timestamps to avoid noise in diff
+function generateJsonDiff(oldObj: any, newObj: any) {
   const cleanObject = (obj: any) => {
     if (!obj) return null;
     const cloned = JSON.parse(JSON.stringify(obj));

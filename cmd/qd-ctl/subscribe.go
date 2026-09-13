@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jaywehosl/quic-diver/internal/clientstate"
+	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
 )
 
 func subscribe(statePath, raw string) {
@@ -58,5 +59,5 @@ func subscribe(statePath, raw string) {
 	}
 
 	fmt.Printf("subscribed as %q, session %d, %d entrypoint(s)\n",
-		link.Key, clientstate.SessionID(link.Key), len(nodes))
+		link.Key, qdcrypt.SessionID(link.Key), len(nodes))
 }

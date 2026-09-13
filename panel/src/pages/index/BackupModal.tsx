@@ -5,9 +5,6 @@ import { DownloadOutlined, UploadOutlined } from '@ant-design/icons';
 import { HttpUtil, PromiseUtil } from '@/utils';
 import { markBackupDone } from '@/stores/notificationStore';
 import { useBusyOverlay, BOOT_BUSY_KEY } from '@/layouts/busy-overlay-context';
-/** Poll the status endpoint until the panel answers again (after the DB swap +
- *  Xray restart that importDB performs). skipAuthRedirect so the 401s while it's
- *  down don't bounce us to the login page. Returns true once it's back. */
 async function waitForPanelBack(timeoutMs = 90000): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -33,7 +30,7 @@ export default function BackupModal({ open, basePath: _basePath, onClose }: Back
   const isPostgres = window.X_UI_DB_TYPE === 'postgres';
 
   async function exportDb() {
-    markBackupDone(); // resets the "backup overdue" reminder clock
+    markBackupDone();
     const res = await fetch('/panel/api/server/getDb', {
       headers: { 'X-QD-Token': sessionStorage.getItem('qd.token') || '' },
     });
@@ -61,22 +58,13 @@ export default function BackupModal({ open, basePath: _basePath, onClose }: Back
       formData.append('db', dbFile);
 
       onClose();
-      // Same frosted full-screen takeover the settings restart uses — not the
-      // plain inline spinner — so restore feels consistent and deliberate.
       const overlay = {
         title: t('pages.index.restoringBackup'),
         subtitle: t('pages.settings.restartingDesc'),
       };
       busyOverlay.show(overlay);
-      try { localStorage.setItem(BOOT_BUSY_KEY, JSON.stringify(overlay)); } catch { /* ignore */ }
+      try { localStorage.setItem(BOOT_BUSY_KEY, JSON.stringify(overlay)); } catch {}
 
-      // importDB closes the DB + restarts Xray INSIDE the request, so behind the
-      // reverse proxy the HTTP response almost never returns — the old code
-      // awaited it and hung until a ~1-min Network Error, with no idea whether
-      // the restore worked (it usually had). Instead: race the response against
-      // a short timer. A fast explicit answer = invalid file / hard error; a
-      // hang = the expected mid-restore disconnect → poll for the panel to come
-      // back, then report success into the notification system.
       const importP = HttpUtil.post('/panel/api/server/importDB', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
         skipAuthRedirect: true,
@@ -88,23 +76,18 @@ export default function BackupModal({ open, basePath: _basePath, onClose }: Back
         PromiseUtil.sleep(8000).then(() => ({ kind: 'pending' as const })),
       ]);
 
-      // Fast explicit failure (e.g. invalid db file) — report and stop, no reload.
       if (race.kind === 'resp' && !race.r?.success) {
-        try { localStorage.removeItem(BOOT_BUSY_KEY); } catch { /* ignore */ }
+        try { localStorage.removeItem(BOOT_BUSY_KEY); } catch {}
         busyOverlay.hide();
         toast.error(race.r?.msg || t('pages.index.importDatabaseError'));
         return;
       }
 
-      // Either it succeeded outright, or (far more likely) the connection dropped
-      // mid-restore. Wait for the panel to answer again before declaring done.
       const back = await waitForPanelBack();
-      try { localStorage.removeItem(BOOT_BUSY_KEY); } catch { /* ignore */ }
+      try { localStorage.removeItem(BOOT_BUSY_KEY); } catch {}
       busyOverlay.hide();
 
       if (back) {
-        // toast.* mirrors into the notification history, so this is the
-        // "tell me restore finished" record the operator asked for.
         toast.success(t('pages.index.importDatabaseSuccess', { defaultValue: 'Database restored — panel is back online' }));
         await PromiseUtil.sleep(1500);
         window.location.reload();

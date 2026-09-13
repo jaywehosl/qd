@@ -27,9 +27,7 @@ type Rule struct {
 	Role    string `json:"role"`
 	Matched int    `json:"matched"`
 	Running bool   `json:"running"`
-	// Read from the executable, so a rule shows its icon whether or not the
-	// program happens to be running. Filled in by the API, never stored.
-	Icon string `json:"icon,omitempty"`
+	Icon    string `json:"icon,omitempty"`
 }
 
 func (d *DB) Rules() ([]Rule, error) {
@@ -124,11 +122,6 @@ func (d *DB) ReplaceRules(defaultRole string, rules []Rule) error {
 		return err
 	}
 	return tx.Commit()
-}
-
-func (d *DB) BumpRule(id int) error {
-	_, err := d.sql.Exec(`UPDATE rules SET matched = matched + 1 WHERE id = ?`, id)
-	return err
 }
 
 func targetKey(process, path string) string {

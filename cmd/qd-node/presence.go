@@ -4,13 +4,14 @@ package main
 
 import (
 	"fmt"
+	"net/netip"
 	"sort"
 	"sync"
 	"time"
 )
 
 type presence struct {
-	sample func() (map[uint32]seen, error)
+	sample func() map[uint32]seen
 
 	mu    sync.RWMutex
 	stint map[uint32]*stint
@@ -18,7 +19,6 @@ type presence struct {
 
 type seen struct {
 	LastSeen int64
-	LastPing int64
 	Transit  bool
 	Client   string
 	Up       uint64
@@ -34,11 +34,8 @@ type stint struct {
 	Checked   int64
 	Client    string
 	Device    string
-	// devices — какие устройства подписки сейчас на связи. Запись присутствия
-	// одна на подписку, а устройств у неё несколько, и прощание одного не
-	// должно уводить в офлайн остальных.
-	devices map[string]int64
-	Seen    []address
+	devices   map[string]int64
+	Seen      []address
 }
 
 type address struct {
@@ -49,7 +46,7 @@ type address struct {
 
 const gone = 90 * time.Second
 
-func watchPresence(sample func() (map[uint32]seen, error)) *presence {
+func watchPresence(sample func() map[uint32]seen) *presence {
 	p := &presence{sample: sample, stint: map[uint32]*stint{}}
 	go func() {
 		t := time.NewTicker(2 * time.Second)
@@ -88,9 +85,6 @@ func (p *presence) Joining(id uint32, fingerprint string) {
 	}
 }
 
-// Leaving убирает одно устройство. В офлайн подписка уходит, только когда
-// попрощались все: раньше уход любого гасил запись целиком, и отключение с
-// десктопа уводило в офлайн телефон.
 func (p *presence) Leaving(id uint32, fingerprint string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -104,7 +98,6 @@ func (p *presence) Leaving(id uint32, fingerprint string) {
 	if fingerprint != "" && len(held.devices) > 0 {
 		delete(held.devices, fingerprint)
 		if len(held.devices) > 0 {
-			// Кто-то ещё на связи — показываем его.
 			for other := range held.devices {
 				held.Device = other
 				break
@@ -134,10 +127,7 @@ func (p *presence) Checked(id uint32, fingerprint string) {
 }
 
 func (p *presence) tick() {
-	live, err := p.sample()
-	if err != nil {
-		return
-	}
+	live := p.sample()
 
 	now := time.Now().UnixMilli()
 	cutoff := now - gone.Milliseconds()
@@ -166,8 +156,8 @@ func (p *presence) tick() {
 		}
 
 		host := s.Client
-		if colon := lastColon(host); colon > 0 {
-			host = host[:colon]
+		if where, err := netip.ParseAddrPort(host); err == nil {
+			host = where.Addr().Unmap().String()
 		}
 
 		found := false
@@ -224,13 +214,4 @@ func (p *presence) Live() int {
 		}
 	}
 	return live
-}
-
-func lastColon(text string) int {
-	for i := len(text) - 1; i >= 0; i-- {
-		if text[i] == ':' {
-			return i
-		}
-	}
-	return -1
 }

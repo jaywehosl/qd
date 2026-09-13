@@ -96,11 +96,11 @@ func (m *metrics) tick() {
 
 	s.TCPCount = float64(sockets("/proc/net/tcp") + sockets("/proc/net/tcp6"))
 	s.UDPCount = float64(sockets("/proc/net/udp") + sockets("/proc/net/udp6"))
-	s.DiskUsage = diskUsage("/")
-	s.Load1, s.Load5, s.Load15 = loadavg()
-	if m.online != nil {
-		s.Online = float64(m.online())
+	if used, total := diskBytes("/"); total > 0 {
+		s.DiskUsage = 100 * float64(used) / float64(total)
 	}
+	s.Load1, s.Load5, s.Load15 = loadavg()
+	s.Online = float64(m.online())
 
 	m.mu.Lock()
 	m.last = now
@@ -325,15 +325,6 @@ func sockets(path string) int {
 		n--
 	}
 	return n
-}
-
-func diskUsage(path string) float64 {
-	var fs syscall.Statfs_t
-	if err := syscall.Statfs(path, &fs); err != nil || fs.Blocks == 0 {
-		return 0
-	}
-	used := fs.Blocks - fs.Bfree
-	return 100 * float64(used) / float64(fs.Blocks)
 }
 
 func diskBytes(path string) (used, total uint64) {

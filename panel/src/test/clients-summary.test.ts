@@ -3,10 +3,6 @@ import { describe, it, expect } from 'vitest';
 import { computeClientsSummary } from '@/hooks/useClients';
 import type { ClientTraffic } from '@/schemas/client';
 
-// Parity with web/service/client.go buildClientsSummary: the same client must
-// land in the same bucket whether the count comes from the server (list fetch)
-// or is recomputed live from the client_stats WS event. A mismatch would make
-// the summary card "jump" on refresh.
 type Row = ClientTraffic & { email?: string };
 
 const GB = 1024 * 1024 * 1024;
@@ -28,18 +24,16 @@ describe('computeClientsSummary', () => {
       row({ email: 'nearexpiry@x', enable: true, expiryTime: now + DAY }),
       row({ email: 'nearlimit@x', enable: true, total: 10 * GB, up: 9.9 * GB }),
     ];
-    const online = new Set(['online@x', 'disabled@x']); // disabled-but-online must NOT count as online
+    const online = new Set(['online@x', 'disabled@x']);
     const expireDiffMs = 3 * DAY;
 
     const s = computeClientsSummary(stats, online, expireDiffMs);
 
     expect(s.total).toBe(7);
     expect(s.online).toEqual(['online@x']);
-    // No traffic quota exists in the model, so only an expiry ends a client.
     expect(s.depleted).toEqual(['expired@x']);
     expect(s.deactive).toEqual(['disabled@x']);
     expect(s.expiring).toEqual(['nearexpiry@x']);
-    // Everything enabled and not expired counts, warnings included.
     expect(s.active).toBe(5);
   });
 
@@ -50,7 +44,7 @@ describe('computeClientsSummary', () => {
     const s = computeClientsSummary(stats, new Set(['a@x']), 0);
     expect(s.depleted).toEqual(['a@x']);
     expect(s.deactive).toEqual([]);
-    expect(s.online).toEqual([]); // disabled is never online
+    expect(s.online).toEqual([]);
   });
 
   it('unlimited + no expiry is active', () => {

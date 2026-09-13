@@ -60,16 +60,8 @@ type Client struct {
 	stop     chan struct{}
 	live     *qcli.Tunnel
 	liveStop context.CancelFunc
-	// dialing рвёт дозвон, который ещё не кончился. Без него просьба
-	// отключиться во время дозвона не делала ничего: туннель поднимался уже
-	// после неё, а нажатия всё это время уходили в пустоту.
-	dialing context.CancelFunc
-	// src держим, чтобы гасить устройство сразу: закрытый дескриптор немедленно
-	// возвращает всех, кто на нём висел.
-	src packet.Source
-	// turn держится всё время перехода. Без него подъём и спуск шли внахлёст:
-	// старый туннель ещё разбирался, а новый уже дозванивался, и оба мешали
-	// друг другу по три секунды кряду.
+	dialing  context.CancelFunc
+	src      packet.Source
 	turn     sync.Mutex
 	server   string
 	appSplit string
@@ -171,14 +163,6 @@ func (c *Client) SettingsJSON() string {
 	return blob
 }
 
-func (c *Client) UnreadJSON() string {
-	blob, err := c.api.UnreadJSON()
-	if err != nil {
-		return "[]"
-	}
-	return blob
-}
-
 func (c *Client) MarkNoticeRead(id int) error { return c.api.MarkNoticeRead(id) }
 
 func (c *Client) AboutJSON() string {
@@ -246,6 +230,5 @@ func (c *Client) Ping() int {
 		}
 	}
 
-	// Резолвер молчит только когда туннель опущен: тогда мерить нечего.
 	return -1
 }

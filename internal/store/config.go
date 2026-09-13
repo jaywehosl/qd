@@ -191,17 +191,6 @@ func (d *DB) InsertNodeAt(n netstate.Node, now int64) error {
 	return err
 }
 
-func (d *DB) DeleteNode(id int) error {
-	res, err := d.sql.Exec(`DELETE FROM nodes WHERE id = ?`, id)
-	if err != nil {
-		return err
-	}
-	if affected, _ := res.RowsAffected(); affected == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
 func (d *DB) Entrypoints() ([]netstate.Entrypoint, error) {
 	out := []netstate.Entrypoint{}
 	err := scan(d.sql, `SELECT id, node_id, port, remark, enable FROM entrypoints ORDER BY id`,
@@ -239,17 +228,6 @@ func (d *DB) SaveEntrypoint(e netstate.Entrypoint, now int64) (int, error) {
 		return 0, ErrNotFound
 	}
 	return e.ID, nil
-}
-
-func (d *DB) DeleteEntrypoint(id int) error {
-	res, err := d.sql.Exec(`DELETE FROM entrypoints WHERE id = ?`, id)
-	if err != nil {
-		return err
-	}
-	if affected, _ := res.RowsAffected(); affected == 0 {
-		return ErrNotFound
-	}
-	return nil
 }
 
 func (d *DB) Clients() ([]netstate.Client, error) {
@@ -296,17 +274,6 @@ func (d *DB) SaveClient(c netstate.Client, now int64) (int, error) {
 		return 0, ErrNotFound
 	}
 	return c.ID, nil
-}
-
-func (d *DB) DeleteClient(id int) error {
-	res, err := d.sql.Exec(`DELETE FROM clients WHERE id = ?`, id)
-	if err != nil {
-		return err
-	}
-	if affected, _ := res.RowsAffected(); affected == 0 {
-		return ErrNotFound
-	}
-	return nil
 }
 
 func marshalRelays(rs []netstate.GroupRelay) string {
@@ -420,20 +387,6 @@ func (d *DB) SaveGroup(g netstate.Group, now int64) (int, error) {
 	return id, tx.Commit()
 }
 
-func (d *DB) DeleteGroup(id int) error {
-	res, err := d.sql.Exec(`DELETE FROM groups WHERE id = ?`, id)
-	if err != nil {
-		return err
-	}
-	if affected, _ := res.RowsAffected(); affected == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
-// Everything a node needs to run that is a property of the network rather than
-// of the machine it sits on. A node reads this at startup instead of taking it
-// on the command line, so one database describes the whole fleet.
 type NetworkSettings struct {
 	RefreshMinutes   int    `json:"refreshMinutes"`
 	DNSPrimary       string `json:"dnsPrimary"`
@@ -665,17 +618,6 @@ func (d *DB) SaveDNSRecord(rec DNSRecord) (int, error) {
 	return int(id), nil
 }
 
-func (d *DB) DeleteDNSRecord(id int) error {
-	res, err := d.sql.Exec(`DELETE FROM dns_records WHERE id = ?`, id)
-	if err != nil {
-		return err
-	}
-	if affected, _ := res.RowsAffected(); affected == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
 func (d *DB) settle(held, want netstate.Node, now int64) (netstate.Node, error) {
 	before := held
 	if held.UUID == "" {
@@ -698,3 +640,24 @@ func (d *DB) settle(held, want netstate.Node, now int64) (netstate.Node, error) 
 	}
 	return held, nil
 }
+
+func (d *DB) deleteRow(table string, id int) error {
+	res, err := d.sql.Exec(`DELETE FROM `+table+` WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	if affected, _ := res.RowsAffected(); affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (d *DB) DeleteNode(id int) error { return d.deleteRow("nodes", id) }
+
+func (d *DB) DeleteEntrypoint(id int) error { return d.deleteRow("entrypoints", id) }
+
+func (d *DB) DeleteClient(id int) error { return d.deleteRow("clients", id) }
+
+func (d *DB) DeleteGroup(id int) error { return d.deleteRow("groups", id) }
+
+func (d *DB) DeleteDNSRecord(id int) error { return d.deleteRow("dns_records", id) }

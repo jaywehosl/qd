@@ -1,8 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Уведомление — это сама кнопка подключения, как на экране клиента.
-     Обёртка нужна затем, что отрицательные отступы у корня система не
-     применяет: она сама задаёт ему размеры. У вложенного применяет наш же
-     контейнер, и так плашка дотягивается до краёв карточки. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"

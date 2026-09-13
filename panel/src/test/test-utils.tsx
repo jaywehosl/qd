@@ -13,7 +13,6 @@ export function fieldLabels(): string[] {
     .filter(Boolean);
 }
 
-/** DS (controlled-form) equivalent of fieldLabels — reads .ds-field__label. */
 export function dsFieldLabels(): string[] {
   return Array.from(document.querySelectorAll('.ds-field__label'))
     .map((el) => (el.textContent ?? '').trim())

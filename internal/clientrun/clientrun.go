@@ -1,10 +1,3 @@
-// Package clientrun — подъём туннеля на клиенте.
-//
-// Порядок здесь один на все платформы: дозвониться, взять у узла адрес,
-// поднять резолвер, открыть источник пакетов, запустить датапуть. Различие
-// ровно одно — откуда берутся пакеты: на Windows их даёт драйвер захвата, на
-// телефоне и на macOS дескриптор устройства. Всё остальное совпадало дословно,
-// включая цепочки закрытий на каждом отказе, и расходилось при правках.
 package clientrun
 
 import (
@@ -20,34 +13,24 @@ import (
 )
 
 type Plan struct {
-	Dial qcli.Options
-	// Wait — сколько ждать дозвона; 0 означает двадцать секунд.
-	Wait time.Duration
-	// DNS — свой резолвер клиента; nil означает обойтись системным.
-	DNS *clientdns.Config
-	// Source отдаёт источник пакетов под уже поднятый туннель: адрес выдаёт
-	// узел, и открывать устройство раньше дозвона значит взять адрес наугад.
+	Dial   qcli.Options
+	Wait   time.Duration
+	DNS    *clientdns.Config
 	Source func(context.Context, *qcli.Tunnel) (packet.Source, error)
-	// Lost зовётся, когда датапуть встал сам, а не по просьбе.
-	Lost func(error)
-	Say  func(format string, args ...any)
+	Lost   func(error)
+	Say    func(format string, args ...any)
 }
 
-// Carried — то, что подняли. Гасит вызывающий: у каждого клиента своя уборка,
-// и сводить её в одну было бы натяжкой.
 type Carried struct {
 	Live     *qcli.Tunnel
 	DNS      *clientdns.Resolver
 	Source   packet.Source
 	Assigned netip.Prefix
 	Endpoint string
-	// Quit валит датапуть, Halt гасит резолвер, Gone закрывается, когда
-	// датапуть действительно встал.
-	Quit context.CancelFunc
-	// Ctx умирает вместе с датапутём: сторожа вешать на него, а не на свой.
-	Ctx  context.Context
-	Halt chan struct{}
-	Gone chan struct{}
+	Quit     context.CancelFunc
+	Ctx      context.Context
+	Halt     chan struct{}
+	Gone     chan struct{}
 }
 
 const defaultWait = 20 * time.Second
@@ -67,8 +50,6 @@ func Carry(ctx context.Context, p Plan) (*Carried, error) {
 	began := time.Now()
 	round, quit := context.WithCancel(ctx)
 
-	// Всё, что уже открыто, закрывается одним списком: раньше каждая ветка
-	// отказа несла свою цепочку, и стоило добавить шаг — одна из них отставала.
 	undo := []func(){quit}
 	give := func(err error) (*Carried, error) {
 		for i := len(undo) - 1; i >= 0; i-- {

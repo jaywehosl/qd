@@ -3,8 +3,6 @@ html {
   -ms-overflow-style: none;
 }
 
-/* Keep this list in step with AREAS in scroller.ts: every area that gets an
-   overlay rail must lose its native bar, or both show at once. */
 html::-webkit-scrollbar,
 body::-webkit-scrollbar,
 .ds-dialog__body::-webkit-scrollbar,
@@ -28,8 +26,6 @@ body::-webkit-scrollbar,
   scrollbar-width: none;
 }
 
-/* A clip pinned to the edge: whatever sits outside it is invisible, so the
-   track emerges from under the border instead of gliding in from open space. */
 .qd-scroll {
   position: fixed;
   width: 16px;
@@ -57,7 +53,6 @@ body::-webkit-scrollbar,
   pointer-events: auto;
 }
 
-/* Unfolds as it arrives and rolls back up into the edge as it leaves. */
 .qd-scroll.is-live .qd-scroll__track {
   opacity: 1;
   transform: translateX(0) scaleY(1);

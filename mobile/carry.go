@@ -3,7 +3,6 @@ package qdmobile
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/netip"
 	"time"
 
@@ -14,12 +13,10 @@ import (
 	"github.com/jaywehosl/quic-diver/internal/qcli/packet/tun"
 	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
 	"github.com/jaywehosl/quic-diver/internal/qsrv"
+	"github.com/jaywehosl/quic-diver/internal/qsrv/uplink/relay"
 )
 
-// carry поднимает туннель тем же порядком, что и клиент под Windows: сам
-// порядок живёт в clientrun, здесь остаётся только то, чем телефон отличается —
-// устройство от VpnService вместо драйвера захвата.
-func (c *Client) carry(servers []string, relays []qcli.RelayLink, session uint32) error {
+func (c *Client) carry(servers []string, relays []relay.Link, session uint32) error {
 	c.turn.Lock()
 	defer c.turn.Unlock()
 
@@ -35,9 +32,6 @@ func (c *Client) carry(servers []string, relays []qcli.RelayLink, session uint32
 	}
 	say("carry: dialing %v with mtu %d", servers, mtu)
 
-	// Прежний движок валим безусловно, даже если считаем, что его нет. Иначе
-	// осиротевший продолжает читать устройство и глотать трафик: значок VPN
-	// горит, а связи нет.
 	c.mu.Lock()
 	was := c.liveStop
 	c.liveStop = nil
@@ -79,17 +73,15 @@ func (c *Client) carry(servers []string, relays []qcli.RelayLink, session uint32
 		Wait: dialWait,
 		DNS: &clientdns.Config{
 			Node: servers[0], Token: c.token(), Ask: c.wire().Ask,
-			Say: say, Keep: recentKept,
+			Say:     say,
 			Blocked: func(name string) bool { return seen != nil && seen.Query(name) },
 		},
-		// Устройство поднимаем под выданный адрес, а не наугад: узел сверяет, с
-		// какого адреса пришла датаграмма, и чужой отбрасывает.
 		Source: func(ctx context.Context, live *qcli.Tunnel) (packet.Source, error) {
 			fd, err := c.hold(live.Assigned()[0], mtu)
 			if err != nil {
 				return nil, err
 			}
-			raw, err := tun.Open(fd, mtu)
+			raw, err := tun.Open(fd)
 			if err != nil {
 				return nil, err
 			}
@@ -120,8 +112,6 @@ func (c *Client) carry(servers []string, relays []qcli.RelayLink, session uint32
 func (c *Client) stopCarry() {
 	say("carry: stop asked by %s", whoCalled())
 
-	// Дозвон рвём до захвата turn: иначе ждали бы его конца, а он длится до
-	// двадцати секунд, и все нажатия это время уходили бы в пустоту.
 	c.mu.Lock()
 	giveUp := c.dialing
 	c.mu.Unlock()
@@ -147,8 +137,6 @@ func (c *Client) stopCarry() {
 	go c.announce("bye")
 
 	close(stop)
-	// Устройство гасим первым: пока оно открыто, датапуть может висеть на нём
-	// и не заметить отмены.
 	if src != nil {
 		src.Close()
 	}
@@ -161,8 +149,6 @@ func (c *Client) stopCarry() {
 	}
 	live.StopRelay()
 
-	// Ждём конца датапути в стороне: держать на этом замок перехода значит
-	// заставить следующее нажатие ждать три секунды впустую.
 	go func() {
 		if gone != nil {
 			select {
@@ -175,8 +161,6 @@ func (c *Client) stopCarry() {
 	}()
 }
 
-// lost поднимает туннель заново, когда датапуть больше не жив. Миграцию к этому
-// моменту уже пробовал сторож.
 func (c *Client) lost() {
 	c.stopCarry()
 
@@ -206,10 +190,6 @@ func (c *Client) route() string {
 	return ""
 }
 
-// exitFor решает судьбу одного флоу: общий выход, если правил по приложениям нет,
-// иначе — то, что сказано про хозяина этого флоу. Для соединения хозяина ждём,
-// для датаграмм не ждём: они идут потоком, и остановка на опрос системы стоила
-// бы дороже, чем первые пакеты общим выходом.
 func (c *Client) exitFor(src, dst netip.AddrPort, udp bool) string {
 	if c.marks.forFlow(src, dst, udp, !udp) == qdcrypt.ExitEgress {
 		return qsrv.AnyExit
@@ -217,9 +197,6 @@ func (c *Client) exitFor(src, dst netip.AddrPort, udp bool) string {
 	return ""
 }
 
-// goesDirect отвечает на вопрос «пустить мимо туннеля вообще». Метки приложений
-// говорят о другом — каким выходом идти, — и путать это с обходом нельзя: при
-// выключенном +egress весь трафик считался прямым и туннель стоял пустым.
 func (c *Client) goesDirect(pkt []byte) bool { return false }
 
 func (c *Client) keepOut() []netip.Prefix {
@@ -262,7 +239,3 @@ const (
 	dialWait = 20 * time.Second
 	stopWait = 3 * time.Second
 )
-
-var _ = fmt.Sprint
-
-const recentKept = 64

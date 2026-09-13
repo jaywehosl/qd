@@ -1,24 +1,6 @@
 import type { NodeRecord } from '@/api/queries/useNodesQuery';
 
-export interface StreamHints {
-  network: string;
-  isTls: boolean;
-  isReality: boolean;
-}
-
-export type ProtocolFlags = {
-  isVMess?: boolean;
-  isVLess?: boolean;
-  isTrojan?: boolean;
-  isSS?: boolean;
-  isHysteria?: boolean;
-  isMixed?: boolean;
-  isHTTP?: boolean;
-  isWireguard?: boolean;
-  isTunnel?: boolean;
-};
-
-export interface DBInboundRecord extends ProtocolFlags {
+export interface DBInboundRecord {
   id: number;
   enable: boolean;
   remark: string;
@@ -31,7 +13,6 @@ export interface DBInboundRecord extends ProtocolFlags {
   _expiryTime: { valueOf(): number } | null;
   nodeId?: number | null;
   settings: unknown;
-  streamSettings: unknown;
 }
 
 export interface ClientCountEntry {

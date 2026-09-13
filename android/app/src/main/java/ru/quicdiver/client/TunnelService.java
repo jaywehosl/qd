@@ -33,8 +33,6 @@ public class TunnelService extends VpnService {
 
     public static final String ACTION_START = "ru.quicdiver.client.START";
     public static final String ACTION_STOP = "ru.quicdiver.client.STOP";
-    // ACTION_IDLE поднимает службу без туннеля: она держит уведомление, через
-    // которое туннель и поднимают. Иначе оно жило бы только вместе с ним.
     public static final String ACTION_IDLE = "ru.quicdiver.client.IDLE";
 
     static final String TAG = "quicdiver";
@@ -44,9 +42,6 @@ public class TunnelService extends VpnService {
     private static volatile TunnelService live;
 
     private ParcelFileDescriptor held;
-    // turns — единственный поток, где случаются подъём и спуск. Пока каждый
-    // заводил свой, быстрые нажатия по виджету накладывались друг на друга:
-    // connect и disconnect шли одновременно, и клиент оставался ни жив ни мёртв.
     private final java.util.concurrent.ExecutorService turns =
             java.util.concurrent.Executors.newSingleThreadExecutor();
     private volatile Thread watch;
@@ -68,9 +63,6 @@ public class TunnelService extends VpnService {
         watchNetwork();
     }
 
-    // The default network is not what matters here: once the tunnel is up the
-    // VPN itself becomes the default, so watching it would mean watching our own
-    // tunnel appear and vanish. What carries us is the network underneath.
     private void watchNetwork() {
         ConnectivityManager net = getSystemService(ConnectivityManager.class);
         if (net == null || watcher != null) {
@@ -104,8 +96,6 @@ public class TunnelService extends VpnService {
                 .build();
 
         try {
-            // Best-matching, not every match: with a plain callback both wifi and
-            // mobile report themselves and the tunnel would rebuild on each one.
             net.registerBestMatchingNetworkCallback(under, watcher,
                     new Handler(Looper.getMainLooper()));
         } catch (Exception e) {
@@ -144,14 +134,10 @@ public class TunnelService extends VpnService {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        // intent пуст, когда службу перезапустила сама система: тогда поднимаем
-        // только уведомление. Молча включать туннель за спиной незачем.
         String action = intent == null ? ACTION_IDLE : intent.getAction();
 
         if (ACTION_IDLE.equals(action)) {
             showNote();
-            // Флаг выхода лежит в базе, и открыть её на главном потоке нельзя.
-            // Без этого после перезагрузки кнопки выхода нет до запуска клиента.
             new Thread(new Runnable() {
                 @Override
                 public void run() {
@@ -374,7 +360,6 @@ public class TunnelService extends VpnService {
         turns.execute(new Runnable() {
             @Override
             public void run() {
-                // Пока стояли в очереди, состояние могло стать нужным.
                 if (Core.up()) {
                     return;
                 }
@@ -390,8 +375,6 @@ public class TunnelService extends VpnService {
                     Core.gaveUp(String.valueOf(e.getMessage()));
                     Core.mark(TunnelService.this, false, "");
                     update("Не удалось: " + e.getMessage());
-                    // Службу не гасим: она держит уведомление, из которого дозвон
-                    // и повторяют.
                     showNote();
                 } finally {
                     Core.turning(TunnelService.this, false);
@@ -459,12 +442,8 @@ public class TunnelService extends VpnService {
 
         Core.mark(this, false, "");
         held = null;
-        // Служба остаётся жить с опущенным туннелем и держит уведомление: через
-        // него туннель и поднимают обратно, не открывая приложения.
         showNote();
 
-        // Не через очередь: за ней может стоять двадцатисекундный дозвон, а
-        // отключение должно оборвать его сразу, а не дождаться конца.
         new Thread(new Runnable() {
             @Override
             public void run() {

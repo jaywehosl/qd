@@ -16,8 +16,6 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-// Bar — плавающая строка перехода по страницам. До неё страницы менялись только
-// свайпом и подсказкой со стрелками: догадаться было можно, увидеть — нет.
 public class Bar extends LinearLayout {
 
     public interface Pick {
@@ -57,8 +55,6 @@ public class Bar extends LinearLayout {
         tray.setCornerRadius(skin.dp(30));
         setBackground(tray);
 
-        // Подключение посередине: это то, ради чего клиент открывают, и рука
-        // тянется к центру.
         String[] names = {"маршруты", "подключение", "настройки"};
         int[] icons = {R.drawable.ic_routing, R.drawable.ic_connect, R.drawable.ic_settings};
         int[] pages = {0, 1, 2};
@@ -82,9 +78,6 @@ public class Bar extends LinearLayout {
                 }
             });
 
-            // Иконка отдельной вью, а не значком при тексте: подбор размера
-            // считает свободное место без значка и на узком экране уверенно
-            // оставляет надпись обрезанной.
             ImageView glyph = new ImageView(host);
             glyph.setImageResource(icons[i]);
             glyph.setImageTintList(ColorStateList.valueOf(skin.muted));
@@ -104,10 +97,6 @@ public class Bar extends LinearLayout {
         }
     }
 
-    // Подписи ужимаются под ширину экрана вручную: встроенный подбор размера
-    // отмеряет текст до того, как вес растянет ячейку, и оставляет максимум.
-    // Ширина в dp у соседних по диагонали телефонов разнится на десятую часть,
-    // а системный масштаб шрифта добавляет ещё столько же.
     private void measureCaps(int wide) {
         int free = (wide - getPaddingLeft() - getPaddingRight()) / chips.length
                 - skin.dp(9) * 2 - skin.dp(16) - skin.dp(5);

@@ -21,9 +21,6 @@ export default function PanelLayout() {
   const { isDark, isUltra } = useTheme();
   const { pathname } = useLocation();
 
-  // Global scroll reset on page navigation. Pages own a #content-layout scroll
-  // container (settings/xray/…); also reset the window. A second pass on the
-  // next frame catches pages whose scroll container mounts a tick late.
   useEffect(() => {
     const reset = () => {
       document.getElementById('content-layout')?.scrollTo({ top: 0 });
@@ -41,13 +38,9 @@ export default function PanelLayout() {
       <MetricsPanelProvider>
         <BusyOverlayProvider>
           <HeaderActionsProvider>
-            {/* Always-mounted editor controllers: their drafts (and thus the
-                global Save/Restart) survive navigating away from their pages. */}
             <PublishControllerProvider>
               <SettingsControllerProvider>
               
-                {/* Header + metrics bar share ONE fixed glass shell (single
-                    backdrop-filter) so there's no seam between the two surfaces. */}
                 <div className="topbar-shell">
                   <AppSidebar />
                   <MetricsPanel />

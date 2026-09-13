@@ -7,7 +7,6 @@ import { DatabaseSync } from 'node:sqlite';
 const outDir = path.resolve(__dirname, '../web/dist');
 const BACKEND_TARGET = process.env.QD_API || 'http://localhost:2053';
 const BACKEND_WS = BACKEND_TARGET.replace(/^http/, 'ws');
-// qd: panel pages are served by vite, only real api calls are proxied
 
 function resolveDBPath() {
   const envFolder = process.env.XUI_DB_FOLDER;
@@ -63,8 +62,6 @@ function readPanelVersion() {
   }
 }
 
-// `apply: 'serve'` keeps the injection out of `vite build` — dist.go
-// already injects webBasePath and version at runtime in production.
 function injectBasePathPlugin() {
   return {
     name: 'xui-inject-base-path',
@@ -79,13 +76,6 @@ function injectBasePathPlugin() {
   };
 }
 
-// es-toolkit's `./compat/*` exports map only declares a CJS condition, so deep
-// imports like `es-toolkit/compat/get` resolve to a CJS shim. That shim uses a
-// `require_X.Y` pattern that Vite's optimizer and Rolldown both mishandle
-// (TypeError: require_isUnsafeProperty is not a function). The ESM build at
-// `dist/compat/<category>/<name>.mjs` is fine but only carries a named export,
-// while consumers like recharts use default imports — so emit a virtual module
-// that re-exports the named symbol as default.
 const ES_TOOLKIT_COMPAT_DIRS = ['array', 'function', 'math', 'object', 'predicate', 'string', 'util'];
 const ES_TOOLKIT_SHIM_PREFIX = '\0es-toolkit-compat:';
 
@@ -123,7 +113,6 @@ function bypassMigratedRoute(req) {
   const url = req.url.split('?')[0];
   const basePath = refreshBasePath();
 
-  if (url === basePath) return '/login.html';
 
   if (url.startsWith(basePath)) {
     const stripped = url.slice(basePath.length);
@@ -212,7 +201,6 @@ export default defineConfig({
     rollupOptions: {
       input: {
         index: path.resolve(__dirname, 'index.html'),
-        login: path.resolve(__dirname, 'login.html'),
       },
       output: {
         manualChunks(id) {
@@ -237,13 +225,7 @@ export default defineConfig({
             || id.includes('/node_modules/react-dom/')
             || id.includes('/node_modules/scheduler/')
           ) return 'vendor-react';
-          if (
-            id.includes('/node_modules/codemirror/')
-            || id.includes('/node_modules/@codemirror/')
-            || id.includes('/node_modules/@lezer/')
-          ) return 'vendor-codemirror';
           if (id.includes('/node_modules/persian-calendar-suite/')) return 'vendor-jalali';
-          if (id.includes('/node_modules/otpauth/')) return 'vendor-otpauth';
           if (id.includes('/node_modules/@tanstack/')) return 'vendor-tanstack';
           if (id.includes('/node_modules/react-router')) return 'vendor-router';
           if (

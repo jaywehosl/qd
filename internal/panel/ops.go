@@ -13,7 +13,6 @@ import (
 	"time"
 )
 
-// dbChunk — кусок базы за один запрос.
 const dbChunk = 1 << 20
 
 func (a *API) opsRoutes(mux *http.ServeMux) {
@@ -32,14 +31,14 @@ func (a *API) restartAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for i := range results {
-		if !results[i].OK && brokeOffRestarting(results[i].Error) {
+		if !results[i].OK && !results[i].Skipped && brokeOffRestarting(results[i].Error) {
 			results[i].OK = true
 			results[i].Error = ""
 			results[i].Restarting = true
 		}
 	}
 	for _, one := range results {
-		if !one.OK {
+		if !one.OK && !one.Skipped {
 			sendFailWith(w, fmt.Errorf("%s did not take the restart: %s", one.Tag, one.Error), results)
 			return
 		}
