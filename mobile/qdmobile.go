@@ -3,7 +3,9 @@ package qdmobile
 import (
 	"context"
 	"encoding/hex"
+	"net/netip"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/jaywehosl/quic-diver/internal/qcli"
 	"github.com/jaywehosl/quic-diver/internal/qcli/packet"
 	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
+	"github.com/jaywehosl/quic-diver/internal/qsrv/uplink/relay"
 	"github.com/jaywehosl/quic-diver/internal/qwire"
 )
 
@@ -28,6 +31,7 @@ const (
 
 type Protector interface {
 	Protect(fd int) bool
+	Lookup(host string) string
 }
 
 type Host interface {
@@ -106,8 +110,21 @@ func Open(stateDir string, host Host, protector Protector, deviceID, model, name
 	}
 
 	c.api = clientapi.New(db, platform{c: c}, c.seen, c.key)
+	if protector != nil {
+		relay.Lookup = func(host string) []netip.Addr { return lookupOn(protector, host) }
+	}
 	c.upkeep()
 	return c, nil
+}
+
+func lookupOn(protector Protector, host string) []netip.Addr {
+	var out []netip.Addr
+	for _, text := range strings.Split(protector.Lookup(host), ",") {
+		if addr, err := netip.ParseAddr(text); err == nil {
+			out = append(out, addr.Unmap())
+		}
+	}
+	return out
 }
 
 func (c *Client) Close() error {

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/netip"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -33,6 +34,17 @@ type Link struct {
 	Authority string `json:"authority"`
 	Weblink   string `json:"weblink"`
 }
+
+const publicBase = "https://cloud.mail.ru/public/"
+
+func Doc(weblink string) string {
+	if i := strings.Index(weblink, "/public/"); i >= 0 {
+		weblink = weblink[i+len("/public/"):]
+	}
+	return strings.Trim(weblink, "/ ")
+}
+
+func Weblink(doc string) string { return publicBase + Doc(doc) }
 
 type Config struct {
 	Public string
@@ -71,30 +83,94 @@ func New(cfg Config) *Session {
 	}
 }
 
+var Lookup func(host string) []netip.Addr
+
+var yandex = []string{"77.88.8.8:53", "77.88.8.1:53"}
+
 func (s *Session) dialNote(ctx context.Context, network, addr string) (net.Conn, error) {
 	d := &net.Dialer{Timeout: 15 * time.Second}
+	targets := []string{addr}
 	if s.cfg.Keep != nil {
 		keep := s.cfg.Keep
 		control := func(_, _ string, rc syscall.RawConn) error {
 			return rc.Control(keep)
 		}
 		d.Control = control
-		d.Resolver = &net.Resolver{
-			PreferGo: true,
-			Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
-				return (&net.Dialer{Control: control}).DialContext(ctx, network, "8.8.8.8:53")
-			},
+		d.Resolver = yandexResolver(control)
+		targets = s.lookup(addr)
+	}
+
+	var c net.Conn
+	var err error
+	for _, target := range targets {
+		if c, err = d.DialContext(ctx, network, target); err == nil {
+			break
 		}
 	}
-	c, err := d.DialContext(ctx, network, addr)
-	if err == nil {
-		if ap, e := netip.ParseAddrPort(c.RemoteAddr().String()); e == nil {
-			s.peersMu.Lock()
-			s.peers[ap.Addr()] = struct{}{}
-			s.peersMu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	if ap, e := netip.ParseAddrPort(c.RemoteAddr().String()); e == nil {
+		s.peersMu.Lock()
+		s.peers[ap.Addr()] = struct{}{}
+		s.peersMu.Unlock()
+	}
+	return c, nil
+}
+
+func (s *Session) lookup(addr string) []string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil || Lookup == nil {
+		return []string{addr}
+	}
+	if _, err := netip.ParseAddr(host); err == nil {
+		return []string{addr}
+	}
+
+	found := Lookup(host)
+	if len(found) == 0 {
+		s.logf("[relay] %s: the network gave no address, asking yandex dns", host)
+		return []string{addr}
+	}
+	slices.SortStableFunc(found, func(a, b netip.Addr) int {
+		if a.Is4() == b.Is4() {
+			return 0
+		}
+		if a.Is4() {
+			return -1
+		}
+		return 1
+	})
+
+	out := make([]string, 0, len(found))
+	for _, ip := range found {
+		out = append(out, net.JoinHostPort(ip.String(), port))
+	}
+	return out
+}
+
+func yandexResolver(control func(string, string, syscall.RawConn) error) *net.Resolver {
+	var turn atomic.Uint32
+	return &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			server := yandex[(turn.Add(1)-1)%uint32(len(yandex))]
+			return (&net.Dialer{Control: control}).DialContext(ctx, network, server)
+		},
+	}
+}
+
+func (s *Session) Ready(ctx context.Context) error {
+	tick := time.NewTicker(50 * time.Millisecond)
+	defer tick.Stop()
+	for !s.connected.Load() {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("the relay did not come up: %w", ctx.Err())
+		case <-tick.C:
 		}
 	}
-	return c, err
+	return nil
 }
 
 func (s *Session) Peers() []netip.Addr {
@@ -130,9 +206,7 @@ func (s *Session) logf(f string, a ...any) {
 
 func (s *Session) Start() error {
 	s.running.Store(true)
-	if i := strings.Index(s.cfg.Public, "/public/"); i >= 0 {
-		s.cfg.Public = s.cfg.Public[i+len("/public/"):]
-	}
+	s.cfg.Public = Doc(s.cfg.Public)
 	if s.cfg.Public == "" && s.cfg.Token == "" {
 		return fmt.Errorf("relay: needs a Public link or a Token")
 	}
@@ -242,7 +316,7 @@ func (s *Session) connect(attempt int) {
 func (s *Session) mint() (string, error) {
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{Jar: jar, Timeout: 20 * time.Second, Transport: &http.Transport{DialContext: s.dialNote}}
-	pubURL := "https://cloud.mail.ru/public/" + s.cfg.Public
+	pubURL := publicBase + s.cfg.Public
 
 	if req, err := http.NewRequest("GET", pubURL, nil); err == nil {
 		req.Header.Set("User-Agent", browserUA)

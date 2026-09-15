@@ -17,7 +17,39 @@ var (
 	only      atomic.Bool
 	seen      sync.Map
 	relayMode atomic.Bool
+	pinned    atomic.Pointer[Path]
 )
+
+type Path struct {
+	Endpoint string
+	OverTCP  bool
+	Relay    string
+}
+
+func (p Path) String() string {
+	switch {
+	case p.Relay != "":
+		return p.Endpoint + " over relay " + p.Relay
+	case p.OverTCP:
+		return p.Endpoint + " over tcp"
+	default:
+		return p.Endpoint + " over quic"
+	}
+}
+
+func Follow(p Path) (release func()) {
+	held := &p
+	pinned.Store(held)
+	return func() { pinned.CompareAndSwap(held, nil) }
+}
+
+func Following(endpoint string) (Path, bool) {
+	held := pinned.Load()
+	if held == nil || held.Endpoint != endpoint {
+		return Path{}, false
+	}
+	return *held, true
+}
 
 func Only(on bool) { only.Store(on) }
 

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { PlusOutlined } from '@ant-design/icons';
 
 import { Button, Dialog, Divider, Field, Input, Switch, Tag } from '@/components/ds';
 import { getMessage } from '@/utils/messageBus';
@@ -26,6 +27,19 @@ function sameSet(a: number[], b: number[]): boolean {
   return b.every((x) => s.has(x));
 }
 
+type RelayRow = { nodeId: number; weblink: string };
+
+const RELAYS_PER_NODE = 4;
+
+function docOf(weblink: string): string {
+  const at = weblink.indexOf('/public/');
+  return (at >= 0 ? weblink.slice(at + '/public/'.length) : weblink).trim().replace(/\/+$/, '');
+}
+
+function relayKey(rows: RelayRow[]): string {
+  return rows.map((r) => `${r.nodeId}|${docOf(r.weblink)}`).sort().join('\n');
+}
+
 export default function GroupEditModal({
   open,
   group,
@@ -44,7 +58,7 @@ export default function GroupEditModal({
   const [deviceLimit, setDeviceLimit] = useState(0);
   const [allowExit, setAllowExit] = useState(false);
   const [relayEnable, setRelayEnable] = useState(false);
-  const [relays, setRelays] = useState<Record<number, string>>({});
+  const [relays, setRelays] = useState<Record<number, string[]>>({});
   const [saving, setSaving] = useState(false);
   const [touched, setTouched] = useState(false);
 
@@ -77,9 +91,8 @@ export default function GroupEditModal({
     setDeviceLimit(Number((group as { deviceLimit?: number }).deviceLimit) || 0);
     setAllowExit(!!(group as { allowExit?: boolean }).allowExit);
     setRelayEnable(!!(group as { relayEnable?: boolean }).relayEnable);
-    const seed: Record<number, string> = {};
-    ((group as { relays?: { nodeId: number; weblink: string }[] }).relays ?? [])
-      .forEach((r) => { seed[r.nodeId] = r.weblink; });
+    const seed: Record<number, string[]> = {};
+    (group.relays ?? []).forEach((r) => { (seed[r.nodeId] ??= []).push(r.weblink); });
     setRelays(seed);
     setTouched(false);
   });
@@ -91,6 +104,20 @@ export default function GroupEditModal({
 
   function toggleEntry(id: number) {
     setEntrypointIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
+
+  const rowsOf = (nid: number) => relays[nid] ?? [''];
+
+  function setRow(nid: number, at: number, value: string) {
+    setRelays((prev) => ({ ...prev, [nid]: (prev[nid] ?? ['']).map((w, i) => (i === at ? value : w)) }));
+  }
+
+  function addRow(nid: number) {
+    setRelays((prev) => ({ ...prev, [nid]: [...(prev[nid] ?? ['']), ''] }));
+  }
+
+  function dropRow(nid: number, at: number) {
+    setRelays((prev) => ({ ...prev, [nid]: (prev[nid] ?? ['']).filter((_, i) => i !== at) }));
   }
 
   function toggleClient(email: string) {
@@ -110,6 +137,27 @@ export default function GroupEditModal({
       return;
     }
 
+    const relayList: RelayRow[] = relayNodes.flatMap((nid) => (relays[nid] ?? [])
+      .map((w) => w.trim())
+      .filter((w) => w !== '')
+      .map((weblink) => ({ nodeId: nid, weblink })));
+
+    const seen = new Set<string>();
+    for (const r of relayList) {
+      const doc = docOf(r.weblink);
+      if (seen.has(doc)) {
+        message.error(t('pages.groups.relayTwice', { defaultValue: 'The same relay link is entered twice: {link}', link: r.weblink }));
+        return;
+      }
+      seen.add(doc);
+      const other = groups.find((g) => g.name !== group.name
+        && (g.relays ?? []).some((o) => docOf(o.weblink) === doc && o.nodeId !== r.nodeId));
+      if (other) {
+        message.error(t('pages.groups.relayTaken', { defaultValue: 'This relay link already serves another node in group {name}', name: other.name }));
+        return;
+      }
+    }
+
     setSaving(true);
     try {
       if (nextName !== group.name) {
@@ -117,13 +165,7 @@ export default function GroupEditModal({
         if (!msg?.success) { message.error(msg?.msg || t('somethingWentWrong')); return; }
       }
 
-      const relayList = relayNodes
-        .map((nid) => ({ nodeId: nid, weblink: (relays[nid] || '').trim() }))
-        .filter((r) => r.weblink !== '');
-      const origRelays = (group as { relays?: { nodeId: number; weblink: string }[] }).relays ?? [];
-      const byNode = (a: { nodeId: number }, b: { nodeId: number }) => a.nodeId - b.nodeId;
-      const relaysDiffer = JSON.stringify([...relayList].sort(byNode))
-        !== JSON.stringify([...origRelays].sort(byNode));
+      const relaysDiffer = relayKey(relayList) !== relayKey(group.relays ?? []);
 
       if (!sameSet(entrypointIds, group.entrypointIds ?? [])
           || deviceLimit !== (Number((group as { deviceLimit?: number }).deviceLimit) || 0)
@@ -191,42 +233,59 @@ export default function GroupEditModal({
         </Field>
       </div>
 
-      <div className="ge-toggle">
-        <span className="ge-toggle__label">
-          {t('pages.groups.allowExit', { defaultValue: 'Allow exit nodes' })}
-        </span>
-        <Switch
-          checked={allowExit}
-          onChange={setAllowExit}
-          aria-label={t('pages.groups.allowExit', { defaultValue: 'Allow exit nodes' })}
-        />
-      </div>
-
-      <div className="ge-toggle">
-        <span className="ge-toggle__label">
-          {t('pages.groups.relayEnable', { defaultValue: 'Relay fallback (via document cursor)' })}
-        </span>
-        <Switch
-          checked={relayEnable}
-          onChange={setRelayEnable}
-          aria-label={t('pages.groups.relayEnable', { defaultValue: 'Relay fallback' })}
-        />
+      <div className="ge-toggles">
+        <div className="ge-toggle">
+          <span className="ge-toggle__label">
+            {t('pages.groups.allowExit', { defaultValue: 'Allow exit nodes' })}
+          </span>
+          <Switch
+            checked={allowExit}
+            onChange={setAllowExit}
+            aria-label={t('pages.groups.allowExit', { defaultValue: 'Allow exit nodes' })}
+          />
+        </div>
+        <div className="ge-toggle">
+          <span className="ge-toggle__label">
+            {t('pages.groups.relayEnable', { defaultValue: 'Relay fallback' })}
+          </span>
+          <Switch
+            checked={relayEnable}
+            onChange={setRelayEnable}
+            aria-label={t('pages.groups.relayEnable', { defaultValue: 'Relay fallback' })}
+          />
+        </div>
       </div>
 
       {relayEnable && (
         relayNodes.length === 0 ? (
-          <div className="ge-empty">{t('pages.groups.relayNoNodes', { defaultValue: 'Pick inbounds first — one relay link per ingress.' })}</div>
+          <div className="ge-empty">{t('pages.groups.relayNoNodes', { defaultValue: 'Pick inbounds first — relay links are set per ingress.' })}</div>
         ) : (
           <div className="ge-relays">
-            {relayNodes.map((nid) => (
-              <Field key={nid} label={nodeLabel(nid)}>
-                <Input
-                  value={relays[nid] ?? ''}
-                  onChange={(e) => setRelays((prev) => ({ ...prev, [nid]: e.target.value }))}
-                  placeholder={t('pages.groups.relayLink', { defaultValue: 'public document link id' })}
-                />
-              </Field>
-            ))}
+            {relayNodes.map((nid) => {
+              const rows = rowsOf(nid);
+              return (
+                <div key={nid} className="ge-relay-node">
+                  <div className="ge-relay-node__head">
+                    <span className="ds-field__label">{nodeLabel(nid)}</span>
+                    {rows.length < RELAYS_PER_NODE && (
+                      <Button size="sm" icon={<PlusOutlined />} onClick={() => addRow(nid)}>
+                        {t('pages.groups.addRelay', { defaultValue: 'Add Relay' })}
+                      </Button>
+                    )}
+                  </div>
+                  {rows.map((w, at) => (
+                    <div key={at} className="ge-relay-row">
+                      <Input
+                        value={w}
+                        onChange={(e) => setRow(nid, at, e.target.value)}
+                        placeholder={t('pages.groups.relayLink', { defaultValue: 'public document link id' })}
+                      />
+                      <Button danger onClick={() => dropRow(nid, at)}>{t('delete')}</Button>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
           </div>
         )
       )}

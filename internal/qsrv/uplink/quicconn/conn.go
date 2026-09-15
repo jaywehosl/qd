@@ -209,6 +209,10 @@ func OverRelay(ctx context.Context, sess *relay.Session, authority string, conf 
 	if err := sess.Start(); err != nil {
 		return nil, err
 	}
+	if err := sess.Ready(ctx); err != nil {
+		sess.Stop()
+		return nil, err
+	}
 	qc, err := DialPacketConn(ctx, pc, relay.Peer, &tls.Config{ServerName: host}, conf)
 	if err != nil {
 		sess.Stop()

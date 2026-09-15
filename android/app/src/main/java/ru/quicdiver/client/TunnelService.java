@@ -273,6 +273,28 @@ public class TunnelService extends VpnService {
         }
     }
 
+    String lookup(String host) {
+        Network under = carrier;
+        if (under == null) {
+            Core.say(this, "java: lookup " + host + " no carrier");
+            return "";
+        }
+        try {
+            StringBuilder out = new StringBuilder();
+            for (InetAddress at : under.getAllByName(host)) {
+                if (out.length() > 0) {
+                    out.append(',');
+                }
+                out.append(at.getHostAddress());
+            }
+            Core.say(this, "java: lookup " + host + " via " + under + " -> " + out);
+            return out.toString();
+        } catch (Exception e) {
+            Core.say(this, "java: lookup " + host + " via " + under + " failed: " + e);
+            return "";
+        }
+    }
+
     String describe(Network network) {
         try {
             ConnectivityManager net = getSystemService(ConnectivityManager.class);

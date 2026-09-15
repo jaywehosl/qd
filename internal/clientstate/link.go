@@ -67,8 +67,23 @@ func ParseLink(raw string) (Link, error) {
 			link.Relays = append(link.Relays, relay.Link{Authority: authority, Weblink: weblink})
 		}
 	}
+	for _, r := range u.Query()["r"] {
+		at, docs, ok := strings.Cut(r, "~")
+		i, err := strconv.Atoi(at)
+		if !ok || err != nil || i < 0 || i >= len(link.Endpoints) {
+			continue
+		}
+		authority := link.Endpoints[i].String()
+		for _, doc := range strings.Split(docs, ",") {
+			if doc = relay.Doc(doc); doc != "" {
+				link.Relays = append(link.Relays, relay.Link{Authority: authority, Weblink: relay.Weblink(doc)})
+			}
+		}
+	}
 	return link, nil
 }
+
+func (e Endpoint) String() string { return net.JoinHostPort(e.Address, strconv.Itoa(e.Port)) }
 
 func parseEndpoint(hostPort string) (Endpoint, error) {
 	if hostPort == "" {
@@ -92,23 +107,44 @@ func (l Link) String() string {
 		User:     url.User(l.Key),
 		Fragment: l.Label,
 	}
-	if len(l.Endpoints) > 0 {
-		u.Host = net.JoinHostPort(l.Endpoints[0].Address, strconv.Itoa(l.Endpoints[0].Port))
-	}
-	q := url.Values{}
-	for _, e := range l.Endpoints[1:] {
-		q.Add("alt", net.JoinHostPort(e.Address, strconv.Itoa(e.Port)))
-	}
+	var parts []string
 	if l.NetworkKey != "" {
-		q.Set("k", l.NetworkKey)
+		parts = append(parts, "k="+queryText(l.NetworkKey))
 	}
-	for _, r := range l.Relays {
-		if r.Authority != "" && r.Weblink != "" {
-			q.Add("relay", r.Authority+"|"+r.Weblink)
+
+	where := map[string]int{}
+	for i, e := range l.Endpoints {
+		if i == 0 {
+			u.Host = e.String()
+		} else {
+			parts = append(parts, "alt="+queryText(e.String()))
+		}
+		if _, seen := where[e.String()]; !seen {
+			where[e.String()] = i
 		}
 	}
-	if len(q) > 0 {
-		u.RawQuery = q.Encode()
+
+	docs := make([][]string, len(l.Endpoints))
+	for _, r := range l.Relays {
+		if r.Authority == "" || r.Weblink == "" {
+			continue
+		}
+		if i, ok := where[r.Authority]; ok {
+			docs[i] = append(docs[i], relay.Doc(r.Weblink))
+			continue
+		}
+		parts = append(parts, "relay="+queryText(r.Authority+"|"+r.Weblink))
 	}
+	for i, held := range docs {
+		if len(held) > 0 {
+			parts = append(parts, "r="+strconv.Itoa(i)+"~"+queryText(strings.Join(held, ",")))
+		}
+	}
+
+	u.RawQuery = strings.Join(parts, "&")
 	return u.String()
 }
+
+var keepInQuery = strings.NewReplacer("%2F", "/", "%3A", ":", "%2C", ",", "%40", "@")
+
+func queryText(s string) string { return keepInQuery.Replace(url.QueryEscape(s)) }

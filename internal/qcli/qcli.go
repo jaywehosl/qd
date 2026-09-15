@@ -57,6 +57,7 @@ type Tunnel struct {
 	assigned []netip.Prefix
 	peers    []netip.Addr
 	relay    *relay.Session
+	weblink  string
 
 	meter hybrid.Meter
 
@@ -179,16 +180,40 @@ func relayQUIC() *quic.Config {
 }
 
 func dialRelays(ctx context.Context, opts Options) *Tunnel {
+	links := make([]relay.Link, 0, len(opts.Relays))
 	for _, link := range opts.Relays {
-		if link.Weblink == "" || link.Authority == "" {
+		if link.Weblink != "" && link.Authority != "" {
+			links = append(links, link)
+		}
+	}
+
+	round, stop := context.WithCancel(ctx)
+	defer stop()
+
+	line := make(chan *Tunnel, len(links))
+	for _, link := range links {
+		go func(link relay.Link) {
+			t, err := reachRelay(round, opts, link)
+			if err != nil {
+				fmt.Printf("relay    %s via %s failed: %v\n", link.Authority, link.Weblink, err)
+			}
+			line <- t
+		}(link)
+	}
+
+	for i := range links {
+		t := <-line
+		if t == nil {
 			continue
 		}
-		t, err := reachRelay(ctx, opts, link)
-		if err != nil {
-			fmt.Printf("relay    %s via %s failed: %v\n", link.Authority, link.Weblink, err)
-			continue
-		}
-		fmt.Printf("relay    %s up over cursor-relay\n", link.Authority)
+		fmt.Printf("relay    %s up over cursor-relay via %s\n", t.endpoint, t.weblink)
+		go func(left int) {
+			for ; left > 0; left-- {
+				if late := <-line; late != nil {
+					late.Close()
+				}
+			}
+		}(len(links) - i - 1)
 		return t
 	}
 	return nil
@@ -229,10 +254,10 @@ func reachRelay(ctx context.Context, opts Options, link relay.Link) (*Tunnel, er
 		assigned: assigned,
 		peers:    resolve(ctx, host),
 		relay:    sess,
+		weblink:  link.Weblink,
 	}
 	tag := opts.Route
 	t.route.Store(&tag)
-	roads.SetRelay(true)
 	return t, nil
 }
 
@@ -366,6 +391,10 @@ func resolve(ctx context.Context, host string) []netip.Addr {
 }
 
 func (t *Tunnel) Assigned() []netip.Prefix { return t.assigned }
+
+func (t *Tunnel) Path() roads.Path {
+	return roads.Path{Endpoint: t.endpoint, OverTCP: t.overTCP, Relay: t.weblink}
+}
 
 func (t *Tunnel) Peers() []netip.Addr { return t.peers }
 

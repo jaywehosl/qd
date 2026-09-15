@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"sort"
 	"strconv"
@@ -94,33 +93,15 @@ func (a *API) buildClients() ([]map[string]any, []string, error) {
 	}
 	names := make(map[int]string, len(groups))
 	reach := make(map[int][]int, len(groups))
+	relaysOf := make(map[int]int, len(groups))
 	tags := make([]string, 0, len(groups))
-	for _, g := range groups {
+	for i, g := range groups {
 		names[g.ID] = g.Name
 		reach[g.ID] = g.EntrypointIDs
+		if g.RelayEnable {
+			relaysOf[g.ID] = i
+		}
 		tags = append(tags, g.Name)
-	}
-
-	nodeAuthority := map[int]string{}
-	if nodes, err := a.nodeRows(); err == nil {
-		for _, n := range nodes {
-			id := int(numberOf(n["id"]))
-			addr := textOf(n["address"])
-			port := int(numberOf(n["port"]))
-			if addr != "" && port > 0 {
-				nodeAuthority[id] = net.JoinHostPort(addr, strconv.Itoa(port))
-			}
-		}
-	}
-	relayByGroup := make(map[int][]relay.Link, len(groups))
-	for _, g := range groups {
-		for _, r := range g.Relays {
-			auth := nodeAuthority[r.NodeID]
-			if auth == "" || r.Weblink == "" {
-				continue
-			}
-			relayByGroup[g.ID] = append(relayByGroup[g.ID], relay.Link{Authority: auth, Weblink: r.Weblink})
-		}
 	}
 
 	where := a.entrypointAddresses()
@@ -147,26 +128,31 @@ func (a *API) buildClients() ([]map[string]any, []string, error) {
 		row["uri"] = ""
 		if uuid != "" {
 			reachable := []clientstate.Endpoint{}
+			nodeEndpoint := map[int]string{}
 			for _, entry := range entries {
-				address, known := where[entry]
+				at, known := where[entry]
 				if !known {
 					continue
 				}
-				host, port, err := net.SplitHostPort(address)
-				if err != nil {
-					continue
+				reachable = append(reachable, at.Endpoint)
+				if _, held := nodeEndpoint[at.node]; !held {
+					nodeEndpoint[at.node] = at.Endpoint.String()
 				}
-				n, err := strconv.Atoi(port)
-				if err != nil {
-					continue
-				}
-				reachable = append(reachable, clientstate.Endpoint{Address: host, Port: n})
 			}
+
+			var relays []relay.Link
+			if i, on := relaysOf[group]; on {
+				for _, r := range groups[i].Relays {
+					if auth := nodeEndpoint[r.NodeID]; auth != "" && r.Weblink != "" {
+						relays = append(relays, relay.Link{Authority: auth, Weblink: r.Weblink})
+					}
+				}
+			}
+
 			if len(reachable) > 0 {
 				tag, _ := row["email"].(string)
 				row["uri"] = clientstate.Link{
-					Key: uuid, Label: tag, NetworkKey: key, Endpoints: reachable,
-					Relays: relayByGroup[group],
+					Key: uuid, Label: tag, NetworkKey: key, Endpoints: reachable, Relays: relays,
 				}.String()
 			}
 		}
@@ -588,7 +574,12 @@ func (a *API) askSessions() any {
 	return out
 }
 
-func (a *API) entrypointAddresses() map[int]string {
+type entryAt struct {
+	clientstate.Endpoint
+	node int
+}
+
+func (a *API) entrypointAddresses() map[int]entryAt {
 	body, err := a.fleet.Read("entrypoints.list", nil)
 	if err != nil {
 		return nil
@@ -611,13 +602,13 @@ func (a *API) entrypointAddresses() map[int]string {
 		hosts[n.ID] = n.Address
 	}
 
-	out := make(map[int]string, len(rows))
+	out := make(map[int]entryAt, len(rows))
 	for _, e := range rows {
 		if !e.Enable {
 			continue
 		}
 		if host, known := hosts[e.NodeID]; known {
-			out[e.ID] = net.JoinHostPort(host, strconv.Itoa(e.Port))
+			out[e.ID] = entryAt{Endpoint: clientstate.Endpoint{Address: host, Port: e.Port}, node: e.NodeID}
 		}
 	}
 	return out

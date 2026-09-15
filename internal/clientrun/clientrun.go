@@ -10,6 +10,7 @@ import (
 	"github.com/jaywehosl/quic-diver/internal/clientdns"
 	"github.com/jaywehosl/quic-diver/internal/qcli"
 	"github.com/jaywehosl/quic-diver/internal/qcli/packet"
+	"github.com/jaywehosl/quic-diver/internal/roads"
 )
 
 type Plan struct {
@@ -76,6 +77,16 @@ func Carry(ctx context.Context, p Plan) (*Carried, error) {
 		return give(err)
 	}
 	undo = append(undo, func() { live.Close() })
+
+	path := live.Path()
+	release := roads.Follow(path)
+	go func() {
+		<-round.Done()
+		release()
+	}()
+	if p.Say != nil {
+		p.Say("carry: control follows the tunnel: %s", path)
+	}
 
 	assigned := live.Assigned()
 	if len(assigned) == 0 {

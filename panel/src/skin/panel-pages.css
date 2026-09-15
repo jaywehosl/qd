@@ -222,6 +222,39 @@
 
 .ge-toggle__label { color: var(--bold); }
 
+.ge-toggles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  column-gap: var(--step-4);
+  row-gap: var(--step-2);
+}
+
+.ge-relays {
+  display: flex;
+  flex-direction: column;
+  gap: var(--step-3);
+}
+
+.ge-relay-node {
+  display: flex;
+  flex-direction: column;
+  gap: var(--step-2);
+}
+
+.ge-relay-node__head {
+  display: flex;
+  align-items: center;
+  gap: var(--step-2);
+  min-height: 32px;
+}
+
+.ge-relay-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--step-2);
+}
+
 .ge-pick { cursor: pointer; }
 
 .group-edit .ge-picks { justify-content: center; }

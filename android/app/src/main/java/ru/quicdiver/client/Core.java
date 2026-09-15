@@ -73,6 +73,12 @@ public final class Core {
             }
             return live.bind((int) socket);
         }
+
+        @Override
+        public String lookup(String host) {
+            TunnelService live = TunnelService.current();
+            return live == null ? "" : live.lookup(host);
+        }
     };
 
     public static void say(Context context, String text) {
