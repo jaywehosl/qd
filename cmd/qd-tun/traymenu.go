@@ -15,6 +15,17 @@ import (
 	"github.com/jaywehosl/quic-diver/internal/tray"
 )
 
+func startShell(db *clientstate.DB, tun *tunnel, ui *localapi.Server, api *clientapi.API, quit chan struct{}, stop <-chan struct{}) (bool, func()) {
+	icon, err := startTray(db, tun, ui, api, quit)
+	if err != nil {
+		fmt.Printf("tray     %v\n", err)
+		return false, func() {}
+	}
+	fmt.Printf("tray     running\n")
+	go watchTray(icon, db, tun, stop)
+	return true, icon.Stop
+}
+
 func startTray(db *clientstate.DB, tun *tunnel, ui *localapi.Server, api *clientapi.API, quit chan struct{}) (*tray.Icon, error) {
 	var once sync.Once
 

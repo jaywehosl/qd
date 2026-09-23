@@ -3,6 +3,7 @@ import type { AxiosError, AxiosResponse, InternalAxiosRequestConfig } from 'axio
 import qs from 'qs';
 
 import { showClientClosed, showSessionGone } from '@/lib/client-closed';
+import { readLocalToken } from './localToken';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS', 'TRACE']);
 const CSRF_TOKEN_PATH = '/csrf-token';
@@ -12,16 +13,6 @@ let csrfFetchPromise: Promise<string | null> | null = null;
 let sessionExpired = false;
 
 type CsrfAwareConfig = InternalAxiosRequestConfig & { __csrfRetried?: boolean };
-
-function readLocalToken(): string | undefined {
-  if (typeof window === 'undefined') return undefined;
-  if (window.QD_TOKEN) return window.QD_TOKEN;
-  try {
-    return sessionStorage.getItem('qd.token') || undefined;
-  } catch {
-    return undefined;
-  }
-}
 
 function readMetaToken(): string | null {
   return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || null;

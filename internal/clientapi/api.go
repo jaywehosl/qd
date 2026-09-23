@@ -88,7 +88,7 @@ func (a *API) statePayload() (map[string]any, error) {
 		}
 	}
 
-	return map[string]any{
+	payload := map[string]any{
 		"imported":  sub.Imported,
 		"admin":     sub.Admin,
 		"connected": running,
@@ -102,7 +102,11 @@ func (a *API) statePayload() (map[string]any, error) {
 			"intervalMinutes": settings.RefreshMinutes,
 			"expiresAt":       sub.ExpiresAt,
 		},
-	}, nil
+	}
+	if f, ok := a.platform.(interface{ Failed() bool }); ok {
+		payload["failed"] = f.Failed()
+	}
+	return payload, nil
 }
 
 func nodeView(n clientstate.Node) map[string]any {

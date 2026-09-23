@@ -5,6 +5,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"unsafe"
@@ -21,11 +22,19 @@ type shell struct {
 
 var (
 	pane      shell
-	inBrowser bool
 	paneData  string
-	paneDev   string
 	paneToken string
 )
+
+const (
+	guardPage = false
+	headless  = false
+)
+
+func bindPane(statePath, url, token string) {
+	paneData = filepath.Join(filepath.Dir(statePath), "webview")
+	paneToken = token
+}
 
 func (s *shell) show(url string) {
 	if url == "" {

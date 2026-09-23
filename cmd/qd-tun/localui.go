@@ -1,4 +1,4 @@
-//go:build windows
+//go:build windows || linux
 
 package main
 
@@ -21,6 +21,7 @@ func startLocalUI(host string, port int, client, admin http.Handler, isAdmin fun
 		Client:  client,
 		Admin:   admin,
 		IsAdmin: isAdmin,
+		Guarded: guardPage,
 		Index: func(token string) ([]byte, error) {
 			return web.IndexWith(map[string]string{
 				"X_UI_BASE_PATH": "/",

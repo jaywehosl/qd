@@ -1,4 +1,4 @@
-//go:build windows
+//go:build windows || linux
 
 package main
 
@@ -18,6 +18,11 @@ var (
 )
 
 const anyExit = qsrv.AnyExit
+
+const (
+	protoTCP = 6
+	protoUDP = 17
+)
 
 func setExit(egress bool) {
 	tag := ""
@@ -62,14 +67,6 @@ func exitFor(src, dst netip.AddrPort, udp bool) string {
 		return ""
 	}
 	return routeTag()
-}
-
-func goesDirect(pkt []byte) bool {
-	r := routeByProcess.Load()
-	if r == nil || !r.Active() {
-		return false
-	}
-	return r.RoleFor(pkt) == clientstate.RoleDirect
 }
 
 var fixedRate atomic.Int64

@@ -14,14 +14,6 @@ import (
 	"golang.org/x/sys/windows/registry"
 )
 
-type device struct {
-	ID       string `json:"device"`
-	Platform string `json:"platform"`
-	Model    string `json:"model"`
-	Kind     string `json:"kind"`
-	Name     string `json:"name"`
-}
-
 func identify() device {
 	vendor, product, serial := systemBIOS()
 

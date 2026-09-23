@@ -1,0 +1,16 @@
+[Unit]
+Description=qd client
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+ExecStart=/opt/qd-client/qd-client -state /var/lib/qd-client/client.db
+Restart=on-failure
+RestartSec=3
+RuntimeDirectory=qd-client
+RuntimeDirectoryMode=0755
+StateDirectory=qd-client
+StateDirectoryMode=0700
+
+[Install]
+WantedBy=multi-user.target

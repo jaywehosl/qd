@@ -1,4 +1,4 @@
-//go:build windows
+//go:build windows || linux
 
 package main
 
@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -19,18 +18,9 @@ import (
 	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
 )
 
-func defaultStatePath() string {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		return "qd-client.db"
-	}
-	return filepath.Join(dir, "QuicDiver", "client.db")
-}
-
 func runClient(opts runOptions) error {
 	redirectOutput(opts.StatePath)
 	standFull()
-	paneData = filepath.Join(filepath.Dir(opts.StatePath), "webview")
 
 	first, release := true, func() {}
 	if paneDev == "" {
@@ -150,7 +140,7 @@ func runClient(opts runOptions) error {
 		Key: key,
 	})
 
-	api = clientapi.New(db, winPlatform{tun: tun, db: db}, seen, opts.key)
+	api = clientapi.New(db, hostPlatform{tun: tun, db: db}, seen, opts.key)
 
 	admin = newAdminUI(key, db)
 	api.OnImport = func() {
@@ -172,7 +162,7 @@ func runClient(opts runOptions) error {
 	ui.SetFeed(admin.live)
 
 	pageURL := ui.URL()
-	paneToken = ui.Token()
+	bindPane(opts.StatePath, pageURL, ui.Token())
 	if paneDev != "" {
 		if u, err := url.Parse(paneDev); err == nil {
 			ui.Allow(u.Scheme + "://" + u.Host)
@@ -198,26 +188,23 @@ func runClient(opts runOptions) error {
 	go answerKnocks(func() { openPage(pageURL) }, stop)
 
 	quit := make(chan struct{})
-	icon, err := startTray(db, tun, ui, api, quit)
-	if err != nil {
-		fmt.Printf("tray     %v\n", err)
-	} else {
-		fmt.Printf("tray     running\n")
-		defer icon.Stop()
-		go watchTray(icon, db, tun, stop)
-	}
-
-	if opts.Connect && sub.Imported {
-		if err := api.Connect(); err != nil {
-			fmt.Printf("connect  %v\n", err)
-		}
-	}
+	trayed, untray := startShell(db, tun, ui, api, quit, stop)
+	defer untray()
 
 	behaviour := settings.ManualBehaviour
 	if opts.Autostart {
 		behaviour = settings.AutostartBehaviour
 	}
-	if icon == nil || behaviour == "open" {
+	if headless {
+		behaviour = ""
+	}
+
+	if (opts.Connect || behaviour == "connect" || behaviour == "openConnect") && sub.Imported {
+		if err := api.Connect(); err != nil {
+			fmt.Printf("connect  %v\n", err)
+		}
+	}
+	if !trayed || behaviour == "open" || behaviour == "openConnect" {
 		openPage(pageURL)
 	}
 

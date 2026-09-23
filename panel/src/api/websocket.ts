@@ -1,3 +1,5 @@
+import { readLocalToken } from './localToken';
+
 type WebSocketListener = (...args: unknown[]) => void;
 
 interface WebSocketMessage {
@@ -128,7 +130,9 @@ export class WebSocketClient {
     let basePath = this.basePath || '/';
     if (!basePath.startsWith('/')) basePath = '/' + basePath;
     if (!basePath.endsWith('/')) basePath += '/';
-    return `${protocol}//${window.location.host}${basePath}ws`;
+    const token = readLocalToken();
+    const query = token ? `?t=${encodeURIComponent(token)}` : '';
+    return `${protocol}//${window.location.host}${basePath}ws${query}`;
   }
 
   #onMessage(event: MessageEvent): void {

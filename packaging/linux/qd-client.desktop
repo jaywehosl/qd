@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=qd
+Comment=QUIC Diver client
+Exec=/opt/qd-client/qd-client-window
+Icon=qd-client
+Terminal=false
+Categories=Network;
+StartupWMClass=qd-client

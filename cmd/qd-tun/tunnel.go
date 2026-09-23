@@ -1,4 +1,4 @@
-//go:build windows
+//go:build windows || linux
 
 package main
 
@@ -15,9 +15,7 @@ import (
 	"github.com/jaywehosl/quic-diver/internal/clientdns"
 	"github.com/jaywehosl/quic-diver/internal/clientrun"
 	"github.com/jaywehosl/quic-diver/internal/qcli"
-	"github.com/jaywehosl/quic-diver/internal/qcli/guard"
 	"github.com/jaywehosl/quic-diver/internal/qcli/packet"
-	"github.com/jaywehosl/quic-diver/internal/qcli/windivert"
 	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
 	"github.com/jaywehosl/quic-diver/internal/qsrv/uplink/relay"
 )
@@ -115,7 +113,7 @@ func (t *tunnel) Start(servers []string, relays []relay.Link, sessionID uint32) 
 
 	nodeTalk.SetRelays(relays)
 
-	dll, err := unpackDriver()
+	open, err := t.opener()
 	if err != nil {
 		return err
 	}
@@ -154,19 +152,9 @@ func (t *tunnel) Start(servers []string, relays []relay.Link, sessionID uint32) 
 			t.cfg.Lost()
 		}
 	}
+	plan.Dial.Keep = keepSocket
 	plan.Source = func(ctx context.Context, live *qcli.Tunnel) (packet.Source, error) {
-		filter := windivert.BuildFilter(windivert.CaptureConfig{
-			TCP: true, UDP: true, DNS: t.servesDNS(),
-			Bypass: t.bypass(live, keepOut),
-		})
-		src, err := windivert.Open(dll, filter, 0)
-		if err != nil {
-			return nil, fmt.Errorf("windivert: %w (run as administrator)", err)
-		}
-		if r := routeByProcess.Load(); r != nil {
-			go r.watchSockets(ctx, dll)
-		}
-		return src, nil
+		return open(ctx, live, keepOut)
 	}
 
 	held, err := clientrun.Carry(context.Background(), plan)
@@ -202,16 +190,7 @@ func (t *tunnel) Start(servers []string, relays []relay.Link, sessionID uint32) 
 
 const dialWait = 20 * time.Second
 
-func (t *tunnel) bypass(live *qcli.Tunnel, keepOut []netip.Prefix) []netip.Prefix {
-	out := append([]netip.Prefix(nil), guard.New(nil).Bypasses()...)
-	for _, p := range live.Peers() {
-		out = append(out, netip.PrefixFrom(p, p.BitLen()))
-	}
-	for _, p := range live.RelayPeers() {
-		out = append(out, netip.PrefixFrom(p, p.BitLen()))
-	}
-	return append(out, keepOut...)
-}
+type sourceOpener func(ctx context.Context, live *qcli.Tunnel, keepOut []netip.Prefix) (packet.Source, error)
 
 func (t *tunnel) peerAddresses() []netip.Prefix {
 	if t.cfg.Peers == nil {
@@ -308,18 +287,6 @@ func holdToken(key *qdcrypt.Key) {
 		return
 	}
 	nodeTalk.SetToken(hex.EncodeToString(key[:]))
-}
-
-func unpackDriver() (string, error) {
-	dir, err := windivert.DefaultDir()
-	if err != nil {
-		return "", fmt.Errorf("driver folder: %w", err)
-	}
-	dll, err := windivert.Extract(dir)
-	if err != nil {
-		return "", fmt.Errorf("unpack windivert: %w", err)
-	}
-	return dll, nil
 }
 
 func (t *tunnel) ServerName() string {

@@ -1,4 +1,4 @@
-//go:build windows
+//go:build windows || linux
 
 package main
 
@@ -9,36 +9,38 @@ import (
 	"github.com/jaywehosl/quic-diver/internal/qsrv/uplink/relay"
 )
 
-type winPlatform struct {
+type hostPlatform struct {
 	tun *tunnel
 	db  *clientstate.DB
 }
 
-func (p winPlatform) Running() bool { return p.tun.Running() }
+func (p hostPlatform) Running() bool { return p.tun.Running() }
 
-func (p winPlatform) Start(servers []string, relays []relay.Link, session uint32) error {
+func (p hostPlatform) Failed() bool { return p.tun.Failed() }
+
+func (p hostPlatform) Start(servers []string, relays []relay.Link, session uint32) error {
 	return p.tun.Start(servers, relays, session)
 }
 
-func (p winPlatform) Stop() error { return p.tun.Stop() }
+func (p hostPlatform) Stop() error { return p.tun.Stop() }
 
-func (p winPlatform) SetKey(key *qdcrypt.Key) { p.tun.SetKey(key) }
+func (p hostPlatform) SetKey(key *qdcrypt.Key) { p.tun.SetKey(key) }
 
-func (p winPlatform) ServerName() string { return p.tun.ServerName() }
+func (p hostPlatform) ServerName() string { return p.tun.ServerName() }
 
-func (p winPlatform) SetExit(egress bool) { setExit(egress) }
+func (p hostPlatform) SetExit(egress bool) { setExit(egress) }
 
-func (p winPlatform) SetFixedRate(mbit int) { setFixedRate(mbit) }
+func (p hostPlatform) SetFixedRate(mbit int) { setFixedRate(mbit) }
 
-func (p winPlatform) SyncControlRelays(relays []relay.Link) { nodeTalk.SetRelays(relays) }
+func (p hostPlatform) SyncControlRelays(relays []relay.Link) { nodeTalk.SetRelays(relays) }
 
-func (p winPlatform) Wire() clientapi.Asker { return nodeTalk }
+func (p hostPlatform) Wire() clientapi.Asker { return nodeTalk }
 
-func (p winPlatform) Identify() clientapi.Device { return deviceOf() }
+func (p hostPlatform) Identify() clientapi.Device { return deviceOf() }
 
-func (p winPlatform) HoldAutostart(on bool) error { return holdAutostart(on) }
+func (p hostPlatform) HoldAutostart(on bool) error { return holdAutostart(on) }
 
-func (p winPlatform) Processes() []clientapi.Process {
+func (p hostPlatform) Processes() []clientapi.Process {
 	running := runningProcesses()
 	out := make([]clientapi.Process, 0, len(running))
 	for _, r := range running {
@@ -49,11 +51,19 @@ func (p winPlatform) Processes() []clientapi.Process {
 	return out
 }
 
-func (p winPlatform) RulesChanged() { reloadProcessRules(p.db) }
+func (p hostPlatform) RulesChanged() { reloadProcessRules(p.db) }
 
 func deviceOf() clientapi.Device {
 	me := identify()
 	return clientapi.Device{
 		ID: me.ID, Platform: me.Platform, Model: me.Model, Kind: me.Kind, Name: me.Name,
 	}
+}
+
+type device struct {
+	ID       string `json:"device"`
+	Platform string `json:"platform"`
+	Model    string `json:"model"`
+	Kind     string `json:"kind"`
+	Name     string `json:"name"`
 }

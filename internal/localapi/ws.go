@@ -20,6 +20,11 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 	feed := s.feed
 	s.mu.RUnlock()
 
+	if !s.holds(r.URL.Query().Get("t")) {
+		http.Error(w, "", http.StatusUnauthorized)
+		return
+	}
+
 	upgrader := websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool { return allowed[r.Header.Get("Origin")] },
 	}

@@ -1,4 +1,4 @@
-//go:build windows
+//go:build windows || linux
 
 package main
 
@@ -17,12 +17,13 @@ func roamWatch(ctx context.Context, stop <-chan struct{}, live *qcli.Tunnel, los
 		}
 	}()
 
-	watcher, err := watchRoutes()
-	if err != nil {
-		fmt.Printf("roam     no watch on this machine: %v\n", err)
-		return
+	var changed <-chan struct{}
+	if watcher, err := watchRoutes(); err != nil {
+		fmt.Printf("roam     no route watch on this machine, only the liveness checks run: %v\n", err)
+	} else {
+		defer watcher.Close()
+		changed = watcher.Changed()
 	}
-	defer watcher.Close()
 
 	tick := time.NewTicker(roamStep)
 	defer tick.Stop()
@@ -39,7 +40,7 @@ func roamWatch(ctx context.Context, stop <-chan struct{}, live *qcli.Tunnel, los
 		case <-ctx.Done():
 			return
 
-		case <-watcher.Changed():
+		case <-changed:
 			was, deaf, heardAt, last = live.Stats(), time.Time{}, time.Now(), time.Now()
 			migrate(ctx, live)
 

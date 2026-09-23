@@ -1,9 +1,11 @@
 import { useTranslation } from 'react-i18next';
+import dayjs from 'dayjs';
 import { Button, Dialog, toast } from '@/components/ds';
 import { DownloadOutlined, UploadOutlined } from '@ant-design/icons';
 
 import { HttpUtil, PromiseUtil } from '@/utils';
 import { markBackupDone } from '@/stores/notificationStore';
+import { readLocalToken } from '@/api/localToken';
 import { useBusyOverlay, BOOT_BUSY_KEY } from '@/layouts/busy-overlay-context';
 async function waitForPanelBack(timeoutMs = 90000): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
@@ -32,7 +34,7 @@ export default function BackupModal({ open, basePath: _basePath, onClose }: Back
   async function exportDb() {
     markBackupDone();
     const res = await fetch('/panel/api/server/getDb', {
-      headers: { 'X-QD-Token': sessionStorage.getItem('qd.token') || '' },
+      headers: { 'X-QD-Token': readLocalToken() || '' },
     });
     if (!res.ok) {
       toast.error(t('pages.index.exportDatabaseError', { defaultValue: 'Could not read the database' }));
@@ -41,7 +43,7 @@ export default function BackupModal({ open, basePath: _basePath, onClose }: Back
     const url = URL.createObjectURL(await res.blob());
     const link = document.createElement('a');
     link.href = url;
-    link.download = 'qd-network.db';
+    link.download = `qd-network-${dayjs().format('YYYY-MM-DD_HH-mm-ss')}.db`;
     link.click();
     URL.revokeObjectURL(url);
   }

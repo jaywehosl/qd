@@ -252,7 +252,8 @@ func (a *API) getDB(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Disposition", `attachment; filename="qd-network.db"`)
+	w.Header().Set("Content-Disposition",
+		`attachment; filename="qd-network-`+time.Now().Format("2006-01-02_15-04-05")+`.db"`)
 	w.Write(blob)
 }
 

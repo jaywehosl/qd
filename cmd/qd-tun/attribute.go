@@ -1,43 +1,32 @@
-//go:build windows
+//go:build windows || linux
 
 package main
 
 import (
-	"context"
 	"encoding/binary"
 	"fmt"
 	"net/netip"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
-	"unsafe"
 
 	"github.com/jaywehosl/quic-diver/internal/clientstate"
-	"github.com/jaywehosl/quic-diver/internal/qcli/windivert"
-	"golang.org/x/sys/windows"
-)
-
-var (
-	procGetExtendedTcpTable = iphlpapi.NewProc("GetExtendedTcpTable")
-	procGetExtendedUdpTable = iphlpapi.NewProc("GetExtendedUdpTable")
 )
 
 const (
-	tcpTableOwnerPidAll = 5
-	udpTableOwnerPid    = 1
-
-	protoTCP = 6
-	protoUDP = 17
-
 	tableTTL     = 5 * time.Second
 	missCooldown = 40 * time.Millisecond
 
 	flowCap  = 8192
 	flowIdle = 5 * time.Minute
 )
+
+type stats struct {
+	procMiss atomic.Uint64
+}
+
+var st stats
 
 type portKey struct {
 	proto uint8
@@ -300,33 +289,6 @@ func (r *procRouter) wake() {
 	}
 }
 
-func (r *procRouter) watchSockets(ctx context.Context, dll string) {
-	watch, err := windivert.WatchSockets(dll)
-	if err != nil {
-		fmt.Printf("routing  no socket watch, falling back to the windows tables: %v\n", err)
-		return
-	}
-	defer watch.Close()
-	fmt.Printf("routing  socket watch is up, flow owners are known before the first packet\n")
-
-	err = watch.Watch(ctx, func(event uint8, data windivert.SocketData) {
-		if data.Protocol != protoTCP && data.Protocol != protoUDP {
-			return
-		}
-		key := portKey{proto: data.Protocol, port: data.LocalPort}
-		if event == windivert.EventSocketClose {
-			r.watched.Delete(key)
-			return
-		}
-		if data.ProcessID != 0 {
-			r.watched.Store(key, data.ProcessID)
-		}
-	})
-	if ctx.Err() == nil {
-		fmt.Printf("routing  socket watch stopped: %v\n", err)
-	}
-}
-
 func (r *procRouter) tellMisses(stop <-chan struct{}) {
 	tick := time.NewTicker(30 * time.Second)
 	defer tick.Stop()
@@ -351,7 +313,9 @@ func (r *procRouter) keepTable(stop <-chan struct{}) {
 	defer tick.Stop()
 
 	for {
-		r.readTable()
+		if r.fixed.Load() == nil {
+			r.readTable()
+		}
 
 		select {
 		case <-stop:
@@ -365,67 +329,11 @@ func (r *procRouter) keepTable(stop <-chan struct{}) {
 
 func (r *procRouter) readTable() {
 	next := make(map[portKey]uint32, 512)
-	readTCPTable(next)
-	readUDPTable(next)
+	readSockets(next)
 	if len(next) == 0 {
 		return
 	}
 	r.tbl.Store(&next)
-}
-
-func readTCPTable(into map[portKey]uint32) {
-	buf, ok := extendedTable(procGetExtendedTcpTable, tcpTableOwnerPidAll)
-	if !ok {
-		return
-	}
-	n := binary.LittleEndian.Uint32(buf[0:4])
-	const rowSize = 24
-	for i := uint32(0); i < n; i++ {
-		off := 4 + int(i)*rowSize
-		if off+rowSize > len(buf) {
-			return
-		}
-		port := binary.BigEndian.Uint16(buf[off+8 : off+10])
-		pid := binary.LittleEndian.Uint32(buf[off+20 : off+24])
-		into[portKey{proto: protoTCP, port: port}] = pid
-	}
-}
-
-func readUDPTable(into map[portKey]uint32) {
-	buf, ok := extendedTable(procGetExtendedUdpTable, udpTableOwnerPid)
-	if !ok {
-		return
-	}
-	n := binary.LittleEndian.Uint32(buf[0:4])
-	const rowSize = 12
-	for i := uint32(0); i < n; i++ {
-		off := 4 + int(i)*rowSize
-		if off+rowSize > len(buf) {
-			return
-		}
-		port := binary.BigEndian.Uint16(buf[off+4 : off+6])
-		pid := binary.LittleEndian.Uint32(buf[off+8 : off+12])
-		into[portKey{proto: protoUDP, port: port}] = pid
-	}
-}
-
-func extendedTable(proc *syscall.LazyProc, class uintptr) ([]byte, bool) {
-	var size uint32
-	proc.Call(0, uintptr(unsafe.Pointer(&size)), 0, afInet, class, 0)
-	if size == 0 {
-		return nil, false
-	}
-	buf := make([]byte, size+4096)
-	size = uint32(len(buf))
-	r, _, _ := proc.Call(
-		uintptr(unsafe.Pointer(&buf[0])),
-		uintptr(unsafe.Pointer(&size)),
-		0, afInet, class, 0,
-	)
-	if r != 0 || size < 4 {
-		return nil, false
-	}
-	return buf[:size], true
 }
 
 func (r *procRouter) identFor(pid uint32) (procIdent, bool) {
@@ -450,22 +358,6 @@ func (r *procRouter) identFor(pid uint32) (procIdent, bool) {
 	return ident, ident.name != ""
 }
 
-func lookupProcess(pid uint32) procIdent {
-	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
-	if err != nil {
-		return procIdent{}
-	}
-	defer windows.CloseHandle(h)
-
-	buf := make([]uint16, windows.MAX_PATH)
-	size := uint32(len(buf))
-	if err := windows.QueryFullProcessImageName(h, 0, &buf[0], &size); err != nil {
-		return procIdent{}
-	}
-	full := windows.UTF16ToString(buf[:size])
-	return procIdent{name: filepath.Base(full), path: full}
-}
-
 func reloadProcessRules(db *clientstate.DB) {
 	if db == nil {
 		return
@@ -486,6 +378,7 @@ func reloadProcessRules(db *clientstate.DB) {
 		def = clientstate.RoleTunnel
 	}
 	r.Load(def, rules)
+	splitRules(r)
 
 	if n := r.dropRerouted(); n > 0 {
 		fmt.Printf("routing  %d connections dropped so the new rule takes hold now\n", n)
@@ -493,62 +386,6 @@ func reloadProcessRules(db *clientstate.DB) {
 	if held := liveTunnel.Load(); held != nil {
 		(*held).Reroute()
 	}
-}
-
-const tcpStateDeleteTCB = 12
-
-var procSetTcpEntry = iphlpapi.NewProc("SetTcpEntry")
-
-type tcpRow struct {
-	state      uint32
-	localAddr  uint32
-	localPort  uint32
-	remoteAddr uint32
-	remotePort uint32
-	pid        uint32
-}
-
-func tcpRowsWithPid() []tcpRow {
-	buf, ok := extendedTable(procGetExtendedTcpTable, tcpTableOwnerPidAll)
-	if !ok {
-		return nil
-	}
-	n := binary.LittleEndian.Uint32(buf[0:4])
-	out := make([]tcpRow, 0, n)
-	const rowSize = 24
-	for i := uint32(0); i < n; i++ {
-		off := 4 + int(i)*rowSize
-		if off+rowSize > len(buf) {
-			break
-		}
-		out = append(out, tcpRow{
-			state:      binary.LittleEndian.Uint32(buf[off : off+4]),
-			localAddr:  binary.LittleEndian.Uint32(buf[off+4 : off+8]),
-			localPort:  binary.LittleEndian.Uint32(buf[off+8 : off+12]),
-			remoteAddr: binary.LittleEndian.Uint32(buf[off+12 : off+16]),
-			remotePort: binary.LittleEndian.Uint32(buf[off+16 : off+20]),
-			pid:        binary.LittleEndian.Uint32(buf[off+20 : off+24]),
-		})
-	}
-	return out
-}
-
-func dropConnection(r tcpRow) bool {
-	row := struct {
-		state      uint32
-		localAddr  uint32
-		localPort  uint32
-		remoteAddr uint32
-		remotePort uint32
-	}{
-		state:      tcpStateDeleteTCB,
-		localAddr:  r.localAddr,
-		localPort:  r.localPort,
-		remoteAddr: r.remoteAddr,
-		remotePort: r.remotePort,
-	}
-	rc, _, _ := procSetTcpEntry.Call(uintptr(unsafe.Pointer(&row)))
-	return rc == 0
 }
 
 func (r *procRouter) roleOf(ident procIdent, byPath, byName map[string]string, def string) string {
@@ -562,65 +399,3 @@ func (r *procRouter) roleOf(ident procIdent, byPath, byName map[string]string, d
 	}
 	return def
 }
-
-func (r *procRouter) dropRerouted() int {
-	r.mu.RLock()
-	oldPath, oldName, oldDef := r.prevByPath, r.prevByName, r.prevDef
-	newPath, newName, newDef := r.byPath, r.byName, r.def
-	r.mu.RUnlock()
-
-	if oldPath == nil && oldName == nil {
-		return 0
-	}
-
-	dropped := 0
-	for _, row := range tcpRowsWithPid() {
-		if row.pid == 0 || row.remoteAddr == 0 {
-			continue
-		}
-		ident, ok := r.identFor(row.pid)
-		if !ok {
-			continue
-		}
-		was := r.roleOf(ident, oldPath, oldName, oldDef)
-		now := r.roleOf(ident, newPath, newName, newDef)
-		if was == now {
-			continue
-		}
-		if dropConnection(row) {
-			dropped++
-		}
-	}
-	return dropped
-}
-
-func (r *procRouter) dropInherited() int {
-	byPath, byName, def := map[string]string{}, map[string]string{}, clientstate.RoleTunnel
-	if r != nil {
-		r.mu.RLock()
-		byPath, byName, def = r.byPath, r.byName, r.def
-		r.mu.RUnlock()
-	}
-
-	dropped := 0
-	for _, row := range tcpRowsWithPid() {
-		if row.pid == 0 || row.remoteAddr == 0 || loopback(row.remoteAddr) {
-			continue
-		}
-		role := def
-		if r != nil {
-			if ident, ok := r.identFor(row.pid); ok {
-				role = r.roleOf(ident, byPath, byName, def)
-			}
-		}
-		if role != clientstate.RoleTunnel {
-			continue
-		}
-		if dropConnection(row) {
-			dropped++
-		}
-	}
-	return dropped
-}
-
-func loopback(addr uint32) bool { return byte(addr) == 127 }

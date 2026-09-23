@@ -29,6 +29,7 @@ type Server struct {
 	isAdmin func() bool
 	index   func(token string) ([]byte, error)
 	feed    Feed
+	guarded bool
 }
 
 func (s *Server) SetFeed(feed Feed) {
@@ -43,6 +44,7 @@ type Config struct {
 	Admin   http.Handler
 	IsAdmin func() bool
 	Index   func(token string) ([]byte, error)
+	Guarded bool
 }
 
 func New(cfg Config) (*Server, error) {
@@ -64,6 +66,7 @@ func New(cfg Config) (*Server, error) {
 		admin:   cfg.Admin,
 		isAdmin: isAdmin,
 		index:   cfg.Index,
+		guarded: cfg.Guarded,
 	}, nil
 }
 
@@ -157,6 +160,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if isNavigation(r) {
+		if s.guarded && !s.admitted(w, r) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte(closedPage))
+			return
+		}
 		s.servePage(w)
 		return
 	}
@@ -200,9 +209,35 @@ func (s *Server) authorised(r *http.Request) bool {
 	if origin := r.Header.Get("Origin"); origin != "" && !allowed[origin] {
 		return false
 	}
-	given := r.Header.Get(tokenHeader)
-	return subtle.ConstantTimeCompare([]byte(given), []byte(token)) == 1
+	return subtle.ConstantTimeCompare([]byte(r.Header.Get(tokenHeader)), []byte(token)) == 1
 }
+
+func (s *Server) holds(given string) bool {
+	s.mu.RLock()
+	token := s.token
+	s.mu.RUnlock()
+	return given != "" && subtle.ConstantTimeCompare([]byte(given), []byte(token)) == 1
+}
+
+const admitCookie = "qd_ui"
+
+func (s *Server) admitted(w http.ResponseWriter, r *http.Request) bool {
+	if given := r.URL.Query().Get("t"); given != "" {
+		if !s.holds(given) {
+			return false
+		}
+		http.SetCookie(w, &http.Cookie{
+			Name: admitCookie, Value: given, Path: "/",
+			HttpOnly: true, SameSite: http.SameSiteStrictMode,
+		})
+		return true
+	}
+	c, err := r.Cookie(admitCookie)
+	return err == nil && s.holds(c.Value)
+}
+
+const closedPage = `<!doctype html><meta charset="utf-8"><title>qd</title>` +
+	`<body style="font:15px system-ui;margin:3em">This page opens only from the qd window.</body>`
 
 func (s *Server) Token() string {
 	s.mu.RLock()
