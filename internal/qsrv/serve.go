@@ -14,6 +14,7 @@ import (
 
 	connectip "github.com/quic-go/connect-ip-go"
 	quic "github.com/quic-go/quic-go"
+	"github.com/quic-go/quic-go/http3"
 
 	"github.com/jaywehosl/quic-diver/internal/qsrv/server/netstack"
 )
@@ -298,11 +299,21 @@ func (n *Node) serveConnect(w http.ResponseWriter, r *http.Request) {
 	dialer := n.dialerFor(dialCtx, grant, route, hops)
 	s := n.counting(grant, r, route)
 
+	if r.Header.Get(HeaderProto) == "icmp" {
+		n.servePing(w, r, dialer, dst.Addr())
+		cancel()
+		return
+	}
+
 	if r.Header.Get(HeaderProto) == "udp" {
 		out, err := dialer.DialUDP(dialCtx, dst)
 		cancel()
 		if err != nil {
 			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		if hs, ok := w.(http3.HTTPStreamer); ok && r.Header.Get(HeaderDgram) == "1" {
+			n.relayDatagrams(w, hs, out, s)
 			return
 		}
 		n.relayPackets(w, r, out, s)

@@ -89,16 +89,20 @@ install_packages() {
     [ ${#want[@]} -gt 0 ] || die "no apt, dnf, pacman or zypper here; install curl, iproute2, nftables and WebKitGTK 4.1 by hand"
 
     say "installing ${want[*]}"
+    local log
+    log="$(mktemp)"
     if command -v apt-get >/dev/null 2>&1; then
-        apt-get update -qq >/dev/null 2>&1 || true
-        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${want[@]}" >/dev/null 2>&1
+        apt-get update -qq >"$log" 2>&1 || true
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${want[@]}" >>"$log" 2>&1
     elif command -v dnf >/dev/null 2>&1; then
-        dnf install -y -q "${want[@]}" >/dev/null 2>&1
+        dnf install -y -q "${want[@]}" >"$log" 2>&1
     elif command -v pacman >/dev/null 2>&1; then
-        pacman -S --needed --noconfirm "${want[@]}" >/dev/null 2>&1
+        say "Arch takes no partial upgrades, so the system is brought up to date first (pacman -Syu)"
+        pacman -Syu --needed --noconfirm "${want[@]}" >"$log" 2>&1
     else
-        zypper --non-interactive install "${want[@]}" >/dev/null 2>&1
-    fi || die "could not install ${want[*]}"
+        zypper --non-interactive install "${want[@]}" >"$log" 2>&1
+    fi || { tail -n 6 "$log" | sed "s/^/      /" >&2; rm -f "$log"; die "could not install ${want[*]}"; }
+    rm -f "$log"
     good "installed ${want[*]}"
 }
 

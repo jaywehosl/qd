@@ -25,6 +25,8 @@ type adminUI struct {
 	stop    chan struct{}
 	entered bool
 	touched time.Time
+
+	finding sync.Mutex
 }
 
 func newAdminUI(key *qdcrypt.Key, db *clientstate.DB) *adminUI {
@@ -37,12 +39,9 @@ func (a *adminUI) opened() {
 	a.mu.Lock()
 	a.touched = time.Now()
 	a.entered = true
-	fleet, db := a.fleet, a.db
+	db := a.db
 	a.mu.Unlock()
 
-	if fleet == nil || len(fleet.Nodes()) > 0 {
-		return
-	}
 	a.discover(db)
 }
 
@@ -74,9 +73,7 @@ func (a *adminUI) SetKey(key *qdcrypt.Key) {
 	if was != nil {
 		close(was)
 	}
-	if a.open() {
-		go a.discover(a.db)
-	}
+	go a.discover(a.db)
 	go api.Converge(stop, a.open)
 }
 
@@ -112,8 +109,11 @@ func (a *adminUI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *adminUI) discover(db *clientstate.DB) {
+	a.finding.Lock()
+	defer a.finding.Unlock()
+
 	fleet, _ := a.handler()
-	if fleet == nil {
+	if fleet == nil || len(fleet.Nodes()) > 0 {
 		return
 	}
 

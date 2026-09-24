@@ -29,6 +29,7 @@ type Config struct {
 	MaxTTL    time.Duration
 	Stale     time.Duration
 	Timeout   time.Duration
+	Forward   func(query []byte) ([]byte, error)
 }
 
 type Stats struct {
@@ -77,16 +78,19 @@ type Resolver struct {
 	maxSize   int
 	stale     time.Duration
 	timeout   time.Duration
+	forwarder func(query []byte) ([]byte, error)
 	cache     map[string]*entry
 	lru       *list.List
+	inflight  map[string]*call
 
 	stats counters
 }
 
 func New(cfg Config) *Resolver {
 	r := &Resolver{
-		cache: map[string]*entry{},
-		lru:   list.New(),
+		cache:    map[string]*entry{},
+		lru:      list.New(),
+		inflight: map[string]*call{},
 	}
 	r.Reconfigure(cfg)
 	return r
@@ -125,6 +129,7 @@ func (r *Resolver) Reconfigure(cfg Config) {
 	r.mu.Lock()
 	r.minTTL, r.maxTTL, r.stale = cfg.MinTTL, cfg.MaxTTL, cfg.Stale
 	r.maxSize, r.timeout, r.rules = cfg.Cache, cfg.Timeout, rules
+	r.forwarder = cfg.Forward
 
 	same := len(cfg.Upstreams) == len(r.upstreams)
 	if same {
@@ -177,14 +182,47 @@ func (r *Resolver) Answer(query []byte) ([]byte, bool, error) {
 		return answer, true, nil
 	}
 
-	answer, ttl, err := r.forward(query)
+	answer, err := r.once(key, query)
 	if err != nil {
 		r.stats.failed.Add(1)
 		return nil, false, err
 	}
-	r.stats.upstream.Add(1)
-	r.store(key, answer, ttl)
 	return answer, false, nil
+}
+
+type call struct {
+	done   chan struct{}
+	answer []byte
+	err    error
+}
+
+func (r *Resolver) once(key string, query []byte) ([]byte, error) {
+	r.mu.Lock()
+	if c, ok := r.inflight[key]; ok {
+		r.mu.Unlock()
+		<-c.done
+		if c.err != nil {
+			return nil, c.err
+		}
+		out := append([]byte(nil), c.answer...)
+		copy(out[0:2], query[0:2])
+		return out, nil
+	}
+	c := &call{done: make(chan struct{})}
+	r.inflight[key] = c
+	r.mu.Unlock()
+
+	answer, ttl, err := r.forward(query)
+	if err == nil {
+		r.stats.upstream.Add(1)
+		r.store(key, answer, ttl)
+	}
+	c.answer, c.err = answer, err
+	r.mu.Lock()
+	delete(r.inflight, key)
+	r.mu.Unlock()
+	close(c.done)
+	return answer, err
 }
 
 func (r *Resolver) renew(key string, query []byte) {
@@ -204,9 +242,16 @@ func (r *Resolver) forward(query []byte) ([]byte, time.Duration, error) {
 	r.mu.Lock()
 	ups := make([]*upstream, len(r.upstreams))
 	copy(ups, r.upstreams)
-	timeout, minTTL, maxTTL := r.timeout, r.minTTL, r.maxTTL
+	timeout, minTTL, maxTTL, via := r.timeout, r.minTTL, r.maxTTL, r.forwarder
 	r.mu.Unlock()
 
+	if via != nil {
+		answer, err := via(query)
+		if err != nil {
+			return nil, 0, err
+		}
+		return answer, answerTTL(answer, minTTL, maxTTL), nil
+	}
 	if len(ups) == 0 {
 		return nil, 0, errors.New("dns: no upstream configured")
 	}
@@ -616,6 +661,12 @@ func afterQuestions(msg []byte) int {
 }
 
 func answerTTL(msg []byte, lo, hi time.Duration) time.Duration {
+	if len(msg) < 12 {
+		return 0
+	}
+	if rcode := msg[3] & 0x0F; rcode != 0 && rcode != 3 {
+		return 0
+	}
 	answers := int(binary.BigEndian.Uint16(msg[6:8]))
 	if answers == 0 {
 		return lo
@@ -679,7 +730,7 @@ func shortReply(query []byte, low byte) []byte {
 
 func NoData(query []byte) []byte { return shortReply(query, 0x80) }
 
-func Refused(query []byte) []byte { return shortReply(query, 0x83) }
+func NXDomain(query []byte) []byte { return shortReply(query, 0x83) }
 
 func ServFail(query []byte) []byte { return shortReply(query, 0x82) }
 

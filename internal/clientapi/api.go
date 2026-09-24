@@ -54,6 +54,8 @@ func (a *API) Routes() http.Handler {
 
 	mux.HandleFunc("/client/api/routing", a.routing)
 	mux.HandleFunc("/client/api/routing/processes", a.processes)
+	mux.HandleFunc("/client/api/routing/export", a.exportRules)
+	mux.HandleFunc("/client/api/routing/import", a.importRules)
 
 	mux.HandleFunc("/client/api/settings", a.settings)
 	mux.HandleFunc("/client/api/about", a.about)

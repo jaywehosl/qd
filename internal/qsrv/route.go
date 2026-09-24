@@ -11,6 +11,11 @@ const (
 	HeaderProto   = "Qd-Proto"
 	HeaderDevice  = "Qd-Device"
 	HeaderAddr    = "Qd-Addr"
+	HeaderTTL     = "Qd-Ttl"
+	HeaderEcho    = "Qd-Echo"
+	HeaderFrom    = "Qd-From"
+	HeaderICMP    = "Qd-Icmp"
+	HeaderDgram   = "Qd-Dgram"
 
 	AnyExit  = "egress"
 	HereExit = "here"

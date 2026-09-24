@@ -76,5 +76,19 @@ func SrcPort(pkt []byte) (uint16, bool) {
 
 func IsDNS(pkt []byte) bool {
 	proto, rest, ok := after(pkt, 8)
-	return ok && proto == protoUDP && binary.BigEndian.Uint16(rest[2:4]) == 53
+	return ok && (proto == protoUDP || proto == protoTCP) && binary.BigEndian.Uint16(rest[2:4]) == 53
+}
+
+func Checksum(b []byte) uint16 {
+	var sum uint32
+	for i := 0; i+1 < len(b); i += 2 {
+		sum += uint32(binary.BigEndian.Uint16(b[i:]))
+	}
+	if len(b)%2 == 1 {
+		sum += uint32(b[len(b)-1]) << 8
+	}
+	for sum > 0xFFFF {
+		sum = (sum & 0xFFFF) + (sum >> 16)
+	}
+	return ^uint16(sum)
 }

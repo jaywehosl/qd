@@ -1,12 +1,13 @@
-import { lazy, useCallback, useMemo, useState } from 'react';
+import { lazy, useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { DeleteOutlined, DownOutlined, PlusOutlined } from '@ant-design/icons';
+import { DeleteOutlined, DownloadOutlined, DownOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
 
-import { Alert, Button, Card, Dialog, Select, Tag } from '@/components/ds';
+import { Alert, Button, Card, Dialog, Select, Tag, toast } from '@/components/ds';
 import { Spin } from '@/components/ui';
 import { LazyMount } from '@/components/utility';
 import { ROUTING_ROLES, type RoutingRole } from '@/schemas/client-routing';
 import { useClientRouting } from '@/hooks/useClientRouting';
+import { HttpUtil } from '@/utils';
 const ProcessPickerDialog = lazy(() => import('./ProcessPickerDialog'));
 
 interface RoutingSectionProps {
@@ -55,6 +56,30 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
     const role: RoutingRole = state.defaultRole === 'direct' ? 'tunnel' : 'direct';
     void add({ ...pick, role });
   }, [state, add]);
+
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const doExport = useCallback(async () => {
+    const msg = await HttpUtil.get<{ code: string; name: string }>('/client/api/routing/export');
+    if (!msg?.success || !msg.obj) return;
+    const url = URL.createObjectURL(new Blob([msg.obj.code], { type: 'application/octet-stream' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = msg.obj.name;
+    link.click();
+    URL.revokeObjectURL(url);
+  }, []);
+
+  const doImport = useCallback(async (file: File) => {
+    const msg = await HttpUtil.post<{ rules: number }>(
+      '/client/api/routing/import',
+      { code: await file.text() },
+      { headers: { 'Content-Type': 'application/json' } },
+    );
+    if (!msg?.success) return;
+    toast.success(t('client.routing.rulesImported', { count: msg.obj?.rules ?? 0 }));
+    refresh();
+  }, [refresh, t]);
 
   const doReset = useCallback(async () => {
     setBusy(true);
@@ -152,9 +177,28 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
             <DownOutlined className="rt-legend__chev" />
             {t('client.routing.legend')}
           </button>
-          <Button size="sm" danger disabled={rules.length === 0} onClick={() => setConfirmReset(true)}>
-            {t('client.routing.resetRules')}
-          </Button>
+          <div className="rt-danger__actions">
+            <Button size="sm" icon={<DownloadOutlined />} onClick={() => void doExport()}>
+              {t('client.routing.exportRules')}
+            </Button>
+            <Button size="sm" icon={<UploadOutlined />} onClick={() => fileRef.current?.click()}>
+              {t('client.routing.importRules')}
+            </Button>
+            <Button size="sm" danger disabled={rules.length === 0} onClick={() => setConfirmReset(true)}>
+              {t('client.routing.resetRules')}
+            </Button>
+          </div>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".qdr,text/plain"
+            hidden
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = '';
+              if (file) void doImport(file);
+            }}
+          />
         </div>
 
         <div className={`rt-legend__fold${legendOpen ? ' is-open' : ''}`}>

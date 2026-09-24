@@ -3,6 +3,7 @@ package clientapi
 import (
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/jaywehosl/quic-diver/internal/adblock"
 	"github.com/jaywehosl/quic-diver/internal/clientstate"
@@ -26,12 +27,7 @@ func NewVisits(db *clientstate.DB, list *adblock.List, adblockOn bool) *Visits {
 	}
 	v.on.Store(adblockOn)
 
-	go func() {
-		defer close(v.done)
-		for name := range v.ch {
-			v.db.NoteSite(name)
-		}
-	}()
+	go v.tally()
 	return v
 }
 
@@ -58,4 +54,32 @@ func reverseLookup(name string) bool {
 func (v *Visits) Close() {
 	close(v.ch)
 	<-v.done
+}
+
+const siteFlush = 30 * time.Second
+
+func (v *Visits) tally() {
+	defer close(v.done)
+	pending := map[string]int{}
+	flush := func() {
+		if len(pending) == 0 {
+			return
+		}
+		v.db.NoteSites(pending)
+		pending = map[string]int{}
+	}
+	tick := time.NewTicker(siteFlush)
+	defer tick.Stop()
+	for {
+		select {
+		case name, ok := <-v.ch:
+			if !ok {
+				flush()
+				return
+			}
+			pending[name]++
+		case <-tick.C:
+			flush()
+		}
+	}
 }

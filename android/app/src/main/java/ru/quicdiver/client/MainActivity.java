@@ -314,6 +314,9 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if (routingPage.onResult(request, result, data)) {
+            return;
+        }
         if (request == CONSENT && result == RESULT_OK) {
             start();
         }

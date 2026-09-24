@@ -31,7 +31,10 @@ type Resolver struct {
 	say     func(string, ...any)
 	blocked func(name string) bool
 
+	cache *dnsproxy.Resolver
+
 	queries, hits, upstream, failed, refused, noV6 atomic.Uint64
+	lastOK                                         atomic.Int64
 }
 
 func New(cfg Config) (*Resolver, error) {
@@ -45,8 +48,15 @@ func New(cfg Config) (*Resolver, error) {
 
 	r := &Resolver{conn: conn, token: cfg.Token, ask: cfg.Ask, say: cfg.Say, blocked: cfg.Blocked}
 	r.node.Store(&cfg.Node)
+	r.cache = dnsproxy.New(dnsproxy.Config{Cache: cacheSize, MaxTTL: cacheMaxTTL, Stale: cacheStale, Forward: r.fromNode})
 	return r, nil
 }
+
+const (
+	cacheSize   = 2048
+	cacheMaxTTL = 5 * time.Minute
+	cacheStale  = 30 * time.Second
+)
 
 func (r *Resolver) Addr() string { return r.conn.LocalAddr().String() }
 
@@ -104,7 +114,7 @@ func (r *Resolver) handle(query []byte, from *net.UDPAddr) {
 
 	if r.blocked != nil && r.blocked(name) {
 		r.refused.Add(1)
-		r.conn.WriteToUDP(dnsproxy.Refused(query), from)
+		r.conn.WriteToUDP(dnsproxy.NXDomain(query), from)
 		return
 	}
 
@@ -115,7 +125,7 @@ func (r *Resolver) handle(query []byte, from *net.UDPAddr) {
 	}
 
 	began := time.Now()
-	answer, hit, err := r.fetch(query)
+	answer, hit, err := r.cache.Answer(query)
 	r.tell("dns: %s %dms hit=%v err=%v", name, time.Since(began).Milliseconds(), hit, err)
 
 	if err != nil {
@@ -124,6 +134,7 @@ func (r *Resolver) handle(query []byte, from *net.UDPAddr) {
 		return
 	}
 
+	r.lastOK.Store(time.Now().UnixNano())
 	if hit {
 		r.hits.Add(1)
 	} else {
@@ -132,20 +143,19 @@ func (r *Resolver) handle(query []byte, from *net.UDPAddr) {
 	r.conn.WriteToUDP(answer, from)
 }
 
-func (r *Resolver) fetch(query []byte) ([]byte, bool, error) {
+func (r *Resolver) fromNode(query []byte) ([]byte, error) {
 	var answer struct {
 		Answer []byte `json:"answer"`
-		Hit    bool   `json:"hit"`
 	}
 	if err := r.ask(r.asking(), "dns", r.token, map[string]any{"query": query}, &answer); err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	if len(answer.Answer) < 12 {
-		return nil, false, errors.New("the node returned nothing")
+		return nil, errors.New("the node returned nothing")
 	}
 
 	copy(answer.Answer[0:2], query[0:2])
-	return answer.Answer, answer.Hit, nil
+	return answer.Answer, nil
 }
 
 func (r *Resolver) KeepWarm(stop <-chan struct{}) {
@@ -153,8 +163,10 @@ func (r *Resolver) KeepWarm(stop <-chan struct{}) {
 	defer tick.Stop()
 
 	for {
-		if err := r.ask(r.asking(), "whoami", r.token, nil, nil); err != nil {
-			r.tell("dns: the node went quiet between queries: %v", err)
+		if time.Since(time.Unix(0, r.lastOK.Load())) >= warmStep {
+			if err := r.ask(r.asking(), "whoami", r.token, nil, nil); err != nil {
+				r.tell("dns: the node went quiet between queries: %v", err)
+			}
 		}
 		select {
 		case <-stop:

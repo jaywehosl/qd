@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"net/netip"
 	"sync/atomic"
+
+	"github.com/jaywehosl/quic-diver/internal/ippkt"
 )
 
 type NAT struct {
@@ -81,6 +83,24 @@ func (n *NAT) applyV4(pkt []byte, outbound bool) {
 	copy(pkt[16:20], held[:])
 	fixIPv4Header(pkt)
 	fixL4(pkt, 4, n.assignedV4[:], held[:])
+	if pkt[9] == 1 {
+		n.fixQuoteV4(pkt, *held)
+	}
+}
+
+func (n *NAT) fixQuoteV4(pkt []byte, real [4]byte) {
+	msg := pkt[int(pkt[0]&0x0F)*4:]
+	if len(msg) < 28 || (msg[0] != 3 && msg[0] != 11 && msg[0] != 12) {
+		return
+	}
+	inner := msg[8:]
+	if [4]byte(inner[12:16]) != n.assignedV4 {
+		return
+	}
+	copy(inner[12:16], real[:])
+	fixIPv4Header(inner)
+	msg[2], msg[3] = 0, 0
+	binary.BigEndian.PutUint16(msg[2:], ippkt.Checksum(msg))
 }
 
 func (n *NAT) applyV6(pkt []byte, outbound bool) {

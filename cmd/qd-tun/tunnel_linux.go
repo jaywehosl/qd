@@ -31,6 +31,7 @@ const (
 const (
 	ruleDNS = routeTable + iota
 	ruleOwn
+	ruleAnyDNS
 	ruleAside
 	ruleLocal
 	ruleTunnel
@@ -133,6 +134,11 @@ func raise(live *qcli.Tunnel, keepOut []netip.Prefix, mtu int, dns bool) (packet
 			steps = append(steps, []string{"to", tunDNS + "/32", "lookup", table, "priority", strconv.Itoa(ruleDNS)})
 		}
 		steps = append(steps, []string{"fwmark", strconv.Itoa(socketMark), "lookup", "main", "priority", strconv.Itoa(ruleOwn)})
+		if dns {
+			for _, proto := range []string{"udp", "tcp"} {
+				steps = append(steps, []string{"ipproto", proto, "dport", "53", "lookup", table, "priority", strconv.Itoa(ruleAnyDNS)})
+			}
+		}
 		for _, p := range aside {
 			if (family == "-4") == p.Addr().Is4() {
 				steps = append(steps, []string{"to", p.String(), "lookup", "main", "priority", strconv.Itoa(ruleAside)})

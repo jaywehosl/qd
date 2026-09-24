@@ -206,11 +206,15 @@ func (c *Client) RulesJSON() string {
 	return blob
 }
 
-func (c *Client) SaveRulesJSON(raw string) error    { return c.api.SaveRulesJSON(raw) }
-func (c *Client) SaveSettingsJSON(raw string) error { return c.api.SaveSettingsJSON(raw) }
-func (c *Client) Reset(subscription bool) error     { return c.api.Reset(subscription) }
-func (c *Client) SetEgress(on bool) error           { return c.api.SetEgress(on) }
-func (c *Client) SetAdblock(on bool) error          { return c.api.SetAdblock(on) }
+func (c *Client) SaveRulesJSON(raw string) error { return c.api.SaveRulesJSON(raw) }
+
+func (c *Client) ExportRules() (string, error) { return c.api.ExportRules() }
+
+func (c *Client) ImportRules(code string) (int, error) { return c.api.ImportRules(code) }
+func (c *Client) SaveSettingsJSON(raw string) error    { return c.api.SaveSettingsJSON(raw) }
+func (c *Client) Reset(subscription bool) error        { return c.api.Reset(subscription) }
+func (c *Client) SetEgress(on bool) error              { return c.api.SetEgress(on) }
+func (c *Client) SetAdblock(on bool) error             { return c.api.SetAdblock(on) }
 
 func (c *Client) Refresh() error {
 	_, err := c.api.Refresh()

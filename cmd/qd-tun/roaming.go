@@ -142,6 +142,7 @@ func migrate(ctx context.Context, live *qcli.Tunnel) {
 
 		if err == nil {
 			fmt.Printf("roam     the path moved, the tunnel migrated in place\n")
+			nodeTalk.Reset()
 			return
 		}
 		if ctx.Err() != nil {

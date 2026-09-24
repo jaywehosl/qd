@@ -459,8 +459,12 @@ func (t *Tunnel) SetRoute(tag string) {
 
 func (t *Tunnel) Run(ctx context.Context, src packet.Source) error {
 	assigned := make([]netip.Addr, 0, len(t.assigned))
+	var gateway netip.Addr
 	for _, p := range t.assigned {
 		assigned = append(assigned, p.Addr())
+		if p.Addr().Is4() && !gateway.IsValid() {
+			gateway = p.Masked().Addr().Next()
+		}
 	}
 	ns, err := t.stack()
 	if err != nil {
@@ -478,6 +482,7 @@ func (t *Tunnel) Run(ctx context.Context, src packet.Source) error {
 
 	return hybrid.New(hybrid.Options{
 		Guard:    guard.New(keepOut),
+		Gateway:  gateway,
 		NAT:      nat.New(assigned),
 		Stack:    ns,
 		Workers:  t.opts.Workers,
@@ -595,6 +600,9 @@ func (r routed) with(ctx context.Context) connectdial.Dialer {
 }
 
 func (r routed) DialTCP(ctx context.Context, dst netip.AddrPort) (net.Conn, error) {
+	if dst.Port() == 53 && r.resolver != "" {
+		return dnsOverTCP(r.resolver)
+	}
 	return r.with(ctx).DialTCP(ctx, dst)
 }
 

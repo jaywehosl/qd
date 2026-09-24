@@ -134,11 +134,20 @@ type Site struct {
 	Hits int64  `json:"hits"`
 }
 
-func (d *DB) NoteSite(host string) error {
-	_, err := d.sql.Exec(`
-		INSERT INTO sites (host, hits) VALUES (?, 1)
-		ON CONFLICT(host) DO UPDATE SET hits = sites.hits + 1`, host)
-	return err
+func (d *DB) NoteSites(hits map[string]int) error {
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for host, n := range hits {
+		if _, err := tx.Exec(`
+			INSERT INTO sites (host, hits) VALUES (?, ?)
+			ON CONFLICT(host) DO UPDATE SET hits = sites.hits + excluded.hits`, host, n); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (d *DB) TopSites(limit int) ([]Site, error) {

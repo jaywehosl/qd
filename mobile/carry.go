@@ -8,6 +8,7 @@ import (
 
 	"github.com/jaywehosl/quic-diver/internal/clientdns"
 	"github.com/jaywehosl/quic-diver/internal/clientrun"
+	"github.com/jaywehosl/quic-diver/internal/peers"
 	"github.com/jaywehosl/quic-diver/internal/qcli"
 	"github.com/jaywehosl/quic-diver/internal/qcli/packet"
 	"github.com/jaywehosl/quic-diver/internal/qcli/packet/tun"
@@ -200,17 +201,9 @@ func (c *Client) exitFor(src, dst netip.AddrPort, udp bool) string {
 func (c *Client) goesDirect(pkt []byte) bool { return false }
 
 func (c *Client) keepOut() []netip.Prefix {
-	out := []netip.Prefix{}
-	for _, host := range c.peerAddresses() {
-		if addr, err := netip.ParseAddr(host); err == nil {
-			out = append(out, netip.PrefixFrom(addr, addr.BitLen()))
-			continue
-		}
-		for _, addr := range lookUp(host) {
-			out = append(out, netip.PrefixFrom(addr, addr.BitLen()))
-		}
-	}
-	return out
+	return peers.Prefixes(c.peerAddresses(), func(host string, err error) {
+		say("bypass: could not resolve %s: %v", host, err)
+	})
 }
 
 func (c *Client) StatsJSON() string {

@@ -483,7 +483,10 @@
       "restartNeededIdle": "Android fixes per-app rules when the tunnel is built, so these land when you connect.",
       "reconnect": "Reconnect now",
       "resetRules": "Reset rules",
-      "resetRulesDesc": "Removes every rule and puts all traffic back on the default. The tunnel stays up."
+      "resetRulesDesc": "Removes every rule and puts all traffic back on the default. The tunnel stays up.",
+      "exportRules": "Save to file",
+      "importRules": "Load from file",
+      "rulesImported": "Loaded {count} rules"
     },
     "settings": {
       "about": "About",

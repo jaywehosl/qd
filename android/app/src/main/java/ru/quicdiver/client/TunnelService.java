@@ -517,7 +517,13 @@ public class TunnelService extends VpnService {
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
+    private String saidNode = "";
+
     private void update(String text) {
-        Core.say(this, "state: " + text);
+        String node = text.split(" · ", 2)[0];
+        if (!node.equals(saidNode)) {
+            saidNode = node;
+            Core.say(this, "state: " + text);
+        }
     }
 }

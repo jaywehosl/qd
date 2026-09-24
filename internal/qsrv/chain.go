@@ -25,14 +25,11 @@ type chained struct {
 
 func (c chained) at() where { return where{c.endpoint, c.seat} }
 
-func (c chained) open(ctx context.Context, dst netip.AddrPort, udp bool) (io.ReadCloser, io.WriteCloser, context.CancelFunc, func(), error) {
+func (c chained) open(ctx context.Context, dst netip.AddrPort) (io.ReadCloser, io.WriteCloser, context.CancelFunc, func(), error) {
 	sctx, scancel := context.WithCancel(context.Background())
 	pr, pw := io.Pipe()
 
 	head := http.Header{}
-	if udp {
-		head.Set(HeaderProto, "udp")
-	}
 	head.Set(HeaderHops, strconv.Itoa(c.hops))
 
 	req := (&http.Request{
@@ -77,17 +74,9 @@ func (c chained) open(ctx context.Context, dst netip.AddrPort, udp bool) (io.Rea
 }
 
 func (c chained) DialTCP(ctx context.Context, dst netip.AddrPort) (net.Conn, error) {
-	r, w, stop, done, err := c.open(ctx, dst, false)
+	r, w, stop, done, err := c.open(ctx, dst)
 	if err != nil {
 		return nil, err
 	}
 	return costream.NewStream(r, w, stop, dst, done), nil
-}
-
-func (c chained) DialUDP(ctx context.Context, dst netip.AddrPort) (net.Conn, error) {
-	r, w, stop, done, err := c.open(ctx, dst, true)
-	if err != nil {
-		return nil, err
-	}
-	return costream.NewPackets(r, w, stop, dst, done), nil
 }

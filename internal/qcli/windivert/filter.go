@@ -35,7 +35,7 @@ func BuildFilter(cfg CaptureConfig) string {
 	if !cfg.DNS {
 		return caught
 	}
-	return "(" + caught + ") or (outbound and udp and udp.DstPort == 53 and " +
+	return "(" + caught + ") or (outbound and ((udp and udp.DstPort == 53) or (tcp and tcp.DstPort == 53)) and " +
 		"((ip and ip.DstAddr != 127.0.0.1) or (ipv6 and ipv6.DstAddr != ::1)))"
 }
 
@@ -57,7 +57,7 @@ func notIn(field string, p netip.Prefix) string {
 func protoClause(cfg CaptureConfig) string {
 	switch {
 	case cfg.TCP && cfg.UDP:
-		return "(tcp or udp)"
+		return "(tcp or udp or (icmp and icmp.Type == 8))"
 	case cfg.TCP:
 		return "tcp"
 	case cfg.UDP:

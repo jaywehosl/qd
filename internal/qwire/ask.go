@@ -43,10 +43,13 @@ func (d *Dialer) Ask(endpoint, op, auth string, body any, out any) error {
 
 	rsp, err := cc.RoundTrip(req)
 	if err != nil {
-		d.drop(endpoint)
+		if ctx.Err() == nil || d.missed(endpoint) {
+			d.drop(endpoint)
+		}
 		return fmt.Errorf("%s: %w", op, err)
 	}
 	defer rsp.Body.Close()
+	d.answered(endpoint)
 
 	answer, err := io.ReadAll(rsp.Body)
 	if err != nil {

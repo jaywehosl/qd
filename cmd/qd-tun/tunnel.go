@@ -7,13 +7,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"net"
 	"net/netip"
 	"sync"
 	"time"
 
 	"github.com/jaywehosl/quic-diver/internal/clientdns"
 	"github.com/jaywehosl/quic-diver/internal/clientrun"
+	"github.com/jaywehosl/quic-diver/internal/peers"
 	"github.com/jaywehosl/quic-diver/internal/qcli"
 	"github.com/jaywehosl/quic-diver/internal/qcli/packet"
 	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
@@ -197,37 +197,10 @@ func (t *tunnel) peerAddresses() []netip.Prefix {
 		return nil
 	}
 
-	out := []netip.Prefix{}
-	for _, host := range t.cfg.Peers() {
-		for _, addr := range addressesOf(host) {
-			out = append(out, netip.PrefixFrom(addr, addr.BitLen()))
-		}
-	}
-	return out
-}
-
-func addressesOf(host string) []netip.Addr {
-	if addr, err := netip.ParseAddr(host); err == nil {
-		return []netip.Addr{addr}
-	}
-
-	ctx, stop := context.WithTimeout(context.Background(), lookupWait)
-	defer stop()
-
-	found, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
-	if err != nil {
+	return peers.Prefixes(t.cfg.Peers(), func(host string, err error) {
 		fmt.Printf("bypass   could not resolve %s: %v\n", host, err)
-		return nil
-	}
-
-	out := make([]netip.Addr, 0, len(found))
-	for _, addr := range found {
-		out = append(out, addr.Unmap())
-	}
-	return out
+	})
 }
-
-const lookupWait = 3 * time.Second
 
 func (t *tunnel) Stop() error {
 	t.mu.Lock()

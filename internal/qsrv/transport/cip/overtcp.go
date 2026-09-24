@@ -15,6 +15,7 @@ import (
 
 	"golang.org/x/net/http2"
 
+	"github.com/jaywehosl/quic-diver/internal/ippkt"
 	"github.com/jaywehosl/quic-diver/internal/qsrv"
 	"github.com/jaywehosl/quic-diver/internal/roads"
 )
@@ -164,6 +165,20 @@ func (o *Over) ReadPacket(b []byte) (int, error) {
 }
 
 func (o *Over) WritePacket(b []byte) ([]byte, error) {
+	switch {
+	case len(b) >= 20 && b[0]>>4 == 4:
+		if b[8] <= 1 {
+			return nil, fmt.Errorf("cip: datagram TTL too small: %d", b[8])
+		}
+		b[8]--
+		b[10], b[11] = 0, 0
+		binary.BigEndian.PutUint16(b[10:], ippkt.Checksum(b[:int(b[0]&0x0F)*4]))
+	case len(b) >= 40 && b[0]>>4 == 6:
+		if b[7] <= 1 {
+			return nil, fmt.Errorf("cip: datagram hop limit too small: %d", b[7])
+		}
+		b[7]--
+	}
 	frame := make([]byte, 2+len(b))
 	binary.BigEndian.PutUint16(frame, uint16(len(b)))
 	copy(frame[2:], b)

@@ -2,7 +2,9 @@ package hybrid
 
 import (
 	"context"
+	"encoding/binary"
 	"log"
+	"net/netip"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -43,6 +45,7 @@ type Options struct {
 	Direct   func(pkt []byte) bool
 	Mark     func(pkt []byte) uint64
 	Loud     bool
+	Gateway  netip.Addr
 }
 
 type Engine struct {
@@ -119,13 +122,19 @@ func (e *Engine) Run(ctx context.Context, src packet.Source, tun Tunnel) error {
 }
 
 func (e *Engine) logStats(ctx context.Context, tt *tcpTunnel, src packet.Source) {
-	t := time.NewTicker(3 * time.Second)
+	t := time.NewTicker(statsEvery)
 	defer t.Stop()
+	var seen uint64
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			moved := e.cOutRecv.Load() + e.cInRecv.Load()
+			if moved == seen {
+				continue
+			}
+			seen = moved
 			rcvd, dropped := quic.DatagramStats()
 			var pct float64
 			if rcvd+dropped > 0 {
@@ -177,6 +186,10 @@ func (e *Engine) pumpOutbound(ctx context.Context, rd packet.Reader, src packet.
 				e.cTCP.Add(1)
 				e.Meter.carried(len(p.Data))
 				tt.push(p.Data)
+				continue
+			}
+			if expired := e.expired(p.Data); expired != nil {
+				reinject = append(reinject, packet.Packet{Data: expired, Dir: packet.Inbound})
 				continue
 			}
 			e.cUDP.Add(1)
@@ -400,3 +413,27 @@ func (e *Engine) hurry() func() {
 }
 
 const resetDrain = 300 * time.Millisecond
+
+const statsEvery = time.Minute
+
+func (e *Engine) expired(pkt []byte) []byte {
+	if !e.Gateway.Is4() || len(pkt) < 28 || pkt[0]>>4 != 4 || pkt[8] > 1 {
+		return nil
+	}
+	ihl := int(pkt[0]&0x0F) * 4
+	if ihl < 20 || len(pkt) < ihl+8 {
+		return nil
+	}
+	msg := append([]byte{11, 0, 0, 0, 0, 0, 0, 0}, pkt[:ihl+8]...)
+	binary.BigEndian.PutUint16(msg[2:], ippkt.Checksum(msg))
+
+	out := make([]byte, 20+len(msg))
+	out[0], out[8], out[9] = 0x45, 64, 1
+	binary.BigEndian.PutUint16(out[2:], uint16(len(out)))
+	gw := e.Gateway.As4()
+	copy(out[12:16], gw[:])
+	copy(out[16:20], pkt[12:16])
+	binary.BigEndian.PutUint16(out[10:], ippkt.Checksum(out[:20]))
+	copy(out[20:], msg)
+	return out
+}

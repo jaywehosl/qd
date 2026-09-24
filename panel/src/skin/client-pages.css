@@ -129,6 +129,13 @@ html.is-dark .cset-about .cset-grid { border: 1px solid var(--edge); }
   margin-top: var(--step-3);
 }
 
+.rt-danger__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--step-2);
+}
+
 .rt-legend__toggle {
   display: inline-flex;
   align-items: center;

@@ -2,9 +2,6 @@ package qdmobile
 
 import (
 	"context"
-	"net"
-	"net/netip"
-	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -156,6 +153,7 @@ func (c *Client) migrate(ctx context.Context) {
 
 		if err == nil {
 			say("roam: the path moved, the tunnel migrated in place")
+			c.wire().Reset()
 			return
 		}
 		if ctx.Err() != nil {
@@ -174,37 +172,6 @@ func (c *Client) migrate(ctx context.Context) {
 	go c.lost()
 }
 
-var resolved sync.Map
-
-func lookUp(host string) []netip.Addr {
-	if held, known := resolved.Load(host); known {
-		go refresh(host)
-		return held.([]netip.Addr)
-	}
-	return refresh(host)
-}
-
-func refresh(host string) []netip.Addr {
-	ctx, stop := context.WithTimeout(context.Background(), lookWait)
-	defer stop()
-
-	found, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
-	if err != nil {
-		if held, known := resolved.Load(host); known {
-			return held.([]netip.Addr)
-		}
-		say("bypass: could not resolve %s: %v", host, err)
-		return nil
-	}
-
-	out := make([]netip.Addr, 0, len(found))
-	for _, addr := range found {
-		out = append(out, addr.Unmap())
-	}
-	resolved.Store(host, out)
-	return out
-}
-
 const (
 	deafStep   = 3 * time.Second
 	deafFor    = 20 * time.Second
@@ -216,5 +183,4 @@ const (
 	tries      = 2
 	moveWait   = 4 * time.Second
 	pause      = 1 * time.Second
-	lookWait   = 3 * time.Second
 )

@@ -10,6 +10,7 @@ import android.content.pm.ResolveInfo;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.util.TypedValue;
@@ -24,17 +25,27 @@ import android.widget.TextView;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class RoutingPage {
+
+    public static final int SAVE_RULES = 41;
+    public static final int LOAD_RULES = 42;
 
     private static final String[] ROLES = {"direct", "noEgress", "egress", "tunnel"};
     private static final String[] NAMES = {"напрямую", "−egress", "+egress", "туннель"};
@@ -111,6 +122,29 @@ public class RoutingPage {
 
         list = skin.column();
         box.addView(list);
+
+        LinearLayout files = skin.segments(new String[]{"Сохранить в файл", "Загрузить из файла"}, -1,
+                new Skin.Pick() {
+                    @Override
+                    public void at(int index) {
+                        Intent pick;
+                        if (index == 0) {
+                            pick = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                            pick.setType("application/octet-stream");
+                            pick.putExtra(Intent.EXTRA_TITLE, "qd-routing-android-"
+                                    + new SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US).format(new Date()) + ".qdr");
+                        } else {
+                            pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                            pick.setType("*/*");
+                        }
+                        pick.addCategory(Intent.CATEGORY_OPENABLE);
+                        host.startActivityForResult(pick, index == 0 ? SAVE_RULES : LOAD_RULES);
+                    }
+                });
+        LinearLayout.LayoutParams filesAt = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        filesAt.topMargin = skin.dp(12);
+        box.addView(files, filesAt);
         page.addView(box, skin.gap(14));
 
         Scroller scroll = new Scroller(host, skin);
@@ -718,6 +752,96 @@ public class RoutingPage {
     }
 
     private void say(String text, boolean bad) {
+    }
+
+    public boolean onResult(int request, int result, Intent data) {
+        if (request != SAVE_RULES && request != LOAD_RULES) {
+            return false;
+        }
+        if (result != Activity.RESULT_OK || data == null || data.getData() == null) {
+            return true;
+        }
+        final Uri where = data.getData();
+        final boolean saving = request == SAVE_RULES;
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                String title;
+                String text;
+                try {
+                    if (saving) {
+                        String code = Core.client(host).exportRules();
+                        try (OutputStream out = host.getContentResolver().openOutputStream(where)) {
+                            out.write(code.getBytes(StandardCharsets.UTF_8));
+                        }
+                        title = "Правила сохранены";
+                        text = "Файл можно загрузить обратно в клиенте qd для Android.";
+                    } else {
+                        ByteArrayOutputStream got = new ByteArrayOutputStream();
+                        try (InputStream in = host.getContentResolver().openInputStream(where)) {
+                            byte[] chunk = new byte[8192];
+                            int n;
+                            while ((n = in.read(chunk)) > 0 && got.size() < (4 << 20)) {
+                                got.write(chunk, 0, n);
+                            }
+                        }
+                        long count = Core.client(host).importRules(got.toString("UTF-8"));
+                        title = "Правила загружены";
+                        text = "Правил в файле: " + count + ".";
+                    }
+                } catch (Exception e) {
+                    title = saving ? "Не удалось сохранить" : "Не удалось загрузить";
+                    text = String.valueOf(e.getMessage());
+                }
+                final String shownTitle = title;
+                final String shownText = text;
+                host.runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        notice(shownTitle, shownText);
+                        loaded = false;
+                        render();
+                    }
+                });
+            }
+        }).start();
+        return true;
+    }
+
+    private void notice(String title, String text) {
+        LinearLayout wrap = skin.column();
+        wrap.setPadding(skin.dp(20), skin.dp(20), skin.dp(20), skin.dp(16));
+        wrap.addView(skin.label(title, skin.bold, 16));
+
+        TextView body = skin.label(text, skin.text, 15);
+        LinearLayout.LayoutParams bodyAt = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        bodyAt.topMargin = skin.dp(12);
+        wrap.addView(body, bodyAt);
+
+        LinearLayout feet = new LinearLayout(host);
+        feet.setOrientation(LinearLayout.HORIZONTAL);
+        feet.setGravity(Gravity.END);
+        LinearLayout.LayoutParams feetAt = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        feetAt.topMargin = skin.dp(20);
+        wrap.addView(feet, feetAt);
+
+        TextView fine = skin.button("OK", skin.good);
+        fine.setTextColor(0xFFFFFFFF);
+        feet.addView(fine);
+
+        final AlertDialog dialog = new AlertDialog.Builder(host, R.style.RoundDialog)
+                .setView(wrap)
+                .create();
+        fine.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                dialog.dismiss();
+            }
+        });
+        dialog.show();
+        skin.frame(dialog);
     }
 
 

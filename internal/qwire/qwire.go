@@ -28,6 +28,7 @@ type Dialer struct {
 	relays  []relay.Link
 	held    map[string]*controlLink
 	dialing map[string]*dialing
+	misses  map[string]int
 }
 
 type dialing struct {
@@ -78,6 +79,7 @@ func NewKept(keep func(fd uintptr)) *Dialer {
 		keep:    keep,
 		held:    map[string]*controlLink{},
 		dialing: map[string]*dialing{},
+		misses:  map[string]int{},
 	}
 }
 
@@ -109,8 +111,8 @@ func (d *Dialer) relaySnapshot() []relay.Link {
 func controlConfig() *quic.Config {
 	return &quic.Config{
 		EnableDatagrams: true,
-		MaxIdleTimeout:  10 * time.Second,
-		KeepAlivePeriod: 3 * time.Second,
+		MaxIdleTimeout:  45 * time.Second,
+		KeepAlivePeriod: 15 * time.Second,
 	}
 }
 
@@ -312,6 +314,7 @@ func dialControlRelay(ctx context.Context, link relay.Link, keep func(fd uintptr
 func (d *Dialer) drop(endpoint string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	delete(d.misses, endpoint)
 	if l, ok := d.held[endpoint]; ok {
 		l.close()
 		delete(d.held, endpoint)
@@ -331,4 +334,31 @@ func (l *controlLink) close() {
 	if l.relay != nil {
 		l.relay.Stop()
 	}
+}
+
+const missesToDrop = 3
+
+func (d *Dialer) missed(endpoint string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.misses[endpoint]++
+	return d.misses[endpoint] >= missesToDrop
+}
+
+func (d *Dialer) answered(endpoint string) {
+	d.mu.Lock()
+	if d.misses[endpoint] != 0 {
+		delete(d.misses, endpoint)
+	}
+	d.mu.Unlock()
+}
+
+func (d *Dialer) Reset() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for endpoint, l := range d.held {
+		l.close()
+		delete(d.held, endpoint)
+	}
+	clear(d.misses)
 }

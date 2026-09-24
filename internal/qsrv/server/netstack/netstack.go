@@ -47,6 +47,8 @@ type Stack struct {
 	stack    *stack.Stack
 	ep       *channel.Endpoint
 	dialer   Dialer
+	pinger   Pinger
+	wmu      sync.Mutex
 	flows    sync.Map
 	nextFlow atomic.Uint64
 	mtu      int
@@ -87,6 +89,7 @@ func New(d Dialer, mtu int) (*Stack, error) {
 	})
 
 	st := &Stack{stack: s, ep: ep, dialer: d, mtu: mtu}
+	st.pinger, _ = d.(Pinger)
 
 	tcpFwd := tcp.NewForwarder(s, 0, maxInFlight, st.handleTCP)
 	s.SetTransportProtocolHandler(tcp.ProtocolNumber, tcpFwd.HandlePacket)
@@ -133,6 +136,10 @@ func (s *Stack) ingress(ctx context.Context, t Tunnel) error {
 		if n == 0 {
 			continue
 		}
+		if s.pinger != nil && isEcho4(buf[:n]) {
+			go s.echo(t, append([]byte(nil), buf[:n]...))
+			continue
+		}
 		var proto tcpip.NetworkProtocolNumber
 		switch buf[0] >> 4 {
 		case 4:
@@ -160,7 +167,9 @@ func (s *Stack) egress(ctx context.Context, t Tunnel) {
 			return
 		}
 		b := pkt.ToBuffer()
+		s.wmu.Lock()
 		_, err := t.WritePacket(b.Flatten())
+		s.wmu.Unlock()
 		pkt.DecRef()
 		if err != nil {
 			errs++
@@ -227,10 +236,61 @@ func (s *Stack) handleUDP(r *udp.ForwarderRequest) {
 		s.opened(id.RemotePort, shut)
 	}
 	held := s.keepFlow(Flow{Src: src, Dst: dst, UDP: true}, shut)
+	idle := udpIdle
+	if dst.Port() == 53 {
+		idle = dnsIdle
+	}
 	go func() {
-		pipe(inbound, outbound)
+		pipeIdle(inbound, outbound, idle)
 		s.dropFlow(held)
 	}()
+}
+
+const (
+	udpIdle = 2 * time.Minute
+	dnsIdle = 15 * time.Second
+)
+
+func pipeIdle(a, b net.Conn, idle time.Duration) {
+	var last atomic.Int64
+	last.Store(time.Now().UnixNano())
+	done := make(chan struct{}, 2)
+	cp := func(dst, src net.Conn) {
+		buf := make([]byte, 65535)
+		for {
+			n, err := src.Read(buf)
+			if err != nil {
+				break
+			}
+			last.Store(time.Now().UnixNano())
+			if _, err := dst.Write(buf[:n]); err != nil {
+				break
+			}
+		}
+		done <- struct{}{}
+	}
+	go cp(a, b)
+	go cp(b, a)
+
+	tick := time.NewTicker(idle / 4)
+	defer tick.Stop()
+	for {
+		select {
+		case <-done:
+			a.Close()
+			b.Close()
+			<-done
+			return
+		case <-tick.C:
+			if time.Since(time.Unix(0, last.Load())) > idle {
+				a.Close()
+				b.Close()
+				<-done
+				<-done
+				return
+			}
+		}
+	}
 }
 
 func (s *Stack) OnFlow(fn func(port uint16, shut io.Closer)) { s.opened = fn }
