@@ -170,6 +170,7 @@ func (t *tunnel) Start(servers []string, relays []relay.Link, sessionID uint32) 
 		<-held.Gone
 	}()
 
+	go flushSystemDNS()
 	t.running = true
 	t.stop = held.Halt
 	t.live = held.Live
@@ -181,6 +182,7 @@ func (t *tunnel) Start(servers []string, relays []relay.Link, sessionID uint32) 
 	liveTunnel.Store(&held.Live)
 
 	go roamWatch(held.Ctx, held.Halt, held.Live, plan.Lost)
+	go t.followPeers(held.Ctx, keepOut)
 
 	if t.cfg.Announce != nil {
 		go t.cfg.Announce("join")
@@ -189,6 +191,39 @@ func (t *tunnel) Start(servers []string, relays []relay.Link, sessionID uint32) 
 }
 
 const dialWait = 20 * time.Second
+
+const peerFollow = 30 * time.Second
+
+func (t *tunnel) followPeers(ctx context.Context, known []netip.Prefix) {
+	if t.cfg.Peers == nil {
+		return
+	}
+	keepAsideReset()
+	have := map[netip.Prefix]bool{}
+	for _, p := range known {
+		have[p.Masked()] = true
+	}
+	tick := time.NewTicker(peerFollow)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+		var fresh []netip.Prefix
+		for _, p := range peers.Prefixes(t.cfg.Peers(), nil) {
+			if p = p.Masked(); !have[p] {
+				have[p] = true
+				fresh = append(fresh, p)
+			}
+		}
+		if len(fresh) > 0 {
+			keepAside(fresh)
+			fmt.Printf("bypass   %v now go around the tunnel, the network gained them after it came up\n", fresh)
+		}
+	}
+}
 
 type sourceOpener func(ctx context.Context, live *qcli.Tunnel, keepOut []netip.Prefix) (packet.Source, error)
 

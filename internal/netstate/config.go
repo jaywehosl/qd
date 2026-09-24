@@ -9,6 +9,7 @@ type CfgClient struct {
 	UUID      string
 	ExpiryAt  int64
 	AllowExit bool
+	RouteDNS  bool
 }
 
 type CfgPeer struct {

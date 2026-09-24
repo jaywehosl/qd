@@ -57,6 +57,7 @@ export default function GroupEditModal({
   const [emails, setEmails] = useState<string[]>([]);
   const [deviceLimit, setDeviceLimit] = useState(0);
   const [allowExit, setAllowExit] = useState(false);
+  const [routeDns, setRouteDns] = useState(false);
   const [relayEnable, setRelayEnable] = useState(false);
   const [relays, setRelays] = useState<Record<number, string[]>>({});
   const [saving, setSaving] = useState(false);
@@ -90,6 +91,7 @@ export default function GroupEditModal({
     setEmails(clients.filter((c) => c.group === group.name).map((c) => c.email));
     setDeviceLimit(Number((group as { deviceLimit?: number }).deviceLimit) || 0);
     setAllowExit(!!(group as { allowExit?: boolean }).allowExit);
+    setRouteDns(!!(group as { routeDns?: boolean }).routeDns);
     setRelayEnable(!!(group as { relayEnable?: boolean }).relayEnable);
     const seed: Record<number, string[]> = {};
     (group.relays ?? []).forEach((r) => { (seed[r.nodeId] ??= []).push(r.weblink); });
@@ -170,10 +172,11 @@ export default function GroupEditModal({
       if (!sameSet(entrypointIds, group.entrypointIds ?? [])
           || deviceLimit !== (Number((group as { deviceLimit?: number }).deviceLimit) || 0)
           || allowExit !== !!(group as { allowExit?: boolean }).allowExit
+          || routeDns !== !!(group as { routeDns?: boolean }).routeDns
           || relayEnable !== !!(group as { relayEnable?: boolean }).relayEnable
           || relaysDiffer) {
         const msg = await clientsApi.groupsEntrypoints(
-          { name: nextName, entrypointIds, deviceLimit, allowExit, relayEnable, relays: relayList }, { silent: true });
+          { name: nextName, entrypointIds, deviceLimit, allowExit, routeDns, relayEnable, relays: relayList }, { silent: true });
         if (!msg?.success) { message.error(msg?.msg || t('somethingWentWrong')); return; }
       }
 
@@ -242,6 +245,16 @@ export default function GroupEditModal({
             checked={allowExit}
             onChange={setAllowExit}
             aria-label={t('pages.groups.allowExit', { defaultValue: 'Allow exit nodes' })}
+          />
+        </div>
+        <div className="ge-toggle">
+          <span className="ge-toggle__label">
+            {t('pages.groups.routeDns', { defaultValue: 'Route by DNS' })}
+          </span>
+          <Switch
+            checked={routeDns}
+            onChange={setRouteDns}
+            aria-label={t('pages.groups.routeDns', { defaultValue: 'Route by DNS' })}
           />
         </div>
         <div className="ge-toggle">

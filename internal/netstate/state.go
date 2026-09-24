@@ -44,6 +44,7 @@ type Group struct {
 	ID            int          `json:"id"`
 	Tag           string       `json:"name"`
 	AllowExit     bool         `json:"allowExit"`
+	RouteDNS      bool         `json:"routeDns"`
 	DeviceLimit   int          `json:"deviceLimit"`
 	EntrypointIDs []int        `json:"entrypointIds"`
 	RelayEnable   bool         `json:"relayEnable"`

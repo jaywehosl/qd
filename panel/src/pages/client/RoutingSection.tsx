@@ -95,7 +95,9 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
     return <div className="rt-boot"><Spin spinning size="large" /></div>;
   }
 
-  const { rules, defaultRole, applyMode, pendingRestart } = state;
+  const { rules, defaultRole, allowExit, applyMode, pendingRestart } = state;
+  const plain = (r: RoutingRole) => r === 'direct' || r === 'tunnel';
+  const shownRoles = ROUTING_ROLES.filter((r) => allowExit || plain(r));
 
   return (
     <div className="rt">
@@ -151,9 +153,10 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
                 {r.path && <span className="rt-rule__path">{r.path}</span>}
               </div>
               {r.matched ? <Tag>{t('client.routing.flows', { count: r.matched })}</Tag> : null}
+              {!allowExit && !plain(r.role) && <Tag tone="warning">{t('client.routing.noExit')}</Tag>}
               <Select
                 value={r.role}
-                options={roleOptions}
+                options={roleOptions.filter((o) => allowExit || plain(o.value) || o.value === r.role)}
                 onChange={(v) => void setRole(r.id, v as RoutingRole)}
               />
               <Button
@@ -204,7 +207,7 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
         <div className={`rt-legend__fold${legendOpen ? ' is-open' : ''}`}>
           <div className="rt-legend__inner">
             <div className="rt-legend">
-              {ROUTING_ROLES.map((r) => (
+              {shownRoles.map((r) => (
                 <div key={r} className="rt-legend__row">
                   <Tag tone={r === 'direct' ? 'warning' : 'primary'}>{t(`client.routing.role.${r}`)}</Tag>
                   <span>{t(`client.routing.roleDesc.${r}`)}</span>

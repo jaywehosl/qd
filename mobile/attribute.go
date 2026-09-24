@@ -44,7 +44,7 @@ func newMarks(host Host) *marks {
 }
 
 func (m *marks) reload(db *clientstate.DB) {
-	rules, err := db.Rules()
+	_, rules, err := db.RulesInForce()
 	if err != nil {
 		return
 	}

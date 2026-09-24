@@ -300,11 +300,11 @@ func parseRelays(s string) []netstate.GroupRelay {
 
 func (d *DB) Groups() ([]netstate.Group, error) {
 	out := []netstate.Group{}
-	err := scan(d.sql, `SELECT id, tag, allow_exit, device_limit, relay_enable, relays FROM groups ORDER BY id`,
+	err := scan(d.sql, `SELECT id, tag, allow_exit, route_dns, device_limit, relay_enable, relays FROM groups ORDER BY id`,
 		func(r *sql.Rows) error {
 			var g netstate.Group
 			var relays string
-			if err := r.Scan(&g.ID, &g.Tag, &g.AllowExit, &g.DeviceLimit, &g.RelayEnable, &relays); err != nil {
+			if err := r.Scan(&g.ID, &g.Tag, &g.AllowExit, &g.RouteDNS, &g.DeviceLimit, &g.RelayEnable, &relays); err != nil {
 				return err
 			}
 			g.Relays = parseRelays(relays)
@@ -347,8 +347,8 @@ func (d *DB) SaveGroup(g netstate.Group, now int64) (int, error) {
 	id := g.ID
 	if id == 0 {
 		res, err := tx.Exec(
-			`INSERT INTO groups (tag, allow_exit, device_limit, relay_enable, relays, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-			g.Tag, g.AllowExit, g.DeviceLimit, g.RelayEnable, marshalRelays(g.Relays), now)
+			`INSERT INTO groups (tag, allow_exit, route_dns, device_limit, relay_enable, relays, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			g.Tag, g.AllowExit, g.RouteDNS, g.DeviceLimit, g.RelayEnable, marshalRelays(g.Relays), now)
 		if err != nil {
 			return 0, err
 		}
@@ -358,8 +358,8 @@ func (d *DB) SaveGroup(g netstate.Group, now int64) (int, error) {
 		}
 		id = int(newID)
 	} else {
-		res, err := tx.Exec(`UPDATE groups SET tag = ?, allow_exit = ?, device_limit = ?, relay_enable = ?, relays = ? WHERE id = ?`,
-			g.Tag, g.AllowExit, g.DeviceLimit, g.RelayEnable, marshalRelays(g.Relays), id)
+		res, err := tx.Exec(`UPDATE groups SET tag = ?, allow_exit = ?, route_dns = ?, device_limit = ?, relay_enable = ?, relays = ? WHERE id = ?`,
+			g.Tag, g.AllowExit, g.RouteDNS, g.DeviceLimit, g.RelayEnable, marshalRelays(g.Relays), id)
 		if err != nil {
 			return 0, err
 		}
@@ -407,6 +407,8 @@ type NetworkSettings struct {
 	IdleSeconds      int    `json:"idleSeconds"`
 	KeepAliveSeconds int    `json:"keepAliveSeconds"`
 	SocketBuffer     int    `json:"socketBufferKb"`
+	RouteList        string `json:"routeList"`
+	RouteServices    string `json:"routeServices"`
 }
 
 func defaultNetworkSettings() NetworkSettings {
@@ -438,13 +440,13 @@ func (d *DB) NetworkSettings() (NetworkSettings, error) {
 		`SELECT refresh_minutes, dns_primary, dns_secondary, dns_cache, dns_min_ttl,
 		        dns_max_ttl, dns_stale, mtu, stats_seconds, pool, brutal_mbit,
 		        max_streams, stream_window, max_stream_window, conn_window, max_conn_window,
-		        idle_seconds, keepalive_seconds, socket_buffer
+		        idle_seconds, keepalive_seconds, socket_buffer, route_list, route_services
 		 FROM network WHERE id = 1`).Scan(
 		&out.RefreshMinutes, &out.DNSPrimary, &out.DNSSecondary,
 		&out.DNSCache, &out.DNSMinTTL, &out.DNSMaxTTL, &out.DNSStale,
 		&out.MTU, &out.StatsSeconds, &out.Pool, &out.BrutalMbit, &out.MaxStreams, &out.StreamWindow, &out.MaxStreamWindow,
 		&out.ConnWindow, &out.MaxConnWindow, &out.IdleSeconds, &out.KeepAliveSeconds,
-		&out.SocketBuffer)
+		&out.SocketBuffer, &out.RouteList, &out.RouteServices)
 	if errors.Is(err, sql.ErrNoRows) {
 		return defaultNetworkSettings(), nil
 	}
@@ -528,13 +530,13 @@ func (d *DB) SaveNetworkSettings(s NetworkSettings) error {
 		        mtu = ?, stats_seconds = ?,
 		        pool = ?, brutal_mbit = ?, max_streams = ?, stream_window = ?,
 		        max_stream_window = ?, conn_window = ?, max_conn_window = ?,
-		        idle_seconds = ?, keepalive_seconds = ?, socket_buffer = ?
+		        idle_seconds = ?, keepalive_seconds = ?, socket_buffer = ?, route_list = ?, route_services = ?
 		 WHERE id = 1`,
 		s.RefreshMinutes, s.DNSPrimary, s.DNSSecondary,
 		s.DNSCache, s.DNSMinTTL, s.DNSMaxTTL, s.DNSStale,
 		s.MTU, s.StatsSeconds, s.Pool, s.BrutalMbit,
 		s.MaxStreams, s.StreamWindow, s.MaxStreamWindow, s.ConnWindow, s.MaxConnWindow,
-		s.IdleSeconds, s.KeepAliveSeconds, s.SocketBuffer)
+		s.IdleSeconds, s.KeepAliveSeconds, s.SocketBuffer, s.RouteList, s.RouteServices)
 	if err != nil {
 		return err
 	}

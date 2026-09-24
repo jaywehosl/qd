@@ -17,6 +17,7 @@ export const RoutingRuleSchema = z.object({
 
 export const RoutingStateSchema = z.object({
   defaultRole: RoleSchema,
+  allowExit: z.boolean().catch(false),
   applyMode: z.enum(['live', 'restart']).catch('live'),
   pendingRestart: z.boolean().optional(),
   rules: z.array(RoutingRuleSchema).nullable().transform((v) => v ?? []),

@@ -264,6 +264,7 @@
     },
     "groups": {
       "groupTag": "Group Tag",
+      "routeDns": "Route by DNS",
       "inboundsInGroup": "Inbounds in group",
       "clientsInGroup": "Clients in group",
       "clientCount": "Clients in Group",
@@ -340,6 +341,11 @@
       "dnsStale": "Serve stale (seconds)",
       "dnsStaleDesc": "A stale answer goes out at once and is refreshed in the background. 0 turns it off.",
       "dnsRecords": "Own records",
+      "routeList": "Routing by DNS",
+      "routeListDesc": "Services picked here, and the names and networks below, leave through an exit node for groups with Route by DNS on — even when the client's +egress switch is off. The resolver on the exit node answers for these names, so addresses match where the traffic leaves.",
+      "routeOwn": "Your own names and networks. A name covers its subdomains, a leading *. means the same; networks are written as 91.105.192.0/23. Lines starting with # are notes.",
+      "routeServiceEntries": "names and networks",
+      "routeCount": "{own} own entries, {services} services picked",
       "dnsRecordAdd": "Add",
       "dnsRecordEdit": "Record",
       "dnsRecordName": "Name",
@@ -470,6 +476,7 @@
         "egress": "Into the tunnel and out through an exit node, whatever the switch says.",
         "noEgress": "Into the tunnel and out at the entry node, whatever the switch says."
       },
+      "noExit": "no exit — follows the default",
       "newFlowsNote": "Rules apply to new connections. Anything already open finishes on the route it started on — moving a live connection would change the address the far end sees and it would drop the session.",
       "matchNote": "A rule picked from a running process matches that exact file. One typed by name matches any process called that, wherever it was started from.",
       "searchProcess": "Search running processes, or type a name",

@@ -61,6 +61,7 @@ public class RoutingPage {
     private LinearLayout list;
 
     private String defaultRole = "tunnel";
+    private boolean allowExit;
     private final List<Rule> rules = new ArrayList<>();
     private List<App> catalogue;
     private final Map<String, Drawable> faces = new HashMap<>();
@@ -216,6 +217,7 @@ public class RoutingPage {
             String kept = body.optString("defaultRole", "tunnel");
             boolean stray = !"direct".equals(kept) && !"tunnel".equals(kept);
             defaultRole = stray ? "tunnel" : kept;
+            allowExit = body.optBoolean("allowExit", false);
 
             rules.clear();
             JSONArray rows = body.optJSONArray("rules");
@@ -301,17 +303,32 @@ public class RoutingPage {
 
     private void fill(final LinearLayout picker, final Rule rule) {
         picker.removeAllViews();
-        picker.addView(skin.segments(NAMES, indexOf(rule.role), new Skin.Pick() {
+        final boolean plain = "direct".equals(rule.role) || "tunnel".equals(rule.role);
+        final String[] roles = allowExit ? ROLES : BASE_ROLES;
+        int chosen = allowExit ? indexOf(rule.role) : plain ? indexIn(BASE_ROLES, rule.role) : -1;
+        picker.addView(skin.segments(allowExit ? NAMES : BASE_NAMES, chosen, new Skin.Pick() {
             @Override
             public void at(int index) {
-                if (ROLES[index].equals(rule.role)) {
+                if (roles[index].equals(rule.role)) {
                     return;
                 }
-                rule.role = ROLES[index];
+                rule.role = roles[index];
                 fill(picker, rule);
                 save();
             }
         }));
+        if (!allowExit && !plain) {
+            TextView note = skin.label(NAMES[indexOf(rule.role)]
+                    + " недоступен в подписке, работает как трафик по умолчанию", skin.muted, 12);
+            LinearLayout.LayoutParams noteAt = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            noteAt.topMargin = skin.dp(6);
+            picker.addView(note, noteAt);
+        }
+    }
+
+    void stale() {
+        loaded = false;
     }
 
     private static int indexOf(String role) {

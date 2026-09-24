@@ -6,17 +6,46 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
+	"sync/atomic"
 
 	"github.com/jaywehosl/quic-diver/internal/clientstate"
+	"github.com/jaywehosl/quic-diver/internal/ippkt"
 	"github.com/jaywehosl/quic-diver/internal/qcli"
 	"github.com/jaywehosl/quic-diver/internal/qcli/guard"
 	"github.com/jaywehosl/quic-diver/internal/qcli/packet"
 	"github.com/jaywehosl/quic-diver/internal/qcli/windivert"
+
+	"golang.org/x/sys/windows"
 )
 
 var keepSocket func(fd uintptr)
 
+var lateAside atomic.Pointer[[]netip.Prefix]
+
+func keepAsideReset() { lateAside.Store(nil) }
+
+var dnsFlush = windows.NewLazySystemDLL("dnsapi.dll").NewProc("DnsFlushResolverCache")
+
+func flushSystemDNS() { dnsFlush.Call() }
+
+func keepAside(fresh []netip.Prefix) {
+	next := append([]netip.Prefix{}, fresh...)
+	if held := lateAside.Load(); held != nil {
+		next = append(next, *held...)
+	}
+	lateAside.Store(&next)
+}
+
 func goesDirect(pkt []byte) bool {
+	if late := lateAside.Load(); late != nil {
+		if dst, ok := ippkt.Dst(pkt); ok {
+			for _, p := range *late {
+				if p.Contains(dst) {
+					return true
+				}
+			}
+		}
+	}
 	r := routeByProcess.Load()
 	if r == nil || !r.Active() {
 		return false

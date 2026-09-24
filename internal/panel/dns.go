@@ -4,10 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+
+	"github.com/jaywehosl/quic-diver/internal/steerlist"
 )
 
 var networkKeys = []string{
 	"refreshMinutes",
+	"routeList",
+	"routeServices",
 	"dnsPrimary",
 	"dnsSecondary",
 	"dnsCache",
@@ -34,6 +38,7 @@ func (a *API) dnsRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/panel/api/dns/records/del", a.dnsRecordDelete)
 	mux.HandleFunc("/panel/api/dns/stats", a.dnsStats)
 	mux.HandleFunc("/panel/api/dns/flush", a.dnsFlush)
+	mux.HandleFunc("/panel/api/dns/services", func(w http.ResponseWriter, r *http.Request) { sendOK(w, steerlist.Services) })
 }
 
 func (a *API) dnsRecords(w http.ResponseWriter, r *http.Request) {

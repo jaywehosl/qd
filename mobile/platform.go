@@ -116,13 +116,9 @@ func (c *Client) peerAddresses() []string {
 }
 
 func (c *Client) appLists() (direct []string, allowed []string, carveOut bool) {
-	rules, err := c.db.Rules()
+	fallback, rules, err := c.db.RulesInForce()
 	if err != nil {
 		return nil, nil, false
-	}
-	fallback, err := c.db.DefaultRole()
-	if err != nil {
-		fallback = clientstate.RoleTunnel
 	}
 
 	for _, rule := range rules {
@@ -147,6 +143,11 @@ func (p platform) HoldAutostart(on bool) error { return nil }
 
 func (c *Client) hold(assigned netip.Prefix, mtu int) (int, error) {
 	direct, allowed, carveOut := c.appLists()
+	if carveOut {
+		say("rules: only these apps enter the tunnel: %v", allowed)
+	} else {
+		say("rules: these apps bypass the tunnel: %v", direct)
+	}
 
 	c.mu.Lock()
 	c.appSplit = fmt.Sprintf("%v|%v|%v", direct, allowed, carveOut)

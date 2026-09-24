@@ -798,6 +798,38 @@ func FirstAddr(msg []byte, qtype uint16) (net.IP, bool) {
 	return nil, false
 }
 
+func Addrs(msg []byte) []netip.Addr {
+	if len(msg) < 12 {
+		return nil
+	}
+	answers := int(binary.BigEndian.Uint16(msg[6:8]))
+	i := questionEnd(msg)
+	if i < 0 {
+		return nil
+	}
+
+	var out []netip.Addr
+	for a := 0; a < answers && i+12 <= len(msg); a++ {
+		i = skipName(msg, i)
+		if i+10 > len(msg) {
+			break
+		}
+		kind := binary.BigEndian.Uint16(msg[i : i+2])
+		rdlen := int(binary.BigEndian.Uint16(msg[i+8 : i+10]))
+		i += 10
+		if i+rdlen > len(msg) {
+			break
+		}
+		if (kind == 1 && rdlen == 4) || (kind == 28 && rdlen == 16) {
+			if addr, ok := netip.AddrFromSlice(msg[i : i+rdlen]); ok {
+				out = append(out, addr.Unmap())
+			}
+		}
+		i += rdlen
+	}
+	return out
+}
+
 func AskFor(query []byte, qtype uint16) []byte {
 	end := questionEnd(query)
 	if end < 4 {

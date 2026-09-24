@@ -286,6 +286,19 @@
 
 .dns-table { margin-top: var(--step-2); }
 
+.dns-route__note { margin: 0 0 var(--step-2); opacity: 0.75; font-size: 13px; line-height: 1.45; }
+.dns-route__services { margin-bottom: var(--step-3); }
+.dns-route__service { display: inline-flex; align-items: center; gap: 6px; user-select: none; }
+.dns-route__service img { width: 16px; height: 16px; border-radius: 3px; flex: none; }
+.dns-route__list {
+  width: 100%;
+  min-height: 220px;
+  margin-bottom: var(--step-2);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12.5px;
+  resize: vertical;
+}
+
 .dns-stats {
   display: flex;
   flex-direction: column;

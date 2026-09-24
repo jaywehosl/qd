@@ -45,13 +45,17 @@ func (state *controlState) startResolver() {
 	state.dns = dnsproxy.New(cfg)
 	fmt.Printf("resolver   %v, %d cached names, %d local records\n",
 		cfg.Upstreams, cfg.Cache, len(cfg.Records))
+	state.loadRoutes()
 }
 
 func (state *controlState) reloadResolver() {
 	if state.dns == nil {
 		return
 	}
-	state.dns.Reconfigure(state.dnsConfig())
+	cfg := state.dnsConfig()
+	state.dns.Reconfigure(cfg)
+	fmt.Printf("resolver   now %v\n", cfg.Upstreams)
+	state.loadRoutes()
 }
 
 func (state *controlState) resolve(req request) response {
@@ -67,6 +71,10 @@ func (state *controlState) resolve(req request) response {
 	}
 	if len(body.Query) < 12 {
 		return response{OK: false, Error: "dns: query too short"}
+	}
+
+	if answer, ok := state.resolveAbroad(req.Auth, body.Query); ok {
+		return reply(req, map[string]any{"answer": dropUnreachable(body.Query, answer), "hit": false})
 	}
 
 	answer, hit, err := state.dns.Answer(body.Query)

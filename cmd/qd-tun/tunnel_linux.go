@@ -47,6 +47,20 @@ var keepSocket = func(fd uintptr) {
 
 func goesDirect(pkt []byte) bool { return false }
 
+func keepAsideReset() {}
+
+func flushSystemDNS() { run("resolvectl", "flush-caches") }
+
+func keepAside(fresh []netip.Prefix) {
+	for _, p := range fresh {
+		family := "-4"
+		if !p.Addr().Is4() {
+			family = "-6"
+		}
+		ip(family, "rule", "add", "to", p.String(), "lookup", "main", "priority", strconv.Itoa(ruleAside))
+	}
+}
+
 func (t *tunnel) opener() (sourceOpener, error) {
 	if os.Geteuid() != 0 {
 		return nil, errors.New("the tunnel needs root; run it as the qd-client service")

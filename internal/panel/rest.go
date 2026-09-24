@@ -455,6 +455,7 @@ func (a *API) groupEntrypoints(w http.ResponseWriter, r *http.Request) {
 		EntrypointIDs []int  `json:"entrypointIds"`
 		DeviceLimit   int    `json:"deviceLimit"`
 		AllowExit     bool   `json:"allowExit"`
+		RouteDNS      bool   `json:"routeDns"`
 		RelayEnable   bool   `json:"relayEnable"`
 		Relays        []struct {
 			NodeID  int    `json:"nodeId"`
@@ -489,7 +490,7 @@ func (a *API) groupEntrypoints(w http.ResponseWriter, r *http.Request) {
 		}
 		results, err := a.write("groups.save", map[string]any{
 			"id": g.ID, "name": g.Name, "entrypointIds": body.EntrypointIDs,
-			"deviceLimit": body.DeviceLimit, "allowExit": body.AllowExit,
+			"deviceLimit": body.DeviceLimit, "allowExit": body.AllowExit, "routeDns": body.RouteDNS,
 			"relayEnable": body.RelayEnable, "relays": body.Relays,
 		})
 		if err != nil {

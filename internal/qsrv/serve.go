@@ -234,7 +234,13 @@ func (c counted) WritePacket(b []byte) ([]byte, error) {
 func (n *Node) dialerFor(ctx context.Context, grant Grant, route string, hops int) netstack.Dialer {
 	local := netstack.NetDialer{}
 
-	if route == "" || hops <= 0 {
+	if hops <= 0 {
+		return local
+	}
+	if route == "" {
+		if grant.Steer && n.steer.any() {
+			return steering{node: n, grant: grant, hops: hops, local: local}
+		}
 		return local
 	}
 	if route == n.cfg.SelfID || route == n.cfg.SelfTag {

@@ -1,12 +1,13 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 
-import { Button, Card, DataTable, Dialog, Field, Input, Switch, Tag, toast, type ColumnDef } from '@/components/ds';
+import { Button, Card, DataTable, Dialog, Field, Input, Switch, Tag, Textarea, toast, type ColumnDef } from '@/components/ds';
 import { SettingListItem } from '@/components/ui';
 import { HttpUtil } from '@/utils';
 import type { AllSetting } from '@/models/setting';
+import { adoptPreset, countEntries, iconOf, pickedOf, type RouteService } from './routeServices';
 
 interface DnsTabProps {
   allSetting: AllSetting;
@@ -42,6 +43,21 @@ export default function DnsTab({ allSetting, updateSetting }: DnsTabProps) {
   const queryClient = useQueryClient();
 
   const [editing, setEditing] = useState<DnsRecord | null>(null);
+  const { data: services = [] } = useQuery<RouteService[]>({
+    queryKey: ['dns', 'services'],
+    queryFn: async () => {
+      const msg = await HttpUtil.get<RouteService[]>('/panel/api/dns/services', undefined, { silent: true });
+      return msg?.success ? (msg.obj ?? []) : [];
+    },
+    staleTime: Infinity,
+  });
+  const picked = pickedOf(allSetting.routeServices);
+
+  useEffect(() => {
+    if (services.length === 0 || picked.length > 0) return;
+    const adopted = adoptPreset(allSetting.routeList ?? '', services);
+    if (adopted) updateSetting({ routeList: adopted.list, routeServices: adopted.ids.join(',') });
+  }, [services]);
 
   const { data: records = [], isFetching } = useQuery<DnsRecord[]>({
     queryKey: ['dns', 'records'],
@@ -195,6 +211,42 @@ export default function DnsTab({ allSetting, updateSetting }: DnsTabProps) {
           onChange={(e) => updateSetting({ dnsStale: Number(e.target.value) || 0 })}
         />
       </SettingListItem>
+      </Card>
+
+      <Card title={t('pages.settings.routeList')}>
+        <p className="dns-route__note">{t('pages.settings.routeListDesc')}</p>
+        <div className="ge-picks dns-route__services">
+          {services.map((s) => {
+            const on = picked.includes(s.id);
+            const icon = iconOf(s.id);
+            return (
+              <Tag
+                key={s.id}
+                tone={on ? 'success' : 'neutral'}
+                className={`ge-pick dns-route__service${on ? ' is-on' : ''}`}
+                title={[s.note, `${s.entries.length} ${t('pages.settings.routeServiceEntries')}`].filter(Boolean).join(' · ')}
+                onClick={() => updateSetting({
+                  routeServices: (on ? picked.filter((id) => id !== s.id) : [...picked, s.id]).join(','),
+                })}
+              >
+                {icon ? <img src={icon} alt="" aria-hidden="true" /> : null}
+                {s.name}
+              </Tag>
+            );
+          })}
+        </div>
+        <p className="dns-route__note">{t('pages.settings.routeOwn')}</p>
+        <Textarea
+          className="dns-route__list"
+          rows={14}
+          spellCheck={false}
+          value={allSetting.routeList ?? ''}
+          onChange={(e) => updateSetting({ routeList: e.target.value })}
+        />
+        <p className="dns-route__note">{t('pages.settings.routeCount', {
+          own: countEntries(allSetting.routeList ?? ''),
+          services: picked.length,
+        })}</p>
       </Card>
 
       <Card

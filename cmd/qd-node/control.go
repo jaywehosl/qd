@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/jaywehosl/quic-diver/internal/dnsproxy"
@@ -60,10 +61,12 @@ type controlState struct {
 	node  *qsrv.Node
 	gate  *gate
 	exits int
+	byDNS int
 	watch *presence
 	epoch int64
 
-	dns *dnsproxy.Resolver
+	dns    *dnsproxy.Resolver
+	routes atomic.Pointer[routeList]
 }
 
 var clientOps = map[string]bool{

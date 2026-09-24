@@ -408,6 +408,7 @@ public class MainActivity extends Activity {
                 return;
             case ROUTING:
                 Snapshot.watch(Snapshot.NOTHING);
+                routingPage.stale();
                 return;
             default:
                 Snapshot.watch(Snapshot.CONNECT);

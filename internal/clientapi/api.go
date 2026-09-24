@@ -198,6 +198,7 @@ func (a *API) Import(uri string) error {
 	if a.OnImport != nil {
 		a.OnImport()
 	}
+	a.platform.RulesChanged()
 
 	go a.check("imported")
 	return nil
@@ -471,6 +472,7 @@ func (a *API) adoptExit(answer Standing) {
 	}
 	sub.AllowExit = answer.AllowExit
 	a.db.SaveSubscription(sub)
+	a.platform.RulesChanged()
 
 	if !answer.AllowExit {
 		if settings, err := a.db.Settings(); err == nil && settings.Egress {
@@ -696,7 +698,12 @@ func (a *API) RulesJSON() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return marshal(map[string]any{"defaultRole": defaultRole, "rules": rules})
+	return marshal(map[string]any{"defaultRole": defaultRole, "rules": rules, "allowExit": a.exitAllowed()})
+}
+
+func (a *API) exitAllowed() bool {
+	sub, err := a.db.Subscription()
+	return err == nil && sub.AllowExit
 }
 
 func (a *API) SaveRulesJSON(raw string) error {
@@ -935,6 +942,7 @@ func (a *API) routing(w http.ResponseWriter, r *http.Request) {
 
 	ok(w, map[string]any{
 		"defaultRole":    defaultRole,
+		"allowExit":      a.exitAllowed(),
 		"applyMode":      "live",
 		"pendingRestart": false,
 		"rules":          rules,

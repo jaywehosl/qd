@@ -369,13 +369,9 @@ func reloadProcessRules(db *clientstate.DB) {
 		go r.keepTable(nil)
 		go r.tellMisses(nil)
 	}
-	rules, err := db.Rules()
+	def, rules, err := db.RulesInForce()
 	if err != nil {
 		return
-	}
-	def, err := db.DefaultRole()
-	if err != nil {
-		def = clientstate.RoleTunnel
 	}
 	r.Load(def, rules)
 	splitRules(r)

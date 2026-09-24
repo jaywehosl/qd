@@ -23,6 +23,7 @@ type groupRow struct {
 	EntrypointIDs []int  `json:"entrypointIds"`
 	DeviceLimit   int    `json:"deviceLimit"`
 	AllowExit     bool   `json:"allowExit"`
+	RouteDNS      bool   `json:"routeDns"`
 	RelayEnable   bool   `json:"relayEnable"`
 	Relays        []struct {
 		NodeID  int    `json:"nodeId"`
@@ -642,6 +643,7 @@ func (a *API) groupsList(w http.ResponseWriter, r *http.Request) {
 			"id": g.ID, "name": g.Name, "clientCount": counts[g.ID],
 			"entrypointIds": g.EntrypointIDs, "deviceLimit": g.DeviceLimit,
 			"allowExit":   g.AllowExit,
+			"routeDns":    g.RouteDNS,
 			"relayEnable": g.RelayEnable, "relays": g.Relays,
 		})
 	}

@@ -57,6 +57,28 @@ func (d *DB) DefaultRole() (string, error) {
 	return v, nil
 }
 
+func plainRole(role string) bool { return role == RoleDirect || role == RoleTunnel }
+
+func (d *DB) RulesInForce() (string, []Rule, error) {
+	rules, err := d.Rules()
+	if err != nil {
+		return "", nil, err
+	}
+	def, _ := d.DefaultRole()
+	if sub, err := d.Subscription(); err == nil && sub.AllowExit {
+		return def, rules, nil
+	}
+	if !plainRole(def) {
+		def = RoleDirect
+	}
+	for i := range rules {
+		if !plainRole(rules[i].Role) {
+			rules[i].Role = def
+		}
+	}
+	return def, rules, nil
+}
+
 func (d *DB) ReplaceRules(defaultRole string, rules []Rule) error {
 	if !ValidRole(defaultRole) {
 		return fmt.Errorf("clientstate: %q is not a role", defaultRole)
