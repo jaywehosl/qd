@@ -73,6 +73,8 @@ func (n *Node) verified(r *http.Request) (Grant, bool) {
 	return sessionOf(r.Context()).recall()
 }
 
+func SeatFor(session uint32, device string) uint32 { return seatFor(session, device) }
+
 func seatFor(session uint32, device string) uint32 {
 	h := fnv.New32a()
 	fmt.Fprintf(h, "%d/%s", session, device)

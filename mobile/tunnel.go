@@ -44,7 +44,11 @@ func (c *Client) applyExit(on bool) {
 
 	c.mu.Lock()
 	live := c.live
+	dns := c.dns
 	c.mu.Unlock()
+	if dns != nil {
+		dns.Flush()
+	}
 	if live == nil {
 		return
 	}

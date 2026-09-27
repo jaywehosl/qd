@@ -28,7 +28,13 @@ func (p hostPlatform) SetKey(key *qdcrypt.Key) { p.tun.SetKey(key) }
 
 func (p hostPlatform) ServerName() string { return p.tun.ServerName() }
 
-func (p hostPlatform) SetExit(egress bool) { setExit(egress) }
+func (p hostPlatform) SetExit(egress bool) {
+	setExit(egress)
+	if d := p.tun.DNS(); d != nil {
+		d.Flush()
+	}
+	go flushSystemDNS()
+}
 
 func (p hostPlatform) SetFixedRate(mbit int) { setFixedRate(mbit) }
 

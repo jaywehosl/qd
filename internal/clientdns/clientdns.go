@@ -17,6 +17,8 @@ type Config struct {
 	Ask     Ask
 	Blocked func(name string) bool
 	Say     func(format string, args ...any)
+	Device  string
+	Exit    func() bool
 }
 
 type Stats struct {
@@ -27,6 +29,8 @@ type Resolver struct {
 	conn    *net.UDPConn
 	node    atomic.Pointer[string]
 	token   string
+	device  string
+	exit    func() bool
 	ask     Ask
 	say     func(string, ...any)
 	blocked func(name string) bool
@@ -46,7 +50,7 @@ func New(cfg Config) (*Resolver, error) {
 		return nil, err
 	}
 
-	r := &Resolver{conn: conn, token: cfg.Token, ask: cfg.Ask, say: cfg.Say, blocked: cfg.Blocked}
+	r := &Resolver{conn: conn, token: cfg.Token, device: cfg.Device, exit: cfg.Exit, ask: cfg.Ask, say: cfg.Say, blocked: cfg.Blocked}
 	r.node.Store(&cfg.Node)
 	r.cache = dnsproxy.New(dnsproxy.Config{Cache: cacheSize, MaxTTL: cacheMaxTTL, Stale: cacheStale, Forward: r.fromNode})
 	return r, nil
@@ -147,7 +151,8 @@ func (r *Resolver) fromNode(query []byte) ([]byte, error) {
 	var answer struct {
 		Answer []byte `json:"answer"`
 	}
-	if err := r.ask(r.asking(), "dns", r.token, map[string]any{"query": query}, &answer); err != nil {
+	body := map[string]any{"query": query, "device": r.device, "exit": r.exit != nil && r.exit()}
+	if err := r.ask(r.asking(), "dns", r.token, body, &answer); err != nil {
 		return nil, err
 	}
 	if len(answer.Answer) < 12 {
@@ -157,6 +162,8 @@ func (r *Resolver) fromNode(query []byte) ([]byte, error) {
 	copy(answer.Answer[0:2], query[0:2])
 	return answer.Answer, nil
 }
+
+func (r *Resolver) Flush() { r.cache.Flush() }
 
 func (r *Resolver) KeepWarm(stop <-chan struct{}) {
 	tick := time.NewTicker(warmStep)

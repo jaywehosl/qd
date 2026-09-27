@@ -71,6 +71,12 @@ func (g *gate) route(id uint32, allow bool) {
 	g.mu.Unlock()
 }
 
+func (g *gate) exits(id uint32) bool {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.allowed[id]
+}
+
 func (g *gate) routes(id uint32) bool {
 	g.mu.RLock()
 	defer g.mu.RUnlock()

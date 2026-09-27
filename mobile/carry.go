@@ -75,6 +75,8 @@ func (c *Client) carry(servers []string, relays []relay.Link, session uint32) er
 		DNS: &clientdns.Config{
 			Node: servers[0], Token: c.token(), Ask: c.wire().Ask,
 			Say:     say,
+			Device:  c.device.ID,
+			Exit:    func() bool { return exit.Load() == uint32(qdcrypt.ExitEgress) },
 			Blocked: func(name string) bool { return seen != nil && seen.Query(name) },
 		},
 		Source: func(ctx context.Context, live *qcli.Tunnel) (packet.Source, error) {

@@ -148,12 +148,12 @@ func (d steering) Ping(ctx context.Context, dst netip.Addr, ttl uint8, payload [
 	return d.local.Ping(ctx, dst, ttl, payload)
 }
 
-func (n *Node) AskExit(ctx context.Context, op string, body []byte) ([]byte, error) {
-	cc, endpoint, err := n.steerExit(ctx, 0, 0)
+func (n *Node) AskExit(ctx context.Context, seat, session uint32, op string, body []byte) ([]byte, error) {
+	cc, endpoint, err := n.steerExit(ctx, seat, session)
 	if err != nil {
 		return nil, err
 	}
-	at := where{endpoint, 0}
+	at := where{endpoint, seat}
 	n.links.hold(at)
 	defer n.links.release(at)
 

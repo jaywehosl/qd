@@ -126,6 +126,8 @@ func (t *tunnel) Start(servers []string, relays []relay.Link, sessionID uint32) 
 		plan.DNS = &clientdns.Config{
 			Node: servers[0], Token: t.token(), Ask: nodeTalk.Ask,
 			Blocked: t.cfg.OnQuery,
+			Device:  deviceOf().ID,
+			Exit:    func() bool { return routeTag() == anyExit },
 		}
 	}
 	plan.Dial = qcli.Options{

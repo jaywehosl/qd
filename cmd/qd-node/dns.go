@@ -64,7 +64,9 @@ func (state *controlState) resolve(req request) response {
 	}
 
 	var body struct {
-		Query []byte `json:"query"`
+		Query  []byte `json:"query"`
+		Device string `json:"device"`
+		Exit   bool   `json:"exit"`
 	}
 	if err := json.Unmarshal(req.Body, &body); err != nil {
 		return response{OK: false, Error: err.Error()}
@@ -73,7 +75,7 @@ func (state *controlState) resolve(req request) response {
 		return response{OK: false, Error: "dns: query too short"}
 	}
 
-	if answer, ok := state.resolveAbroad(req.Auth, body.Query); ok {
+	if answer, ok := state.resolveAbroad(req.Auth, body.Device, body.Exit, body.Query); ok {
 		return reply(req, map[string]any{"answer": dropUnreachable(body.Query, answer), "hit": false})
 	}
 

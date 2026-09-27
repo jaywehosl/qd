@@ -12,6 +12,7 @@ import (
 
 	"github.com/jaywehosl/quic-diver/internal/dnsproxy"
 	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
+	"github.com/jaywehosl/quic-diver/internal/qsrv"
 	"github.com/jaywehosl/quic-diver/internal/steerlist"
 )
 
@@ -77,26 +78,42 @@ func (state *controlState) loadRoutes() {
 	}
 }
 
-func (state *controlState) resolveAbroad(auth string, query []byte) ([]byte, bool) {
-	list := state.routes.Load()
-	if list == nil || len(list.names) == 0 || auth == "" || !state.gate.routes(qdcrypt.SessionID(auth)) {
+func (state *controlState) resolveAbroad(auth, device string, exit bool, query []byte) ([]byte, bool) {
+	if auth == "" {
 		return nil, false
 	}
 	name, _, ok := dnsproxy.Question(query)
-	if !ok || !list.matches(name) {
+	if !ok {
 		return nil, false
 	}
-	return state.askAbroad(name, query)
+	session := qdcrypt.SessionID(auth)
+	list := state.routes.Load()
+	listed := list != nil && state.gate.routes(session) && list.matches(name)
+	if !listed && !(exit && state.gate.exits(session)) {
+		return nil, false
+	}
+
+	var seat uint32
+	if device != "" {
+		seat = qsrv.SeatFor(session, device)
+	} else {
+		session = 0
+	}
+	answer, ok := state.askAbroad(query, seat, session)
+	if ok && listed {
+		state.node.Steer(name, dnsproxy.Addrs(answer))
+	}
+	return answer, ok
 }
 
-func (state *controlState) askAbroad(name string, query []byte) ([]byte, bool) {
+func (state *controlState) askAbroad(query []byte, seat, session uint32) ([]byte, bool) {
 	body, err := json.Marshal(map[string]any{"query": query})
 	if err != nil {
 		return nil, false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), abroadWait)
 	defer cancel()
-	raw, err := state.node.AskExit(ctx, "dns", body)
+	raw, err := state.node.AskExit(ctx, seat, session, "dns", body)
 	if err != nil {
 		return nil, false
 	}
@@ -107,6 +124,5 @@ func (state *controlState) askAbroad(name string, query []byte) ([]byte, bool) {
 	if json.Unmarshal(raw, &got) != nil || len(got.Answer) < 12 {
 		return nil, false
 	}
-	state.node.Steer(name, dnsproxy.Addrs(got.Answer))
 	return got.Answer, true
 }
