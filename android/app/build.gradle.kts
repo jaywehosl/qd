@@ -22,8 +22,8 @@ android {
         applicationId = "ru.quicdiver.client"
         minSdk = 33
         targetSdk = 35
-        versionCode = 12
-        versionName = "0.1.1"
+        versionCode = 13
+        versionName = "0.1.2"
         ndk {
             abiFilters += "arm64-v8a"
         }

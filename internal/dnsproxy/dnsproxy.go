@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/netip"
 	"strings"
@@ -264,7 +265,11 @@ func (r *Resolver) forward(query []byte) ([]byte, time.Duration, error) {
 
 	for _, up := range ups {
 		go func(u *upstream) {
-			answer, err := u.exchange(query, timeout)
+			began := time.Now()
+			answer, err := u.exchange(query, timeout*6/10)
+			if err != nil {
+				answer, err = overTCP(u.addr, query, timeout-time.Since(began))
+			}
 			answers <- heard{answer: answer, err: err}
 		}(up)
 	}
@@ -591,6 +596,38 @@ func (u *upstream) exchange(query []byte, timeout time.Duration) ([]byte, error)
 		u.mu.Unlock()
 		return nil, errors.New("dns: upstream timeout")
 	}
+}
+
+func overTCP(addr string, query []byte, wait time.Duration) ([]byte, error) {
+	if wait <= 0 {
+		return nil, errors.New("dns: upstream timeout")
+	}
+	conn, err := net.DialTimeout("tcp", addr, wait)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(wait))
+
+	out := make([]byte, 2+len(query))
+	binary.BigEndian.PutUint16(out, uint16(len(query)))
+	copy(out[2:], query)
+	if _, err := conn.Write(out); err != nil {
+		return nil, err
+	}
+
+	var size [2]byte
+	if _, err := io.ReadFull(conn, size[:]); err != nil {
+		return nil, err
+	}
+	answer := make([]byte, binary.BigEndian.Uint16(size[:]))
+	if _, err := io.ReadFull(conn, answer); err != nil {
+		return nil, err
+	}
+	if len(answer) < 12 {
+		return nil, errors.New("dns: short answer over tcp")
+	}
+	return answer, nil
 }
 
 func address(entry string) string {

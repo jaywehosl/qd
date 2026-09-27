@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -327,7 +328,10 @@ func mustSettings(db *store.DB) store.NetworkSettings {
 
 func printStats(node *qsrv.Node) {
 	sessions, transits, refused := node.Live()
-	fmt.Printf("sessions=%d transits=%d refused=%d\n", sessions, transits, refused)
+	var mem runtime.MemStats
+	runtime.ReadMemStats(&mem)
+	fmt.Printf("sessions=%d transits=%d refused=%d goroutines=%d heap=%dMB sys=%dMB\n",
+		sessions, transits, refused, runtime.NumGoroutine(), mem.HeapAlloc>>20, mem.Sys>>20)
 
 	for _, s := range node.Sessions() {
 		if s.PktUp == 0 && s.PktDown == 0 {
