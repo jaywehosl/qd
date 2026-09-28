@@ -5,8 +5,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/jaywehosl/quic-diver/internal/clientstate"
-	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
+	"github.com/jaywehosl/qd/internal/clientstate"
+	"github.com/jaywehosl/qd/internal/qdcrypt"
 )
 
 func subscribe(statePath, raw string) {

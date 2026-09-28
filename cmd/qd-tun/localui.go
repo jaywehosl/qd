@@ -6,29 +6,21 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/jaywehosl/quic-diver/internal/localapi"
-	"github.com/jaywehosl/quic-diver/web"
+	"github.com/jaywehosl/qd/internal/localapi"
 )
 
-func startLocalUI(host string, port int, client, admin http.Handler, isAdmin func() bool) (*localapi.Server, error) {
-	page, err := web.Handler("")
-	if err != nil {
-		return nil, err
+func startLocalUI(host string, port int, client http.Handler, admin *adminUI, isAdmin func() bool) (*localapi.Server, error) {
+	cfg := localapi.Config{Client: client, IsAdmin: isAdmin}
+	if admin != nil {
+		cfg.Admin = admin
+	}
+	if !embedded {
+		if err := withPage(&cfg); err != nil {
+			return nil, err
+		}
 	}
 
-	srv, err := localapi.New(localapi.Config{
-		Page:    page,
-		Client:  client,
-		Admin:   admin,
-		IsAdmin: isAdmin,
-		Guarded: guardPage,
-		Index: func(token string) ([]byte, error) {
-			return web.IndexWith(map[string]string{
-				"X_UI_BASE_PATH": "/",
-				"QD_TOKEN":       token,
-			})
-		},
-	})
+	srv, err := localapi.New(cfg)
 	if err != nil {
 		return nil, err
 	}

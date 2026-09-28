@@ -13,5 +13,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "quic-diver"
+rootProject.name = "qd"
 include(":app")

@@ -17,18 +17,18 @@ import (
 
 	quic "github.com/quic-go/quic-go"
 
-	"github.com/jaywehosl/quic-diver/internal/ippkt"
-	"github.com/jaywehosl/quic-diver/internal/qcli/connectdial"
-	"github.com/jaywehosl/quic-diver/internal/qcli/guard"
-	"github.com/jaywehosl/quic-diver/internal/qcli/hybrid"
-	"github.com/jaywehosl/quic-diver/internal/qcli/nat"
-	"github.com/jaywehosl/quic-diver/internal/qcli/packet"
-	"github.com/jaywehosl/quic-diver/internal/qsrv"
-	"github.com/jaywehosl/quic-diver/internal/qsrv/server/netstack"
-	"github.com/jaywehosl/quic-diver/internal/qsrv/transport/cip"
-	"github.com/jaywehosl/quic-diver/internal/qsrv/uplink/quicconn"
-	"github.com/jaywehosl/quic-diver/internal/qsrv/uplink/relay"
-	"github.com/jaywehosl/quic-diver/internal/roads"
+	"github.com/jaywehosl/qd/internal/ippkt"
+	"github.com/jaywehosl/qd/internal/qcli/connectdial"
+	"github.com/jaywehosl/qd/internal/qcli/guard"
+	"github.com/jaywehosl/qd/internal/qcli/hybrid"
+	"github.com/jaywehosl/qd/internal/qcli/nat"
+	"github.com/jaywehosl/qd/internal/qcli/packet"
+	"github.com/jaywehosl/qd/internal/qsrv"
+	"github.com/jaywehosl/qd/internal/qsrv/server/netstack"
+	"github.com/jaywehosl/qd/internal/qsrv/transport/cip"
+	"github.com/jaywehosl/qd/internal/qsrv/uplink/quicconn"
+	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
+	"github.com/jaywehosl/qd/internal/roads"
 )
 
 type Options struct {

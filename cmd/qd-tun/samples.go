@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jaywehosl/quic-diver/internal/clientdns"
-	"github.com/jaywehosl/quic-diver/internal/clientstate"
+	"github.com/jaywehosl/qd/internal/clientdns"
+	"github.com/jaywehosl/qd/internal/clientstate"
 )
 
 func collectSamples(db *clientstate.DB, tun *tunnel, stop <-chan struct{}) {

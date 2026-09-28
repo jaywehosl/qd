@@ -12,7 +12,7 @@ import (
 
 	"github.com/quic-go/quic-go/http3"
 
-	"github.com/jaywehosl/quic-diver/internal/costream"
+	"github.com/jaywehosl/qd/internal/costream"
 )
 
 type chained struct {

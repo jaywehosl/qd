@@ -15,10 +15,10 @@ import (
 	"github.com/quic-go/quic-go/http3"
 	"golang.org/x/net/http2"
 
-	"github.com/jaywehosl/quic-diver/internal/qsrv/transport/cip"
-	"github.com/jaywehosl/quic-diver/internal/qsrv/uplink/quicconn"
-	"github.com/jaywehosl/quic-diver/internal/qsrv/uplink/relay"
-	"github.com/jaywehosl/quic-diver/internal/roads"
+	"github.com/jaywehosl/qd/internal/qsrv/transport/cip"
+	"github.com/jaywehosl/qd/internal/qsrv/uplink/quicconn"
+	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
+	"github.com/jaywehosl/qd/internal/roads"
 )
 
 type Dialer struct {

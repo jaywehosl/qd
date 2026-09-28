@@ -6,15 +6,15 @@ import (
 	"net/netip"
 	"time"
 
-	"github.com/jaywehosl/quic-diver/internal/clientdns"
-	"github.com/jaywehosl/quic-diver/internal/clientrun"
-	"github.com/jaywehosl/quic-diver/internal/peers"
-	"github.com/jaywehosl/quic-diver/internal/qcli"
-	"github.com/jaywehosl/quic-diver/internal/qcli/packet"
-	"github.com/jaywehosl/quic-diver/internal/qcli/packet/tun"
-	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
-	"github.com/jaywehosl/quic-diver/internal/qsrv"
-	"github.com/jaywehosl/quic-diver/internal/qsrv/uplink/relay"
+	"github.com/jaywehosl/qd/internal/clientdns"
+	"github.com/jaywehosl/qd/internal/clientrun"
+	"github.com/jaywehosl/qd/internal/peers"
+	"github.com/jaywehosl/qd/internal/qcli"
+	"github.com/jaywehosl/qd/internal/qcli/packet"
+	"github.com/jaywehosl/qd/internal/qcli/packet/tun"
+	"github.com/jaywehosl/qd/internal/qdcrypt"
+	"github.com/jaywehosl/qd/internal/qsrv"
+	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
 )
 
 func (c *Client) carry(servers []string, relays []relay.Link, session uint32) error {

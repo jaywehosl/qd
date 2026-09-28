@@ -14,11 +14,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/jaywehosl/quic-diver/internal/dnsproxy"
-	"github.com/jaywehosl/quic-diver/internal/netstate"
-	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
-	"github.com/jaywehosl/quic-diver/internal/qsrv"
-	"github.com/jaywehosl/quic-diver/internal/store"
+	"github.com/jaywehosl/qd/internal/dnsproxy"
+	"github.com/jaywehosl/qd/internal/netstate"
+	"github.com/jaywehosl/qd/internal/qdcrypt"
+	"github.com/jaywehosl/qd/internal/qsrv"
+	"github.com/jaywehosl/qd/internal/store"
 )
 
 type nodeInfo struct {

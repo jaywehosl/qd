@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jaywehosl/quic-diver/internal/netstate"
-	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
+	"github.com/jaywehosl/qd/internal/netstate"
+	"github.com/jaywehosl/qd/internal/qdcrypt"
 )
 
 const prefsKey = "panel.prefs"

@@ -17,7 +17,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/jaywehosl/quic-diver/internal/clientstate"
+	"github.com/jaywehosl/qd/internal/clientstate"
 )
 
 const (

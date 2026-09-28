@@ -13,8 +13,8 @@ import (
 	"github.com/quic-go/quic-go/http3"
 	"golang.org/x/net/http2"
 
-	"github.com/jaywehosl/quic-diver/internal/costream"
-	"github.com/jaywehosl/quic-diver/internal/qsrv"
+	"github.com/jaywehosl/qd/internal/costream"
+	"github.com/jaywehosl/qd/internal/qsrv"
 )
 
 type Dialer struct {

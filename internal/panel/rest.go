@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
+	"github.com/jaywehosl/qd/internal/qdcrypt"
 )
 
 func (a *API) restRoutes(mux *http.ServeMux) {

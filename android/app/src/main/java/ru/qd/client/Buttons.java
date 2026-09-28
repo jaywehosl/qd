@@ -1,4 +1,4 @@
-package ru.quicdiver.client;
+package ru.qd.client;
 
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -9,8 +9,8 @@ import qdmobile.Client;
 
 public class Buttons extends BroadcastReceiver {
 
-    public static final String ACTION_EGRESS = "ru.quicdiver.client.EGRESS";
-    public static final String ACTION_KEEP = "ru.quicdiver.client.KEEP";
+    public static final String ACTION_EGRESS = "ru.qd.client.EGRESS";
+    public static final String ACTION_KEEP = "ru.qd.client.KEEP";
 
     @Override
     public void onReceive(Context context, Intent intent) {

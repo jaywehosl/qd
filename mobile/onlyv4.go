@@ -3,7 +3,7 @@ package qdmobile
 import (
 	"context"
 
-	"github.com/jaywehosl/quic-diver/internal/qcli/packet"
+	"github.com/jaywehosl/qd/internal/qcli/packet"
 )
 
 type onlyV4 struct {

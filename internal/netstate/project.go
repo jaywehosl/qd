@@ -3,7 +3,7 @@ package netstate
 import (
 	"sort"
 
-	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
+	"github.com/jaywehosl/qd/internal/qdcrypt"
 )
 
 func Project(nodeID int, s *State) (*NodeConfig, error) {

@@ -1,8 +1,8 @@
 package clientapi
 
 import (
-	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
-	"github.com/jaywehosl/quic-diver/internal/qsrv/uplink/relay"
+	"github.com/jaywehosl/qd/internal/qdcrypt"
+	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
 )
 
 type Device struct {

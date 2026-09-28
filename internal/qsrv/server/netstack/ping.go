@@ -12,7 +12,7 @@ import (
 
 	"golang.org/x/net/ipv4"
 
-	"github.com/jaywehosl/quic-diver/internal/ippkt"
+	"github.com/jaywehosl/qd/internal/ippkt"
 )
 
 type Echo struct {

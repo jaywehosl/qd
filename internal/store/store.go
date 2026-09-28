@@ -11,7 +11,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/jaywehosl/quic-diver/internal/netstate"
+	"github.com/jaywehosl/qd/internal/netstate"
 )
 
 //go:embed schema.sql

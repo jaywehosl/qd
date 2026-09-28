@@ -195,7 +195,7 @@ export default defineConfig({
   build: {
     outDir,
     emptyOutDir: true,
-    sourcemap: process.env.QD_EMBED ? false : true,
+    sourcemap: Boolean(process.env.QD_MAPS),
     target: 'es2020',
     chunkSizeWarningLimit: 1500,
     rollupOptions: {

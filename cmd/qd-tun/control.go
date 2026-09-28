@@ -3,8 +3,8 @@
 package main
 
 import (
-	"github.com/jaywehosl/quic-diver/internal/clientstate"
-	"github.com/jaywehosl/quic-diver/internal/qwire"
+	"github.com/jaywehosl/qd/internal/clientstate"
+	"github.com/jaywehosl/qd/internal/qwire"
 )
 
 var nodeTalk = qwire.NewKept(keepSocket)

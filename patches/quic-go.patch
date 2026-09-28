@@ -12,7 +12,7 @@ diff -ruN '--exclude=.git' qg-orig/datagram_queue.go C:/Users/jaywehosl/Desktop/
  	"github.com/quic-go/quic-go/internal/wire"
  )
  
-+// QUIC Diver: диагностика потерь датаграмм. Дроп на приёме = потеря IP-пакета в
++// qd: диагностика потерь датаграмм. Дроп на приёме = потеря IP-пакета в
 +// туннеле → TCP внутри видит потерю и рушит cwnd. Счётчики глобальные, читаются
 +// из приложения (DatagramStats).
 +var (
@@ -29,7 +29,7 @@ diff -ruN '--exclude=.git' qg-orig/datagram_queue.go C:/Users/jaywehosl/Desktop/
  const (
 -	maxDatagramSendQueueLen = 32
 -	maxDatagramRcvQueueLen  = 128
-+	// QUIC Diver: очереди под bulk-трафик, но НАМЕРЕННО небольшие.
++	// qd: очереди под bulk-трафик, но НАМЕРЕННО небольшие.
 +	// Upstream (32/128) рассчитан на редкие сигнальные датаграммы: send блокировал
 +	// отправителя (stop-and-go), rcv молча дропал при burst. Раздувать тоже нельзя:
 +	// длинная очередь = bufferbloat (пакет ждёт дренажа → RTT под нагрузкой растёт).
@@ -48,7 +48,7 @@ diff -ruN '--exclude=.git' qg-orig/datagram_queue.go C:/Users/jaywehosl/Desktop/
 +	if queued {
 +		datagramsRcvd.Add(1)
 +	} else {
-+		datagramsDropped.Add(1) // QUIC Diver: потеря IP-пакета в туннеле
++		datagramsDropped.Add(1) // qd: потеря IP-пакета в туннеле
 +		if h.logger.Debug() {
 +			h.logger.Debugf("Discarding received DATAGRAM frame (%d bytes payload)", len(f.Data))
 +		}
@@ -92,7 +92,7 @@ diff -ruN '--exclude=.git' qg-orig/internal/ackhandler/sent_packet_handler.go C:
 +	h.setLossDetectionTimer(now)
 +}
 +
-+// qdNewCongestion — QUIC Diver: выбор congestion control.
++// qdNewCongestion — qd: выбор congestion control.
 +//
 +// По умолчанию Cubic. Upstream хардкодил Reno («true, // use Reno»), а тот режет
 +// окно вдвое на каждой потере и растёт линейно — на длинном плече не успевает

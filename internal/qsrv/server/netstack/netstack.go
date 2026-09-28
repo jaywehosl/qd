@@ -42,7 +42,7 @@ type Dialer interface {
 }
 
 type Stack struct {
-	opened func(port uint16, shut io.Closer)
+	opened func(port uint16, shut io.Closer) func()
 
 	stack    *stack.Stack
 	ep       *channel.Endpoint
@@ -231,9 +231,10 @@ func (s *Stack) handleUDP(r *udp.ForwarderRequest) {
 		return
 	}
 	inbound := gonet.NewUDPConn(s.stack, &wq, ep)
-	shut := shutBoth{inbound, outbound}
+	shut := &shutBoth{inbound, outbound}
+	release := func() {}
 	if s.opened != nil {
-		s.opened(id.RemotePort, shut)
+		release = s.opened(id.RemotePort, shut)
 	}
 	held := s.keepFlow(Flow{Src: src, Dst: dst, UDP: true}, shut)
 	idle := udpIdle
@@ -243,6 +244,7 @@ func (s *Stack) handleUDP(r *udp.ForwarderRequest) {
 	go func() {
 		pipeIdle(inbound, outbound, idle)
 		s.dropFlow(held)
+		release()
 	}()
 }
 
@@ -293,7 +295,7 @@ func pipeIdle(a, b net.Conn, idle time.Duration) {
 	}
 }
 
-func (s *Stack) OnFlow(fn func(port uint16, shut io.Closer)) { s.opened = fn }
+func (s *Stack) OnFlow(fn func(port uint16, shut io.Closer) func()) { s.opened = fn }
 
 func (s *Stack) keepFlow(f Flow, shut io.Closer) uint64 {
 	id := s.nextFlow.Add(1)

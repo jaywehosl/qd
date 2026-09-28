@@ -11,7 +11,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"github.com/jaywehosl/quic-diver/internal/qcli/packet"
+	"github.com/jaywehosl/qd/internal/qcli/packet"
 )
 
 const (

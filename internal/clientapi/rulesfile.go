@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jaywehosl/quic-diver/internal/clientstate"
+	"github.com/jaywehosl/qd/internal/clientstate"
 )
 
 const rulesTag = "qdr1."

@@ -8,8 +8,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/jaywehosl/quic-diver/internal/localapi"
-	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
+	"github.com/jaywehosl/qd/internal/localapi"
+	"github.com/jaywehosl/qd/internal/qdcrypt"
 )
 
 type runOptions struct {
@@ -31,6 +31,7 @@ type runOptions struct {
 var (
 	inBrowser bool
 	paneDev   string
+	embedded  bool
 )
 
 func main() {
@@ -49,6 +50,7 @@ func main() {
 	flag.BoolVar(&inBrowser, "browser", false, "open the page in the default browser instead of the app window")
 	flag.IntVar(&opts.UIPort, "ui-port", localapi.DefaultPort, "port the local page listens on, 0 takes any free one")
 	flag.StringVar(&paneDev, "dev", "", "point the window at a vite dev server instead of the built page")
+	flag.BoolVar(&embedded, "embedded", false, "run inside another app: no window or tray, log to stdout, print the api address and token, stop when stdin closes")
 	flag.Parse()
 
 	if err := runClient(opts); err != nil {

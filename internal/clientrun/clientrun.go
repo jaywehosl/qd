@@ -7,10 +7,10 @@ import (
 	"net/netip"
 	"time"
 
-	"github.com/jaywehosl/quic-diver/internal/clientdns"
-	"github.com/jaywehosl/quic-diver/internal/qcli"
-	"github.com/jaywehosl/quic-diver/internal/qcli/packet"
-	"github.com/jaywehosl/quic-diver/internal/roads"
+	"github.com/jaywehosl/qd/internal/clientdns"
+	"github.com/jaywehosl/qd/internal/qcli"
+	"github.com/jaywehosl/qd/internal/qcli/packet"
+	"github.com/jaywehosl/qd/internal/roads"
 )
 
 type Plan struct {

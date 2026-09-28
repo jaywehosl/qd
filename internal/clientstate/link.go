@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jaywehosl/quic-diver/internal/qsrv/uplink/relay"
+	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
 )
 
 const linkScheme = "qd"

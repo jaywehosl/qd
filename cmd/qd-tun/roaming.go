@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jaywehosl/quic-diver/internal/qcli"
+	"github.com/jaywehosl/qd/internal/qcli"
 )
 
 func roamWatch(ctx context.Context, stop <-chan struct{}, live *qcli.Tunnel, lost func(error)) {

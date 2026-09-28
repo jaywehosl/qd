@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/jaywehosl/quic-diver/internal/dnsproxy"
+	"github.com/jaywehosl/qd/internal/dnsproxy"
 )
 
 type Ask func(endpoint, op, auth string, body, out any) error

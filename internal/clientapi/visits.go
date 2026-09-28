@@ -5,8 +5,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/jaywehosl/quic-diver/internal/adblock"
-	"github.com/jaywehosl/quic-diver/internal/clientstate"
+	"github.com/jaywehosl/qd/internal/adblock"
+	"github.com/jaywehosl/qd/internal/clientstate"
 )
 
 type Visits struct {

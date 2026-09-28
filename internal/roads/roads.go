@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/jaywehosl/quic-diver/internal/qsrv/uplink/quicconn"
+	"github.com/jaywehosl/qd/internal/qsrv/uplink/quicconn"
 )
 
 const quicHeadStart = 300 * time.Millisecond

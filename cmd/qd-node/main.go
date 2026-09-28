@@ -19,11 +19,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jaywehosl/quic-diver/internal/netstate"
-	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
-	"github.com/jaywehosl/quic-diver/internal/qsrv"
-	"github.com/jaywehosl/quic-diver/internal/qsrv/uplink/relay"
-	"github.com/jaywehosl/quic-diver/internal/store"
+	"github.com/jaywehosl/qd/internal/netstate"
+	"github.com/jaywehosl/qd/internal/qdcrypt"
+	"github.com/jaywehosl/qd/internal/qsrv"
+	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
+	"github.com/jaywehosl/qd/internal/store"
 )
 
 var version = "dev"
@@ -272,6 +272,7 @@ func main() {
 	state.applySelf()
 	state.syncSessions()
 	state.startResolver()
+	servePprof()
 	go state.recordTelemetry()
 
 	fmt.Printf("quic       udp/%d, authority %s, pool %s\n", self.Port, authority, settings.Pool)

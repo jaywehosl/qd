@@ -5,7 +5,7 @@ import (
 	"net/netip"
 	"sync/atomic"
 
-	"github.com/jaywehosl/quic-diver/internal/ippkt"
+	"github.com/jaywehosl/qd/internal/ippkt"
 )
 
 type NAT struct {

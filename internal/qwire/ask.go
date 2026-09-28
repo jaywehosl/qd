@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jaywehosl/quic-diver/internal/qsrv"
+	"github.com/jaywehosl/qd/internal/qsrv"
 )
 
 func (d *Dialer) Ask(endpoint, op, auth string, body any, out any) error {

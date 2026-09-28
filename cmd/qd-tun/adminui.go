@@ -1,4 +1,4 @@
-//go:build windows || linux
+//go:build (windows || linux) && !core
 
 package main
 
@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jaywehosl/quic-diver/internal/clientstate"
-	"github.com/jaywehosl/quic-diver/internal/localapi"
-	"github.com/jaywehosl/quic-diver/internal/panel"
-	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
+	"github.com/jaywehosl/qd/internal/clientstate"
+	"github.com/jaywehosl/qd/internal/localapi"
+	"github.com/jaywehosl/qd/internal/panel"
+	"github.com/jaywehosl/qd/internal/qdcrypt"
 )
 
 type adminUI struct {
@@ -147,4 +147,16 @@ func (a *adminUI) discover(db *clientstate.DB) {
 		return
 	}
 	fmt.Printf("admin    no node answered the control channel yet\n")
+}
+
+func (a *adminUI) peers() []string {
+	fleet, _ := a.handler()
+	if fleet == nil {
+		return nil
+	}
+	out := []string{}
+	for _, n := range fleet.Nodes() {
+		out = append(out, n.Address)
+	}
+	return out
 }

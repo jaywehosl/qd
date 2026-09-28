@@ -8,7 +8,7 @@ import (
 	"net/netip"
 	"strings"
 
-	"github.com/jaywehosl/quic-diver/internal/netstate"
+	"github.com/jaywehosl/qd/internal/netstate"
 )
 
 var ErrNotFound = errors.New("store: no such row")

@@ -6,18 +6,21 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"os"
 	"path/filepath"
 	"syscall"
 	"unsafe"
 
-	"github.com/jaywehosl/quic-diver/internal/clientstate"
-	"github.com/jaywehosl/quic-diver/internal/qcli/windivert"
+	"github.com/jaywehosl/qd/internal/clientstate"
+	"github.com/jaywehosl/qd/internal/qcli/windivert"
 	"golang.org/x/sys/windows"
 )
 
 var (
 	procGetExtendedTcpTable = iphlpapi.NewProc("GetExtendedTcpTable")
 	procGetExtendedUdpTable = iphlpapi.NewProc("GetExtendedUdpTable")
+
+	self = uint32(os.Getpid())
 )
 
 const (
@@ -196,7 +199,7 @@ func (r *procRouter) dropRerouted() int {
 
 	dropped := 0
 	for _, row := range tcpRowsWithPid() {
-		if row.pid == 0 || row.remoteAddr == 0 {
+		if row.pid == 0 || row.pid == self || row.remoteAddr == 0 || loopback(row.remoteAddr) {
 			continue
 		}
 		ident, ok := r.identFor(row.pid)
@@ -225,7 +228,7 @@ func (r *procRouter) dropInherited() int {
 
 	dropped := 0
 	for _, row := range tcpRowsWithPid() {
-		if row.pid == 0 || row.remoteAddr == 0 || loopback(row.remoteAddr) {
+		if row.pid == 0 || row.pid == self || row.remoteAddr == 0 || loopback(row.remoteAddr) {
 			continue
 		}
 		role := def

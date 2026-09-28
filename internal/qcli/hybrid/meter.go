@@ -3,7 +3,7 @@ package hybrid
 import (
 	"sync/atomic"
 
-	"github.com/jaywehosl/quic-diver/internal/qcli/packet"
+	"github.com/jaywehosl/qd/internal/qcli/packet"
 )
 
 type Meter struct {

@@ -16,9 +16,9 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/jaywehosl/quic-diver/internal/clientapi"
-	"github.com/jaywehosl/quic-diver/internal/clientstate"
-	"github.com/jaywehosl/quic-diver/internal/localapi"
+	"github.com/jaywehosl/qd/internal/clientapi"
+	"github.com/jaywehosl/qd/internal/clientstate"
+	"github.com/jaywehosl/qd/internal/localapi"
 )
 
 const autostartFile = "/etc/xdg/autostart/qd-client-tray.desktop"
@@ -95,6 +95,8 @@ func answerKnocks(show func(), stop <-chan struct{}) {}
 func redirectOutput(statePath string) {}
 
 func standFull() {}
+
+func moveLegacyState() {}
 
 func sharpTimers() func() { return func() {} }
 

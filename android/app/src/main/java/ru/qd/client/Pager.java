@@ -1,4 +1,4 @@
-package ru.quicdiver.client;
+package ru.qd.client;
 
 import android.animation.ObjectAnimator;
 import android.content.Context;

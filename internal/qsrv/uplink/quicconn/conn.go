@@ -14,7 +14,7 @@ import (
 
 	quic "github.com/quic-go/quic-go"
 
-	"github.com/jaywehosl/quic-diver/internal/qsrv/uplink/relay"
+	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
 )
 
 const defaultMaxDatagram = 1200

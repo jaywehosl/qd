@@ -6,7 +6,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/jaywehosl/quic-diver/internal/qcli/packet"
+	"github.com/jaywehosl/qd/internal/qcli/packet"
 )
 
 var errNoTun = errors.New("tun: not available on this platform")

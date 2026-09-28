@@ -15,10 +15,10 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/jaywehosl/quic-diver/internal/qcli"
-	"github.com/jaywehosl/quic-diver/internal/qcli/guard"
-	"github.com/jaywehosl/quic-diver/internal/qcli/packet"
-	"github.com/jaywehosl/quic-diver/internal/qcli/packet/tun"
+	"github.com/jaywehosl/qd/internal/qcli"
+	"github.com/jaywehosl/qd/internal/qcli/guard"
+	"github.com/jaywehosl/qd/internal/qcli/packet"
+	"github.com/jaywehosl/qd/internal/qcli/packet/tun"
 )
 
 const (

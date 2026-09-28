@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jaywehosl/quic-diver/internal/dnsproxy"
-	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
-	"github.com/jaywehosl/quic-diver/internal/qsrv"
-	"github.com/jaywehosl/quic-diver/internal/steerlist"
+	"github.com/jaywehosl/qd/internal/dnsproxy"
+	"github.com/jaywehosl/qd/internal/qdcrypt"
+	"github.com/jaywehosl/qd/internal/qsrv"
+	"github.com/jaywehosl/qd/internal/steerlist"
 )
 
 const abroadWait = 2 * time.Second

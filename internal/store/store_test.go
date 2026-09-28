@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jaywehosl/quic-diver/internal/netstate"
+	"github.com/jaywehosl/qd/internal/netstate"
 )
 
 func open(t *testing.T) *DB {

@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jaywehosl/quic-diver/internal/netstate"
+	"github.com/jaywehosl/qd/internal/netstate"
 )
 
 const configPath = "/etc/qd/node.conf"

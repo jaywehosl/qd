@@ -7,8 +7,8 @@ import (
 )
 
 const (
-	instanceMutex = `Global\QuicDiverClient`
-	instanceEvent = `Global\QuicDiverClientShow`
+	instanceMutex = `Global\qdClient`
+	instanceEvent = `Global\qdClientShow`
 )
 
 func claimInstance() (bool, func()) {

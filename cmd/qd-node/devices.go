@@ -5,8 +5,8 @@ package main
 import (
 	"time"
 
-	"github.com/jaywehosl/quic-diver/internal/netstate"
-	"github.com/jaywehosl/quic-diver/internal/store"
+	"github.com/jaywehosl/qd/internal/netstate"
+	"github.com/jaywehosl/qd/internal/store"
 )
 
 type deviceClaim struct {

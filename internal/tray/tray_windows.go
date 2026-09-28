@@ -194,7 +194,7 @@ func (i *Icon) loop(ready chan<- error) {
 	defer close(i.done)
 
 	instance, _, _ := procGetModuleHandle.Call(0)
-	className, _ := syscall.UTF16PtrFromString("QuicDiverTray")
+	className, _ := syscall.UTF16PtrFromString("qdTray")
 	title, _ := syscall.UTF16PtrFromString("qd")
 	cursor, _, _ := procLoadCursor.Call(0, idcArrow)
 

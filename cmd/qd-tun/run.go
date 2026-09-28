@@ -3,7 +3,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"os/signal"
@@ -11,15 +13,20 @@ import (
 	"time"
 
 	"encoding/hex"
-	"github.com/jaywehosl/quic-diver/internal/adblock"
+	"github.com/jaywehosl/qd/internal/adblock"
 
-	"github.com/jaywehosl/quic-diver/internal/clientapi"
-	"github.com/jaywehosl/quic-diver/internal/clientstate"
-	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
+	"github.com/jaywehosl/qd/internal/clientapi"
+	"github.com/jaywehosl/qd/internal/clientstate"
+	"github.com/jaywehosl/qd/internal/qdcrypt"
 )
 
 func runClient(opts runOptions) error {
-	redirectOutput(opts.StatePath)
+	if opts.StatePath == defaultStatePath() {
+		moveLegacyState()
+	}
+	if !embedded {
+		redirectOutput(opts.StatePath)
+	}
 	standFull()
 
 	first, release := true, func() {}
@@ -27,6 +34,10 @@ func runClient(opts runOptions) error {
 		first, release = claimInstance()
 	}
 	if !first {
+		if embedded {
+			tellParent(map[string]any{"error": "another qd client is already running on this machine"})
+			return fmt.Errorf("another qd client is already running")
+		}
 		if knock() {
 			fmt.Printf("single   already running, brought its page up\n")
 			return nil
@@ -105,11 +116,7 @@ func runClient(opts runOptions) error {
 				out = append(out, api.Peers()...)
 			}
 			if admin != nil {
-				if fleet, _ := admin.handler(); fleet != nil {
-					for _, n := range fleet.Nodes() {
-						out = append(out, n.Address)
-					}
-				}
+				out = append(out, admin.peers()...)
 			}
 			return out
 		},
@@ -142,9 +149,13 @@ func runClient(opts runOptions) error {
 
 	api = clientapi.New(db, hostPlatform{tun: tun, db: db}, seen, opts.key)
 
-	admin = newAdminUI(key, db)
+	if !embedded {
+		admin = newAdminUI(key, db)
+	}
 	api.OnImport = func() {
-		admin.SetKey(api.Key())
+		if admin != nil {
+			admin.SetKey(api.Key())
+		}
 		syncRelays(db)
 		go api.Greet()
 	}
@@ -159,7 +170,9 @@ func runClient(opts runOptions) error {
 		return fmt.Errorf("local page: %w", err)
 	}
 
-	ui.SetFeed(admin.live)
+	if admin != nil {
+		ui.SetFeed(admin.live)
+	}
 
 	pageURL := ui.URL()
 	bindPane(opts.StatePath, pageURL, ui.Token())
@@ -185,17 +198,26 @@ func runClient(opts runOptions) error {
 	go collectSamples(db, tun, stop)
 	go api.KeepFresh(stop)
 	go api.KeepProbing(stop, 60*time.Second)
-	go answerKnocks(func() { openPage(pageURL) }, stop)
 
 	quit := make(chan struct{})
-	trayed, untray := startShell(db, tun, ui, api, quit, stop)
+	trayed, untray := true, func() {}
+	if embedded {
+		tellParent(map[string]any{"api": ui.Base(), "token": ui.Token()})
+		go func() {
+			io.Copy(io.Discard, os.Stdin)
+			close(quit)
+		}()
+	} else {
+		go answerKnocks(func() { openPage(pageURL) }, stop)
+		trayed, untray = startShell(db, tun, ui, api, quit, stop)
+	}
 	defer untray()
 
 	behaviour := settings.ManualBehaviour
 	if opts.Autostart {
 		behaviour = settings.AutostartBehaviour
 	}
-	if headless {
+	if headless || embedded {
 		behaviour = ""
 	}
 
@@ -204,7 +226,7 @@ func runClient(opts runOptions) error {
 			fmt.Printf("connect  %v\n", err)
 		}
 	}
-	if !trayed || behaviour == "open" || behaviour == "openConnect" {
+	if !embedded && (!trayed || behaviour == "open" || behaviour == "openConnect") {
 		openPage(pageURL)
 	}
 
@@ -234,4 +256,12 @@ func shorten(key string) string {
 		return key
 	}
 	return key[:12] + "…"
+}
+
+func tellParent(what map[string]any) {
+	line, err := json.Marshal(map[string]any{"qdEmbedded": what})
+	if err != nil {
+		return
+	}
+	fmt.Printf("%s\n", line)
 }

@@ -15,9 +15,9 @@ import (
 
 	"golang.org/x/net/http2"
 
-	"github.com/jaywehosl/quic-diver/internal/ippkt"
-	"github.com/jaywehosl/quic-diver/internal/qsrv"
-	"github.com/jaywehosl/quic-diver/internal/roads"
+	"github.com/jaywehosl/qd/internal/ippkt"
+	"github.com/jaywehosl/qd/internal/qsrv"
+	"github.com/jaywehosl/qd/internal/roads"
 )
 
 type Over struct {

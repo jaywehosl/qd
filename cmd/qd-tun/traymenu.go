@@ -1,4 +1,4 @@
-//go:build windows
+//go:build windows && !core
 
 package main
 
@@ -9,10 +9,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jaywehosl/quic-diver/internal/clientapi"
-	"github.com/jaywehosl/quic-diver/internal/clientstate"
-	"github.com/jaywehosl/quic-diver/internal/localapi"
-	"github.com/jaywehosl/quic-diver/internal/tray"
+	"github.com/jaywehosl/qd/internal/clientapi"
+	"github.com/jaywehosl/qd/internal/clientstate"
+	"github.com/jaywehosl/qd/internal/localapi"
+	"github.com/jaywehosl/qd/internal/tray"
 )
 
 func startShell(db *clientstate.DB, tun *tunnel, ui *localapi.Server, api *clientapi.API, quit chan struct{}, stop <-chan struct{}) (bool, func()) {

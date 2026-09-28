@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jaywehosl/quic-diver/internal/dnsproxy"
-	"github.com/jaywehosl/quic-diver/internal/qsrv"
+	"github.com/jaywehosl/qd/internal/dnsproxy"
+	"github.com/jaywehosl/qd/internal/qsrv"
 )
 
 func (state *controlState) dnsConfig() dnsproxy.Config {

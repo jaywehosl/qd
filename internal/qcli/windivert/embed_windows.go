@@ -18,7 +18,7 @@ func DefaultDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(appData, "QUICDiver"), nil
+	return filepath.Join(appData, "qd"), nil
 }
 
 func Extract(dir string) (string, error) {

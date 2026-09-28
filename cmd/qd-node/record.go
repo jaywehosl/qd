@@ -6,8 +6,8 @@ import (
 	"net/netip"
 	"time"
 
-	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
-	"github.com/jaywehosl/quic-diver/internal/store"
+	"github.com/jaywehosl/qd/internal/qdcrypt"
+	"github.com/jaywehosl/qd/internal/store"
 )
 
 func (state *controlState) recordTelemetry() {

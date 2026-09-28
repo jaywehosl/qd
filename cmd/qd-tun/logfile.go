@@ -19,6 +19,7 @@ func redirectOutput(statePath string) {
 	}
 
 	path := filepath.Join(filepath.Dir(statePath), "client.log")
+	os.MkdirAll(filepath.Dir(path), 0o755)
 	if info, err := os.Stat(path); err == nil && info.Size() > logSizeCap {
 		os.Remove(path)
 	}

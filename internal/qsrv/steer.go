@@ -14,7 +14,7 @@ import (
 
 	"github.com/quic-go/quic-go/http3"
 
-	"github.com/jaywehosl/quic-diver/internal/qsrv/server/netstack"
+	"github.com/jaywehosl/qd/internal/qsrv/server/netstack"
 )
 
 const (

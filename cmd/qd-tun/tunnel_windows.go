@@ -8,12 +8,12 @@ import (
 	"net/netip"
 	"sync/atomic"
 
-	"github.com/jaywehosl/quic-diver/internal/clientstate"
-	"github.com/jaywehosl/quic-diver/internal/ippkt"
-	"github.com/jaywehosl/quic-diver/internal/qcli"
-	"github.com/jaywehosl/quic-diver/internal/qcli/guard"
-	"github.com/jaywehosl/quic-diver/internal/qcli/packet"
-	"github.com/jaywehosl/quic-diver/internal/qcli/windivert"
+	"github.com/jaywehosl/qd/internal/clientstate"
+	"github.com/jaywehosl/qd/internal/ippkt"
+	"github.com/jaywehosl/qd/internal/qcli"
+	"github.com/jaywehosl/qd/internal/qcli/guard"
+	"github.com/jaywehosl/qd/internal/qcli/packet"
+	"github.com/jaywehosl/qd/internal/qcli/windivert"
 
 	"golang.org/x/sys/windows"
 )

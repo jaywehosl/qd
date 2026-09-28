@@ -3,10 +3,10 @@ package qdmobile
 import (
 	"sync/atomic"
 
-	"github.com/jaywehosl/quic-diver/internal/clientapi"
-	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
-	"github.com/jaywehosl/quic-diver/internal/qsrv"
-	"github.com/jaywehosl/quic-diver/internal/roads"
+	"github.com/jaywehosl/qd/internal/clientapi"
+	"github.com/jaywehosl/qd/internal/qdcrypt"
+	"github.com/jaywehosl/qd/internal/qsrv"
+	"github.com/jaywehosl/qd/internal/roads"
 )
 
 var exit atomic.Uint32

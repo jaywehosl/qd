@@ -1,4 +1,4 @@
-package ru.quicdiver.client;
+package ru.qd.client;
 
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -31,11 +31,11 @@ import qdmobile.Client;
 
 public class TunnelService extends VpnService {
 
-    public static final String ACTION_START = "ru.quicdiver.client.START";
-    public static final String ACTION_STOP = "ru.quicdiver.client.STOP";
-    public static final String ACTION_IDLE = "ru.quicdiver.client.IDLE";
+    public static final String ACTION_START = "ru.qd.client.START";
+    public static final String ACTION_STOP = "ru.qd.client.STOP";
+    public static final String ACTION_IDLE = "ru.qd.client.IDLE";
 
-    static final String TAG = "quicdiver";
+    static final String TAG = "qd";
 
 
 

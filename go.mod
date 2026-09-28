@@ -1,4 +1,4 @@
-module github.com/jaywehosl/quic-diver
+module github.com/jaywehosl/qd
 
 go 1.26.0
 

@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jaywehosl/quic-diver/internal/qdcrypt"
-	"github.com/jaywehosl/quic-diver/internal/qwire"
+	"github.com/jaywehosl/qd/internal/qdcrypt"
+	"github.com/jaywehosl/qd/internal/qwire"
 )
 
 type NodeAddress struct {

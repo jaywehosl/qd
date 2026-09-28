@@ -1,4 +1,4 @@
-package ru.quicdiver.client;
+package ru.qd.client;
 
 import android.appwidget.AppWidgetManager;
 import android.appwidget.AppWidgetProvider;

@@ -11,7 +11,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/jaywehosl/quic-diver/internal/store"
+	"github.com/jaywehosl/qd/internal/store"
 )
 
 func (state *controlState) dbRead(req request) response {

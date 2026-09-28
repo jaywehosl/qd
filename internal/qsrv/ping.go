@@ -10,7 +10,7 @@ import (
 	"net/url"
 	"strconv"
 
-	"github.com/jaywehosl/quic-diver/internal/qsrv/server/netstack"
+	"github.com/jaywehosl/qd/internal/qsrv/server/netstack"
 )
 
 func (d steered) Ping(ctx context.Context, dst netip.Addr, ttl uint8, payload []byte) (netstack.Echo, error) {

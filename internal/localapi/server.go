@@ -54,7 +54,7 @@ func New(cfg Config) (*Server, error) {
 	}
 
 	isAdmin := cfg.IsAdmin
-	if isAdmin == nil {
+	if isAdmin == nil || cfg.Admin == nil {
 		isAdmin = func() bool { return false }
 	}
 
@@ -102,6 +102,16 @@ func (s *Server) ListenOn(host string, port int) (net.Listener, error) {
 	s.addr = l.Addr()
 	s.mu.Unlock()
 	return l, nil
+}
+
+func (s *Server) Base() string {
+	s.mu.RLock()
+	addr := s.addr
+	s.mu.RUnlock()
+	if addr == nil {
+		return ""
+	}
+	return "http://" + addr.String()
 }
 
 func (s *Server) URL() string {
@@ -156,6 +166,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.admin.ServeHTTP(w, r)
+		return
+	}
+
+	if s.page == nil {
+		http.NotFound(w, r)
 		return
 	}
 

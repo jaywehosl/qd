@@ -12,7 +12,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/jaywehosl/quic-diver/internal/qcli/packet"
+	"github.com/jaywehosl/qd/internal/qcli/packet"
 )
 
 type Source struct {

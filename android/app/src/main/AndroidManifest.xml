@@ -101,8 +101,8 @@
             android:name=".Buttons"
             android:exported="false">
             <intent-filter>
-                <action android:name="ru.quicdiver.client.EGRESS" />
-                <action android:name="ru.quicdiver.client.KEEP" />
+                <action android:name="ru.qd.client.EGRESS" />
+                <action android:name="ru.qd.client.KEEP" />
             </intent-filter>
         </receiver>
 

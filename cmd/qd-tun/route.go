@@ -7,9 +7,9 @@ import (
 	"net/netip"
 	"sync/atomic"
 
-	"github.com/jaywehosl/quic-diver/internal/clientstate"
-	"github.com/jaywehosl/quic-diver/internal/qcli"
-	"github.com/jaywehosl/quic-diver/internal/qsrv"
+	"github.com/jaywehosl/qd/internal/clientstate"
+	"github.com/jaywehosl/qd/internal/qcli"
+	"github.com/jaywehosl/qd/internal/qsrv"
 )
 
 var (

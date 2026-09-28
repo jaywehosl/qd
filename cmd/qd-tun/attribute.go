@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/jaywehosl/quic-diver/internal/clientstate"
+	"github.com/jaywehosl/qd/internal/clientstate"
 )
 
 const (

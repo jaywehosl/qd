@@ -18,9 +18,9 @@ import (
 	"github.com/quic-go/quic-go/http3"
 	"github.com/yosida95/uritemplate/v3"
 
-	"github.com/jaywehosl/quic-diver/internal/ippkt"
-	"github.com/jaywehosl/quic-diver/internal/qsrv/server/decoy"
-	"github.com/jaywehosl/quic-diver/internal/qsrv/uplink/relay"
+	"github.com/jaywehosl/qd/internal/ippkt"
+	"github.com/jaywehosl/qd/internal/qsrv/server/decoy"
+	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
 )
 
 const (
@@ -474,10 +474,11 @@ func (s *live) shutFlow(port uint16) {
 	held.(io.Closer).Close()
 }
 
-func (s *live) holdFlow(port uint16, shut io.Closer) {
+func (s *live) holdFlow(port uint16, shut io.Closer) func() {
 	if was, ok := s.flows.Swap(port, shut); ok {
 		was.(io.Closer).Close()
 	}
+	return func() { s.flows.CompareAndDelete(port, shut) }
 }
 
 func (s *live) markOf(port uint16) uint64 {

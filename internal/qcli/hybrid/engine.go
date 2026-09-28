@@ -12,11 +12,11 @@ import (
 
 	quic "github.com/quic-go/quic-go"
 
-	"github.com/jaywehosl/quic-diver/internal/ippkt"
-	"github.com/jaywehosl/quic-diver/internal/qcli/guard"
-	"github.com/jaywehosl/quic-diver/internal/qcli/nat"
-	"github.com/jaywehosl/quic-diver/internal/qcli/packet"
-	"github.com/jaywehosl/quic-diver/internal/qsrv/server/netstack"
+	"github.com/jaywehosl/qd/internal/ippkt"
+	"github.com/jaywehosl/qd/internal/qcli/guard"
+	"github.com/jaywehosl/qd/internal/qcli/nat"
+	"github.com/jaywehosl/qd/internal/qcli/packet"
+	"github.com/jaywehosl/qd/internal/qsrv/server/netstack"
 )
 
 const (

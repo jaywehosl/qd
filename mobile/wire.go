@@ -3,8 +3,8 @@ package qdmobile
 import (
 	"encoding/hex"
 
-	"github.com/jaywehosl/quic-diver/internal/clientapi"
-	"github.com/jaywehosl/quic-diver/internal/qwire"
+	"github.com/jaywehosl/qd/internal/clientapi"
+	"github.com/jaywehosl/qd/internal/qwire"
 )
 
 func (c *Client) keeper() func(fd uintptr) {

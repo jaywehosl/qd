@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/jaywehosl/quic-diver/internal/steerlist"
+	"github.com/jaywehosl/qd/internal/steerlist"
 )
 
 var networkKeys = []string{

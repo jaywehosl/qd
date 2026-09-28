@@ -13,7 +13,7 @@ import (
 
 	"github.com/quic-go/quic-go/http3"
 
-	"github.com/jaywehosl/quic-diver/internal/qsrv/uplink/quicconn"
+	"github.com/jaywehosl/qd/internal/qsrv/uplink/quicconn"
 )
 
 const peerDialTimeout = 8 * time.Second

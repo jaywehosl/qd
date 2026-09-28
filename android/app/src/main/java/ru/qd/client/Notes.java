@@ -1,4 +1,4 @@
-package ru.quicdiver.client;
+package ru.qd.client;
 
 import android.app.Notification;
 import android.app.NotificationChannel;

@@ -3,6 +3,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,7 +31,37 @@ func defaultStatePath() string {
 	if err != nil {
 		return "qd-client.db"
 	}
-	return filepath.Join(dir, "QuicDiver", "client.db")
+	return filepath.Join(dir, "qd", "client.db")
+}
+
+func moveLegacyState() {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return
+	}
+	old := filepath.Join(dir, "QuicDiver")
+	fresh := filepath.Join(dir, "qd")
+	entries, err := os.ReadDir(old)
+	if err != nil {
+		return
+	}
+	if _, err := os.Stat(filepath.Join(fresh, "client.db")); err == nil {
+		return
+	}
+	if err := os.MkdirAll(fresh, 0o755); err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Name(), "client.db") {
+			continue
+		}
+		if err := os.Rename(filepath.Join(old, e.Name()), filepath.Join(fresh, e.Name())); err != nil {
+			fmt.Printf("state    could not move %s from %s: %v\n", e.Name(), old, err)
+			return
+		}
+	}
+	fmt.Printf("state    moved from %s to %s\n", old, fresh)
+	os.RemoveAll(old)
 }
 
 const appName = "qd"
