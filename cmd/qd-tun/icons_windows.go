@@ -8,6 +8,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"os"
 	"sync"
 	"unsafe"
 
@@ -228,4 +229,11 @@ func readBits(bmp windows.Handle, width, height int32) []uint32 {
 		return nil
 	}
 	return out
+}
+
+func (p hostPlatform) IconOf(path string) string {
+	if _, err := os.Stat(path); err != nil {
+		return ""
+	}
+	return processIcon(path)
 }

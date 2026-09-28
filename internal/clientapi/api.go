@@ -931,11 +931,18 @@ func (a *API) routing(w http.ResponseWriter, r *http.Request) {
 			iconByName[name] = p.Icon
 		}
 	}
+	onDisk, _ := a.platform.(interface{ IconOf(path string) string })
 	for i := range rules {
 		rules[i].Running = live[strings.ToLower(rules[i].Process)]
 		if icon, known := iconByPath[strings.ToLower(rules[i].Path)]; known && rules[i].Path != "" {
 			rules[i].Icon = icon
 			continue
+		}
+		if onDisk != nil && rules[i].Path != "" {
+			if icon := onDisk.IconOf(rules[i].Path); icon != "" {
+				rules[i].Icon = icon
+				continue
+			}
 		}
 		rules[i].Icon = iconByName[strings.ToLower(rules[i].Process)]
 	}
