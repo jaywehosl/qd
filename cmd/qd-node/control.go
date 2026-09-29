@@ -67,7 +67,9 @@ type controlState struct {
 
 	dns    *dnsproxy.Resolver
 	routes atomic.Pointer[routeList]
-	ech    []byte
+	ech    *echHolder
+
+	confPath string
 }
 
 var clientOps = map[string]bool{
@@ -571,8 +573,8 @@ func (state *controlState) whoami(token string, claim deviceClaim) map[string]an
 		if c.Admin && c.Enable {
 			answer["peers"] = peerAddresses(network)
 		}
-		if len(state.ech) > 0 {
-			answer["ech"] = state.ech
+		if _, list := state.ech.current(); len(list) > 0 {
+			answer["ech"] = list
 		}
 		if answer["carried"] == true {
 			if refused := state.admit(c, group, claim); refused != "" {
@@ -718,6 +720,7 @@ func (state *controlState) followPort() {
 			continue
 		}
 		fmt.Printf("port       moving from %d to %d, restarting\n", state.port, n.Port)
+		keepPort(state.confPath, n.Port)
 		state.restartSoon()
 		return
 	}

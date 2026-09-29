@@ -4,10 +4,13 @@ package main
 
 import (
 	"bufio"
+	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/jaywehosl/qd/internal/netstate"
 )
@@ -133,4 +136,46 @@ func writeConfig(path string, cfg nodeConfig) error {
 		body.WriteString(line[0] + " = " + line[1] + "\n")
 	}
 	return os.WriteFile(path, []byte(body.String()), 0o600)
+}
+
+var configMu sync.Mutex
+
+func rewriteConfig(path string, edit func(*nodeConfig) bool) {
+	if path == "" {
+		path = configPath
+	}
+	configMu.Lock()
+	defer configMu.Unlock()
+	cfg, err := readConfig(path)
+	if err != nil || cfg == (nodeConfig{}) || !edit(&cfg) {
+		return
+	}
+	if err := writeConfig(path, cfg); err != nil {
+		fmt.Printf("config     %s not rewritten: %v\n", path, err)
+	}
+}
+
+func keepPort(path string, port int) {
+	rewriteConfig(path, func(c *nodeConfig) bool {
+		authority := c.Authority
+		if host, _, err := net.SplitHostPort(authority); err == nil {
+			authority = net.JoinHostPort(host, strconv.Itoa(port))
+		}
+		if c.Port == port && c.Authority == authority {
+			return false
+		}
+		c.Port, c.Authority = port, authority
+		fmt.Printf("config     %s now says port %d\n", path, port)
+		return true
+	})
+}
+
+func keepECH(path, name string) {
+	rewriteConfig(path, func(c *nodeConfig) bool {
+		if c.ECH == name {
+			return false
+		}
+		c.ECH = name
+		return true
+	})
 }

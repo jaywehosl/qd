@@ -405,6 +405,13 @@ var (
 	noECH  sync.Map
 )
 
+type echFailure struct {
+	list string
+	at   time.Time
+}
+
+const echRetry = 10 * time.Minute
+
 func dialOn(ctx context.Context, tr *quic.Transport, raddr net.Addr, tlsConf *tls.Config, conf *quic.Config) (*quic.Conn, error) {
 	hidden := withECH(tlsConf)
 	if hidden == nil {
@@ -421,7 +428,7 @@ func dialOn(ctx context.Context, tr *quic.Transport, raddr net.Addr, tlsConf *tl
 	fmt.Printf("dial     %s: ECH did not go through (%v), trying without\n", raddr, err)
 	qc, err = dialVersions(ctx, tr, raddr, tlsConf, conf)
 	if err == nil {
-		noECH.Store(tlsConf.ServerName, string(hidden.EncryptedClientHelloConfigList))
+		noECH.Store(tlsConf.ServerName, echFailure{string(hidden.EncryptedClientHelloConfigList), time.Now()})
 	}
 	return qc, err
 }
@@ -434,8 +441,10 @@ func withECH(tlsConf *tls.Config) *tls.Config {
 	if len(list) == 0 {
 		return nil
 	}
-	if failed, ok := noECH.Load(tlsConf.ServerName); ok && failed.(string) == string(list) {
-		return nil
+	if held, ok := noECH.Load(tlsConf.ServerName); ok {
+		if failed := held.(echFailure); failed.list == string(list) && time.Since(failed.at) < echRetry {
+			return nil
+		}
 	}
 	hidden := tlsConf.Clone()
 	hidden.EncryptedClientHelloConfigList = list
@@ -497,7 +506,7 @@ func watch(qc *quic.Conn, v2 bool, tlsConf *tls.Config) {
 		}
 		if timedOut(cause) || errors.As(cause, &te) && te.ErrorCode.IsCryptoError() {
 			fmt.Printf("dial     %s: the handshake with ECH failed (%v), next dials go without it\n", qc.RemoteAddr(), cause)
-			noECH.Store(tlsConf.ServerName, string(tlsConf.EncryptedClientHelloConfigList))
+			noECH.Store(tlsConf.ServerName, echFailure{string(tlsConf.EncryptedClientHelloConfigList), time.Now()})
 		}
 	}
 }

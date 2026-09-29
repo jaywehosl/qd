@@ -9,6 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/jaywehosl/qd/internal/qsrv/server/netstack"
 )
 
 var synthetic = netip.MustParsePrefix("198.18.0.0/15")
@@ -233,3 +235,13 @@ func (n *Node) Remember(ctx context.Context, path string) {
 }
 
 const keepEvery = 20 * time.Second
+
+func endsHere(d netstack.Dialer, dst netip.Addr) bool {
+	switch d := d.(type) {
+	case netstack.NetDialer:
+		return true
+	case steering:
+		return !d.node.steer.has(dst)
+	}
+	return false
+}

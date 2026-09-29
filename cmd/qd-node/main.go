@@ -23,6 +23,7 @@ import (
 	"github.com/jaywehosl/qd/internal/netstate"
 	"github.com/jaywehosl/qd/internal/qdcrypt"
 	"github.com/jaywehosl/qd/internal/qsrv"
+	"github.com/jaywehosl/qd/internal/qsrv/uplink/quicconn"
 	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
 	"github.com/jaywehosl/qd/internal/store"
 )
@@ -204,12 +205,6 @@ func main() {
 	if err := holdTickets(tlsConf, filepath.Dir(*dbPath)); err != nil {
 		fmt.Printf("tickets    kept in memory only, they die with the process: %v\n", err)
 	}
-	var echList []byte
-	if conf.ECH != "" {
-		if echList, err = holdECH(tlsConf, filepath.Dir(*dbPath), conf.ECH); err != nil {
-			fmt.Printf("ech        off: %v\n", err)
-		}
-	}
 
 	fmt.Printf("version    %s\n", version)
 	fmt.Printf("interface  %s\n", dev)
@@ -223,9 +218,10 @@ func main() {
 	} else {
 		fmt.Printf("tls        %s, %d certificates served\n", certPath, len(tlsConf.Certificates[0].Certificate))
 	}
-	if echList != nil {
-		fmt.Printf("ech        on, the outer hello names %s\n", conf.ECH)
-	}
+	ech := newECH(db, key, settings.ECHName, func(name string) { keepECH(*confFlag, name) })
+	ech.serve(tlsConf)
+	quicconn.ECH = ech.publicList
+	keepPort(*confFlag, self.Port)
 
 	admission := newGate()
 	admission.setNetwork(key)
@@ -261,14 +257,15 @@ func main() {
 		tag: self.Tag, role: string(self.Role), address: self.Address, uuid: self.UUID,
 		enable: self.Enable, key: key, id: self.ID, port: self.Port,
 		db: db, dbPath: *dbPath, started: time.Now(),
-		netKey:  &netKey,
-		metrics: startMetrics(dev, watch.Live),
-		logs:    logs,
-		watch:   watch,
-		epoch:   time.Now().Unix(),
-		node:    node,
-		gate:    admission,
-		ech:     echList,
+		netKey:   &netKey,
+		metrics:  startMetrics(dev, watch.Live),
+		logs:     logs,
+		watch:    watch,
+		epoch:    time.Now().Unix(),
+		node:     node,
+		gate:     admission,
+		ech:      ech,
+		confPath: *confFlag,
 		restart: func() {
 			binary, err := os.Executable()
 			if err != nil {

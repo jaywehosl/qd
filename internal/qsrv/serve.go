@@ -300,10 +300,6 @@ func (n *Node) serveConnect(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
-	if n.stale(dst) {
-		w.WriteHeader(http.StatusGone)
-		return
-	}
 	dst = n.behind(dst)
 
 	hops := defaultHops
@@ -315,6 +311,11 @@ func (n *Node) serveConnect(w http.ResponseWriter, r *http.Request) {
 
 	dialCtx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	dialer := n.dialerFor(dialCtx, grant, route, hops)
+	if n.stale(dst) && endsHere(dialer, dst.Addr()) {
+		cancel()
+		w.WriteHeader(http.StatusGone)
+		return
+	}
 	s := n.counting(grant, r, route)
 
 	if r.Header.Get(HeaderProto) == "icmp" {

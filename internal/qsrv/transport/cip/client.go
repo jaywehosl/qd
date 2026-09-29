@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"time"
 
 	connectip "github.com/quic-go/connect-ip-go"
 	"github.com/quic-go/quic-go"
@@ -73,16 +74,24 @@ func DialAuthConn(ctx context.Context, qc *quicconn.Conn, tmpl *uritemplate.Temp
 	h3tr := &http3.Transport{EnableDatagrams: true}
 	cc := h3tr.NewClientConn(qc.QUIC())
 
+	began := time.Now()
+	var greetTook time.Duration
 	greeted := make(chan error, 1)
 	go func() {
 		_, err := greet(ctx, cc, http3.MethodGet0RTT, token, device, route, authURL)
+		greetTook = time.Since(began)
 		greeted <- err
 	}()
 
 	head := http.Header{}
 	sign(&http.Request{Header: head}, token, device, route)
 	ipConn, _, ipErr := connectip.Dial(ctx, cc, tmpl, head)
-	if err := <-greeted; err != nil || ipErr != nil {
+	ipTook := time.Since(began)
+	err := <-greeted
+	if max(greetTook, ipTook) > slowStart {
+		fmt.Printf("cip      slow start: greet %d ms (%v), connect-ip %d ms (%v)\n", greetTook.Milliseconds(), err, ipTook.Milliseconds(), ipErr)
+	}
+	if err != nil || ipErr != nil {
 		if ipConn != nil {
 			ipConn.Close()
 		}
@@ -95,6 +104,8 @@ func DialAuthConn(ctx context.Context, qc *quicconn.Conn, tmpl *uritemplate.Temp
 	}
 	return &Client{qc: qc, h3: h3tr, cc: cc, ip: ipConn, auth: authURL, token: token, device: device}, nil
 }
+
+const slowStart = 2 * time.Second
 
 type roundTripper interface {
 	RoundTrip(*http.Request) (*http.Response, error)

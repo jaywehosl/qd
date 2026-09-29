@@ -34,6 +34,14 @@ export default function DatapathTab({ allSetting, updateSetting }: DatapathTabPr
         >
           <Input {...text('pool', '10.7.0.0/16')} placeholder="10.7.0.0/16" />
         </SettingListItem>
+
+        <SettingListItem
+          paddings="small"
+          title={t('pages.settings.ech')}
+          description={t('pages.settings.echDesc')}
+        >
+          <Input {...text('echName', '')} placeholder={t('pages.settings.echOff')} />
+        </SettingListItem>
       </Card>
 
       <Card title={t('pages.settings.carriage')}>

@@ -175,6 +175,8 @@ func Dial(ctx context.Context, opts Options) (*Tunnel, error) {
 
 const relayHeadStart = 800 * time.Millisecond
 
+const slowAddress = 2 * time.Second
+
 func relayQUIC() *quic.Config {
 	c := quicconn.DefaultConfig()
 	c.HandshakeIdleTimeout = 15 * time.Second
@@ -331,7 +333,11 @@ func reach(ctx context.Context, opts Options, endpoint string) (*Tunnel, error) 
 			continue
 		}
 
+		roadUp := time.Now()
 		assigned, err := got.road.LocalPrefixes(ctx)
+		if took := time.Since(roadUp); took > slowAddress {
+			fmt.Printf("carry    the node gave an address %d ms after the road was up\n", took.Milliseconds())
+		}
 		if err != nil {
 			got.road.Close()
 			refused = append(refused, fmt.Sprintf("the node assigned no address: %v", err))

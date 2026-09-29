@@ -28,6 +28,7 @@ export class AllSetting {
   idleSeconds = 90;
   keepAliveSeconds = 15;
   socketBufferKb = 2048;
+  echName = '';
 
   constructor(data?: unknown) {
     if (data != null) {
