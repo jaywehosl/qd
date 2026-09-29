@@ -259,7 +259,7 @@ func reachRelay(ctx context.Context, opts Options, link relay.Link) (*Tunnel, er
 		opts:     opts,
 		endpoint: link.Authority,
 		assigned: assigned,
-		peers:    resolve(ctx, host),
+		peers:    peersOf(ctx, link.Authority),
 		relay:    sess,
 		weblink:  link.Weblink,
 	}
@@ -356,7 +356,7 @@ func reach(ctx context.Context, opts Options, endpoint string) (*Tunnel, error) 
 			opts:     opts,
 			endpoint: endpoint,
 			assigned: assigned,
-			peers:    resolve(ctx, host),
+			peers:    peersOf(ctx, endpoint),
 		}
 		tag := opts.Route
 		t.route.Store(&tag)
@@ -649,3 +649,18 @@ func (t *Tunnel) markOf(pkt []byte) uint64 {
 func (t *Tunnel) Endpoint() string { return t.endpoint }
 
 func (t *Tunnel) CanMigrate() bool { return !t.overTCP && t.relay == nil }
+
+func peersOf(ctx context.Context, endpoint string) []netip.Addr {
+	if held := quicconn.Known(endpoint); len(held) > 0 {
+		return held
+	}
+	host, _, err := net.SplitHostPort(endpoint)
+	if err != nil {
+		return nil
+	}
+	look, stop := context.WithTimeout(ctx, peerLookup)
+	defer stop()
+	return resolve(look, host)
+}
+
+const peerLookup = 4 * time.Second

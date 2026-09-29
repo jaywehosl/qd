@@ -516,3 +516,24 @@ func timedOut(err error) bool {
 	var hs *quic.HandshakeTimeoutError
 	return errors.As(err, &idle) || errors.As(err, &hs)
 }
+
+func Known(endpoint string) []netip.Addr {
+	host, _, err := net.SplitHostPort(endpoint)
+	if err != nil {
+		return nil
+	}
+	if ip, err := netip.ParseAddr(host); err == nil {
+		return []netip.Addr{ip.Unmap()}
+	}
+	held, ok := known.Load(endpoint)
+	if !ok {
+		return nil
+	}
+	var out []netip.Addr
+	for _, a := range held.([]*net.UDPAddr) {
+		if ip, ok := netip.AddrFromSlice(a.IP); ok {
+			out = append(out, ip.Unmap())
+		}
+	}
+	return out
+}
