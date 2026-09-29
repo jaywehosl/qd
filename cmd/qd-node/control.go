@@ -67,6 +67,7 @@ type controlState struct {
 
 	dns    *dnsproxy.Resolver
 	routes atomic.Pointer[routeList]
+	ech    []byte
 }
 
 var clientOps = map[string]bool{
@@ -569,6 +570,9 @@ func (state *controlState) whoami(token string, claim deviceClaim) map[string]an
 		}
 		if c.Admin && c.Enable {
 			answer["peers"] = peerAddresses(network)
+		}
+		if len(state.ech) > 0 {
+			answer["ech"] = state.ech
 		}
 		if answer["carried"] == true {
 			if refused := state.admit(c, group, claim); refused != "" {

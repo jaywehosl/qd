@@ -19,6 +19,8 @@ type nodeConfig struct {
 	Authority string
 	Cert      string
 	Key       string
+	Chain     string
+	ECH       string
 
 	ID      int
 	UUID    string
@@ -60,6 +62,10 @@ func readConfig(path string) (nodeConfig, error) {
 			cfg.Authority = value
 		case "cert":
 			cfg.Cert = value
+		case "chain":
+			cfg.Chain = value
+		case "ech":
+			cfg.ECH = value
 		case "key":
 			cfg.Key = value
 		case "id":
@@ -118,6 +124,8 @@ func writeConfig(path string, cfg nodeConfig) error {
 		{"authority", cfg.Authority},
 		{"cert", cfg.Cert},
 		{"key", cfg.Key},
+		{"chain", cfg.Chain},
+		{"ech", cfg.ECH},
 	} {
 		if line[1] == "" || line[1] == "0" {
 			continue

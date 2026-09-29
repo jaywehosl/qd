@@ -29,6 +29,7 @@ import (
 	"github.com/jaywehosl/qd/internal/qsrv/uplink/quicconn"
 	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
 	"github.com/jaywehosl/qd/internal/roads"
+	"github.com/jaywehosl/qd/internal/roots"
 )
 
 type Options struct {
@@ -80,7 +81,7 @@ func Dial(ctx context.Context, opts Options) (*Tunnel, error) {
 		fmt.Printf("carriage brutal, %d Mbit/s regardless of loss\n", opts.Brutal)
 	} else {
 		os.Unsetenv("QD_BRUTAL_MBPS")
-		fmt.Printf("carriage cubic\n")
+		fmt.Printf("carriage bbr\n")
 	}
 	if len(opts.Endpoints) == 0 {
 		return nil, fmt.Errorf("no entrypoint to dial")
@@ -279,7 +280,7 @@ func reach(ctx context.Context, opts Options, endpoint string) (*Tunnel, error) 
 	}
 
 	tmpl := qsrv.Template(endpoint, qsrv.ConnectIPPath)
-	tlsConf := &tls.Config{ServerName: host, ClientSessionCache: opts.Tickets}
+	tlsConf := &tls.Config{ServerName: host, ClientSessionCache: opts.Tickets, RootCAs: roots.Pool()}
 	authURL := "https://" + endpoint + qsrv.AuthPath
 
 	round, stop := context.WithCancel(ctx)

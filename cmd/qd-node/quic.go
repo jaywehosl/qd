@@ -142,7 +142,7 @@ func peersFrom(db *store.DB, selfID int) func() []qsrv.Peer {
 	}
 }
 
-func loadTLS(certFile, keyFile, authority string) (*tls.Config, error) {
+func loadTLS(certFile, keyFile, authority string, short bool) (*tls.Config, error) {
 	if certFile == "" || keyFile == "" {
 		host := authority
 		if h, _, err := net.SplitHostPort(authority); err == nil {
@@ -153,6 +153,9 @@ func loadTLS(certFile, keyFile, authority string) (*tls.Config, error) {
 	pair, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
 		return nil, err
+	}
+	if short && len(pair.Certificate) > 2 {
+		pair.Certificate = pair.Certificate[:2]
 	}
 	return &tls.Config{Certificates: []tls.Certificate{pair}}, nil
 }

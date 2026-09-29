@@ -40,37 +40,25 @@ func (c chained) open(ctx context.Context, dst netip.AddrPort) (io.ReadCloser, i
 		Body:   pr,
 	}).WithContext(sctx)
 
-	type answer struct {
-		rsp *http.Response
-		err error
-	}
-	done := make(chan answer, 1)
+	answer := costream.NewReply()
 	go func() {
 		rsp, err := c.cc.RoundTrip(req)
-		done <- answer{rsp, err}
+		if err == nil && rsp.StatusCode != http.StatusOK {
+			rsp.Body.Close()
+			err = fmt.Errorf("%s refused the flow: %s", c.endpoint, rsp.Status)
+		}
+		if err != nil {
+			scancel()
+			pw.CloseWithError(err)
+			answer.Settle(nil, err)
+			return
+		}
+		answer.Settle(rsp.Body, nil)
 	}()
 
-	give := func(why error) (io.ReadCloser, io.WriteCloser, context.CancelFunc, func(), error) {
-		scancel()
-		pw.Close()
-		return nil, nil, nil, nil, why
-	}
-
-	select {
-	case <-ctx.Done():
-		return give(fmt.Errorf("%s did not take the flow: %w", c.endpoint, ctx.Err()))
-	case got := <-done:
-		if got.err != nil {
-			return give(got.err)
-		}
-		if got.rsp.StatusCode != http.StatusOK {
-			got.rsp.Body.Close()
-			return give(fmt.Errorf("%s refused the flow: %s", c.endpoint, got.rsp.Status))
-		}
-		at := c.at()
-		c.ls.hold(at)
-		return got.rsp.Body, pw, scancel, func() { c.ls.release(at) }, nil
-	}
+	at := c.at()
+	c.ls.hold(at)
+	return answer, pw, scancel, func() { c.ls.release(at) }, nil
 }
 
 func (c chained) DialTCP(ctx context.Context, dst netip.AddrPort) (net.Conn, error) {

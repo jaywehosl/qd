@@ -15,6 +15,7 @@ import (
 	quic "github.com/quic-go/quic-go"
 
 	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
+	"github.com/jaywehosl/qd/internal/roots"
 )
 
 const defaultMaxDatagram = 1200
@@ -213,7 +214,7 @@ func OverRelay(ctx context.Context, sess *relay.Session, authority string, conf 
 		sess.Stop()
 		return nil, err
 	}
-	qc, err := DialPacketConn(ctx, pc, relay.Peer, &tls.Config{ServerName: host, ClientSessionCache: tickets}, conf)
+	qc, err := DialPacketConn(ctx, pc, relay.Peer, &tls.Config{ServerName: host, ClientSessionCache: tickets, RootCAs: roots.Pool()}, conf)
 	if err != nil {
 		sess.Stop()
 		return nil, err
@@ -233,8 +234,11 @@ func DialPacketConn(ctx context.Context, pc net.PacketConn, raddr net.Addr, tlsC
 	return c, nil
 }
 
+var Tokens quic.TokenStore
+
 func DefaultConfig() *quic.Config {
 	return &quic.Config{
+		TokenStore:                     Tokens,
 		EnableDatagrams:                true,
 		MaxIdleTimeout:                 90 * time.Second,
 		KeepAlivePeriod:                15 * time.Second,
@@ -395,10 +399,111 @@ func (c *Conn) listenLike(laddr *net.UDPAddr) (*net.UDPConn, error) {
 
 const resolveWait = 4 * time.Second
 
+var (
+	skipV2 atomic.Bool
+	ECH    func(serverName string) []byte
+	noECH  sync.Map
+)
+
 func dialOn(ctx context.Context, tr *quic.Transport, raddr net.Addr, tlsConf *tls.Config, conf *quic.Config) (*quic.Conn, error) {
-	tlsConf = ensureALPN(tlsConf)
-	if tlsConf.ClientSessionCache != nil {
-		return tr.DialEarly(ctx, raddr, tlsConf, configOrDefault(conf))
+	hidden := withECH(tlsConf)
+	if hidden == nil {
+		qc, err := dialVersions(ctx, tr, raddr, tlsConf, conf)
+		if timedOut(err) && tlsConf != nil {
+			noECH.Delete(tlsConf.ServerName)
+		}
+		return qc, err
 	}
-	return tr.Dial(ctx, raddr, tlsConf, configOrDefault(conf))
+	qc, err := dialVersions(ctx, tr, raddr, hidden, conf)
+	if err == nil || ctx.Err() != nil {
+		return qc, err
+	}
+	fmt.Printf("dial     %s: ECH did not go through (%v), trying without\n", raddr, err)
+	qc, err = dialVersions(ctx, tr, raddr, tlsConf, conf)
+	if err == nil {
+		noECH.Store(tlsConf.ServerName, string(hidden.EncryptedClientHelloConfigList))
+	}
+	return qc, err
+}
+
+func withECH(tlsConf *tls.Config) *tls.Config {
+	if ECH == nil || tlsConf == nil || tlsConf.ServerName == "" || tlsConf.EncryptedClientHelloConfigList != nil {
+		return nil
+	}
+	list := ECH(tlsConf.ServerName)
+	if len(list) == 0 {
+		return nil
+	}
+	if failed, ok := noECH.Load(tlsConf.ServerName); ok && failed.(string) == string(list) {
+		return nil
+	}
+	hidden := tlsConf.Clone()
+	hidden.EncryptedClientHelloConfigList = list
+	return hidden
+}
+
+func dialVersions(ctx context.Context, tr *quic.Transport, raddr net.Addr, tlsConf *tls.Config, conf *quic.Config) (*quic.Conn, error) {
+	if skipV2.Load() {
+		qc, err := dialVersion(ctx, tr, raddr, tlsConf, conf, quic.Version1)
+		if err == nil && tlsConf != nil && tlsConf.EncryptedClientHelloConfigList != nil {
+			go watch(qc, false, tlsConf)
+		}
+		if timedOut(err) {
+			skipV2.Store(false)
+		}
+		return qc, err
+	}
+	qc, err := dialVersion(ctx, tr, raddr, tlsConf, conf, quic.Version2)
+	if err == nil {
+		go watch(qc, true, tlsConf)
+		return qc, nil
+	}
+	if !timedOut(err) || ctx.Err() != nil {
+		return nil, err
+	}
+	fmt.Printf("dial     %s: no answer to QUIC v2, trying v1\n", raddr)
+	qc, err = dialVersion(ctx, tr, raddr, tlsConf, conf, quic.Version1)
+	if err == nil {
+		skipV2.Store(true)
+	}
+	return qc, err
+}
+
+func dialVersion(ctx context.Context, tr *quic.Transport, raddr net.Addr, tlsConf *tls.Config, conf *quic.Config, v quic.Version) (*quic.Conn, error) {
+	tlsConf = ensureALPN(tlsConf)
+	conf = configOrDefault(conf).Clone()
+	conf.Versions = []quic.Version{v}
+	if v != quic.Version1 {
+		conf.Versions = append(conf.Versions, quic.Version1)
+	}
+	if tlsConf.ClientSessionCache != nil {
+		return tr.DialEarly(ctx, raddr, tlsConf, conf)
+	}
+	return tr.Dial(ctx, raddr, tlsConf, conf)
+}
+
+func watch(qc *quic.Conn, v2 bool, tlsConf *tls.Config) {
+	select {
+	case <-qc.HandshakeComplete():
+	case <-qc.Context().Done():
+		cause := context.Cause(qc.Context())
+		if v2 && timedOut(cause) {
+			fmt.Printf("dial     %s: QUIC v2 went unanswered, next dials use v1\n", qc.RemoteAddr())
+			skipV2.Store(true)
+		}
+		var te *quic.TransportError
+		if tlsConf == nil || tlsConf.EncryptedClientHelloConfigList == nil {
+			return
+		}
+		if timedOut(cause) || errors.As(cause, &te) && te.ErrorCode.IsCryptoError() {
+			fmt.Printf("dial     %s: the handshake with ECH failed (%v), next dials go without it\n", qc.RemoteAddr(), cause)
+			noECH.Store(tlsConf.ServerName, string(tlsConf.EncryptedClientHelloConfigList))
+		}
+	}
+}
+
+func timedOut(err error) bool {
+	var idle *quic.IdleTimeoutError
+	var hs *quic.HandshakeTimeoutError
+	return errors.As(err, &idle) || errors.As(err, &hs)
 }

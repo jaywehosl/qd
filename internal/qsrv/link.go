@@ -14,6 +14,7 @@ import (
 	"github.com/quic-go/quic-go/http3"
 
 	"github.com/jaywehosl/qd/internal/qsrv/uplink/quicconn"
+	"github.com/jaywehosl/qd/internal/roots"
 )
 
 const peerDialTimeout = 8 * time.Second
@@ -87,7 +88,7 @@ func (l *link) dial(ctx context.Context) (*http3.ClientConn, *http3.Transport, *
 	dialCtx, cancel := context.WithTimeout(ctx, peerDialTimeout)
 	defer cancel()
 
-	tlsConf := &tls.Config{ServerName: host, NextProtos: []string{http3.NextProtoH3}}
+	tlsConf := &tls.Config{ServerName: host, NextProtos: []string{http3.NextProtoH3}, RootCAs: roots.Pool()}
 	conn, err := quicconn.Dialer{TLS: tlsConf}.Dial(dialCtx, l.endpoint)
 	if err != nil {
 		return nil, nil, nil, err

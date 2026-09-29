@@ -22,8 +22,8 @@ android {
         applicationId = "ru.qd.client"
         minSdk = 33
         targetSdk = 35
-        versionCode = 16
-        versionName = "0.1.5"
+        versionCode = 17
+        versionName = "0.1.6"
         ndk {
             abiFilters += "arm64-v8a"
         }

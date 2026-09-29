@@ -70,10 +70,17 @@ func (s *live) cameDown(n int) {
 }
 
 func (n *Node) carry(ctx context.Context, conn *connectip.Conn, qc *quic.Conn, grant Grant, route string) {
-	address, err := n.pool.take(grant.Seat)
-	if err != nil {
-		conn.Close()
-		return
+	address, early := n.pool.takeOwn(grant.Seat)
+	if !early {
+		if !settles(qc) {
+			conn.Close()
+			return
+		}
+		var err error
+		if address, err = n.pool.take(grant.Seat); err != nil {
+			conn.Close()
+			return
+		}
 	}
 
 	if err := conn.AssignAddresses(ctx, []netip.Prefix{address}); err != nil {
@@ -82,6 +89,11 @@ func (n *Node) carry(ctx context.Context, conn *connectip.Conn, qc *quic.Conn, g
 		return
 	}
 	if err := conn.AdvertiseRoute(ctx, wholeInternet); err != nil {
+		n.pool.give(address)
+		conn.Close()
+		return
+	}
+	if !settles(qc) {
 		n.pool.give(address)
 		conn.Close()
 		return
@@ -478,4 +490,15 @@ func tallied(to io.Writer, s *live, up bool) io.Writer {
 		sum = &s.up
 	}
 	return tally{to: to, sum: sum, seen: &s.lastSeen}
+}
+
+func settles(qc *quic.Conn) bool {
+	if qc == nil {
+		return true
+	}
+	select {
+	case <-qc.HandshakeComplete():
+	case <-qc.Context().Done():
+	}
+	return qc.Context().Err() == nil
 }

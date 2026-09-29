@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/netip"
@@ -70,21 +71,27 @@ func (d Dialer) open(ctx context.Context, dst netip.AddrPort, udp bool) (io.Read
 		Body:   pr,
 	}).WithContext(sctx)
 
-	give := func(why error) (io.ReadCloser, io.WriteCloser, context.CancelFunc, error) {
-		scancel()
-		pw.Close()
-		return nil, nil, nil, why
-	}
-
-	rsp, err := d.roundTrip(ctx, req)
-	if err != nil {
-		return give(fmt.Errorf("CONNECT %s: %w", dst, err))
-	}
-	if rsp.StatusCode != http.StatusOK {
-		rsp.Body.Close()
-		return give(fmt.Errorf("CONNECT %s: status %d", dst, rsp.StatusCode))
-	}
-	return rsp.Body, pw, scancel, nil
+	answer := costream.NewReply()
+	go func() {
+		rsp, err := d.roundTrip(sctx, req)
+		if err != nil {
+			err = fmt.Errorf("CONNECT %s: %w", dst, err)
+		} else if rsp.StatusCode != http.StatusOK {
+			rsp.Body.Close()
+			err = fmt.Errorf("CONNECT %s: status %d", dst, rsp.StatusCode)
+		}
+		if err != nil {
+			if sctx.Err() == nil {
+				log.Printf("connectdial: %v", err)
+			}
+			scancel()
+			pw.CloseWithError(err)
+			answer.Settle(nil, err)
+			return
+		}
+		answer.Settle(rsp.Body, nil)
+	}()
+	return answer, pw, scancel, nil
 }
 
 func (d Dialer) DialTCP(ctx context.Context, dst netip.AddrPort) (net.Conn, error) {

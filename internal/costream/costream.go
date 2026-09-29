@@ -105,3 +105,48 @@ func (p *Packets) RemoteAddr() net.Addr             { return net.UDPAddrFromAddr
 func (p *Packets) SetDeadline(time.Time) error      { return nil }
 func (p *Packets) SetReadDeadline(time.Time) error  { return nil }
 func (p *Packets) SetWriteDeadline(time.Time) error { return nil }
+
+func NewReply() *Reply {
+	return &Reply{ready: make(chan struct{})}
+}
+
+type Reply struct {
+	mu     sync.Mutex
+	ready  chan struct{}
+	body   io.ReadCloser
+	err    error
+	closed bool
+}
+
+func (r *Reply) Settle(body io.ReadCloser, err error) {
+	r.mu.Lock()
+	r.body, r.err = body, err
+	late := r.closed
+	close(r.ready)
+	r.mu.Unlock()
+	if late && body != nil {
+		body.Close()
+	}
+}
+
+func (r *Reply) Read(b []byte) (int, error) {
+	<-r.ready
+	if r.err != nil {
+		return 0, r.err
+	}
+	return r.body.Read(b)
+}
+
+func (r *Reply) Close() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.closed = true
+	select {
+	case <-r.ready:
+		if r.body != nil {
+			return r.body.Close()
+		}
+	default:
+	}
+	return nil
+}

@@ -83,3 +83,15 @@ CREATE TABLE IF NOT EXISTS tickets (
     blob   BLOB NOT NULL,
     stored INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS tokens (
+    server TEXT PRIMARY KEY,
+    blob   BLOB NOT NULL,
+    rtt    INTEGER NOT NULL,
+    stored INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ech (
+    server TEXT PRIMARY KEY,
+    list   BLOB NOT NULL
+);

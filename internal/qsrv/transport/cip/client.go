@@ -73,17 +73,25 @@ func DialAuthConn(ctx context.Context, qc *quicconn.Conn, tmpl *uritemplate.Temp
 	h3tr := &http3.Transport{EnableDatagrams: true}
 	cc := h3tr.NewClientConn(qc.QUIC())
 
-	if _, err := greet(ctx, cc, http3.MethodGet0RTT, token, device, route, authURL); err != nil {
-		h3tr.Close()
-		qc.Close()
-		return nil, err
-	}
+	greeted := make(chan error, 1)
+	go func() {
+		_, err := greet(ctx, cc, http3.MethodGet0RTT, token, device, route, authURL)
+		greeted <- err
+	}()
 
-	ipConn, _, err := connectip.Dial(ctx, cc, tmpl)
-	if err != nil {
+	head := http.Header{}
+	sign(&http.Request{Header: head}, token, device, route)
+	ipConn, _, ipErr := connectip.Dial(ctx, cc, tmpl, head)
+	if err := <-greeted; err != nil || ipErr != nil {
+		if ipConn != nil {
+			ipConn.Close()
+		}
 		h3tr.Close()
 		qc.Close()
-		return nil, err
+		if err != nil {
+			return nil, err
+		}
+		return nil, ipErr
 	}
 	return &Client{qc: qc, h3: h3tr, cc: cc, ip: ipConn, auth: authURL, token: token, device: device}, nil
 }

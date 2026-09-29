@@ -18,6 +18,7 @@ import (
 	"github.com/jaywehosl/qd/internal/ippkt"
 	"github.com/jaywehosl/qd/internal/qsrv"
 	"github.com/jaywehosl/qd/internal/roads"
+	"github.com/jaywehosl/qd/internal/roots"
 )
 
 type Over struct {
@@ -50,7 +51,7 @@ func ReachH2(ctx context.Context, endpoint string, keep func(fd uintptr)) (net.C
 		return nil, nil, err
 	}
 
-	held := tls.Client(raw, &tls.Config{ServerName: host, NextProtos: []string{"h2"}})
+	held := tls.Client(raw, &tls.Config{ServerName: host, NextProtos: []string{"h2"}, RootCAs: roots.Pool()})
 	if err := held.HandshakeContext(ctx); err != nil {
 		raw.Close()
 		return nil, nil, err

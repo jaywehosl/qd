@@ -16,6 +16,7 @@ import (
 	"github.com/jaywehosl/qd/internal/qcli"
 	"github.com/jaywehosl/qd/internal/qcli/packet"
 	"github.com/jaywehosl/qd/internal/qdcrypt"
+	"github.com/jaywehosl/qd/internal/qsrv/uplink/quicconn"
 	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
 	"github.com/jaywehosl/qd/internal/qwire"
 )
@@ -82,6 +83,8 @@ func Open(stateDir string, host Host, protector Protector, deviceID, model, name
 	if err != nil {
 		return nil, err
 	}
+	quicconn.Tokens = db.Tokens()
+	quicconn.ECH = db.ECH
 
 	settings, err := db.Settings()
 	if err != nil {

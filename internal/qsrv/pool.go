@@ -51,15 +51,30 @@ func (p *pool) stream(seat uint32) netip.Prefix {
 	return netip.PrefixFrom(addr, addr.BitLen())
 }
 
+func (p *pool) takeOwn(session uint32) (netip.Prefix, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.own(session)
+}
+
+func (p *pool) own(session uint32) (netip.Prefix, bool) {
+	was, ok := p.mine[session]
+	if !ok {
+		return netip.Prefix{}, false
+	}
+	if _, busy := p.taken[was]; busy || p.streams.Contains(was) {
+		return netip.Prefix{}, false
+	}
+	p.taken[was] = struct{}{}
+	return netip.PrefixFrom(was, was.BitLen()), true
+}
+
 func (p *pool) take(session uint32) (netip.Prefix, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if was, ok := p.mine[session]; ok {
-		if _, busy := p.taken[was]; !busy && !p.streams.Contains(was) {
-			p.taken[was] = struct{}{}
-			return netip.PrefixFrom(was, was.BitLen()), nil
-		}
+	if own, ok := p.own(session); ok {
+		return own, nil
 	}
 
 	for i := 0; i < 1<<20; i++ {

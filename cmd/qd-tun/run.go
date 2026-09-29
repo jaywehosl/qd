@@ -18,6 +18,7 @@ import (
 	"github.com/jaywehosl/qd/internal/clientapi"
 	"github.com/jaywehosl/qd/internal/clientstate"
 	"github.com/jaywehosl/qd/internal/qdcrypt"
+	"github.com/jaywehosl/qd/internal/qsrv/uplink/quicconn"
 )
 
 func runClient(opts runOptions) error {
@@ -52,6 +53,8 @@ func runClient(opts runOptions) error {
 		return fmt.Errorf("state: %w", err)
 	}
 	defer db.Close()
+	quicconn.Tokens = db.Tokens()
+	quicconn.ECH = db.ECH
 
 	reloadProcessRules(db)
 	setFixedRate(settingsFixedRate(db))

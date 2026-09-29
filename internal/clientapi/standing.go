@@ -31,6 +31,7 @@ type Standing struct {
 	Admin          bool         `json:"admin"`
 	FixedRate      int          `json:"fixedRate"`
 	Peers          []string     `json:"peers"`
+	ECH            []byte       `json:"ech"`
 }
 
 func (s Standing) Refused() bool { return !s.Carried && s.Why() != "" }
@@ -108,6 +109,7 @@ func (a *API) sweep() (int, Standing) {
 				results <- result{id: n.ID, latency: -1}
 				return
 			}
+			a.db.PutECH(n.Address, answer.ECH)
 			results <- result{n.ID, int(time.Since(began).Milliseconds()), answer}
 		}(n)
 	}

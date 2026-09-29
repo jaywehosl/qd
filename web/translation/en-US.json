@@ -385,7 +385,7 @@
       "pool": "Client addresses",
       "poolDesc": "Range each connected client is given an address from.",
       "brutal": "Fixed rate",
-      "brutalDesc": "Send at this many Mbit/s regardless of loss — set it below the real line. Zero hands the pacing to cubic, which backs off on loss instead.",
+      "brutalDesc": "Send at this many Mbit/s regardless of loss — set it below the real line. Zero hands the pacing to BBR, which follows the measured bandwidth and round trip instead.",
       "maxStreams": "Streams per client",
       "maxStreamsDesc": "How many flows one connection may hold open at once. A browser alone takes hundreds, and on an exit node every client transits through a single connection. Raise it before the client count does.",
       "streamWindow": "Stream window",

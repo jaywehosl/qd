@@ -19,6 +19,7 @@ import (
 	"github.com/jaywehosl/qd/internal/qsrv/uplink/quicconn"
 	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
 	"github.com/jaywehosl/qd/internal/roads"
+	"github.com/jaywehosl/qd/internal/roots"
 )
 
 type Dialer struct {
@@ -205,7 +206,7 @@ func dialControl(endpoint string, keep func(fd uintptr), relays []relay.Link) (*
 	if !roads.OnlyTCP() && (!pinned || (pin.Relay == "" && !pin.OverTCP)) {
 		paths++
 		go func() {
-			conn, err := quicconn.Dialer{TLS: &tls.Config{ServerName: host}, QUIC: controlConfig(), Keep: keep}.Dial(direct, endpoint)
+			conn, err := quicconn.Dialer{TLS: &tls.Config{ServerName: host, RootCAs: roots.Pool()}, QUIC: controlConfig(), Keep: keep}.Dial(direct, endpoint)
 			if err != nil {
 				line <- finish{err: fmt.Errorf("quic: %w", err)}
 				return

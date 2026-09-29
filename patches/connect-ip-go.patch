@@ -1,5 +1,53 @@
---- a/conn.go
-+++ b/conn.go
+--- a/client.go	2026-09-29 23:09:41.737426500 +0300
++++ b/client.go	2026-09-29 23:09:41.766145000 +0300
+@@ -12,7 +12,7 @@
+ )
+ 
+ // Dial dials a proxied connection to a target server.
+-func Dial(ctx context.Context, conn *http3.ClientConn, template *uritemplate.Template) (*Conn, *http.Response, error) {
++func Dial(ctx context.Context, conn *http3.ClientConn, template *uritemplate.Template, header http.Header) (*Conn, *http.Response, error) {
+ 	if len(template.Varnames()) > 0 {
+ 		return nil, nil, errors.New("connect-ip: IP flow forwarding not supported")
+ 	}
+@@ -28,14 +28,21 @@
+ 	case <-conn.Context().Done():
+ 		return nil, nil, context.Cause(conn.Context())
+ 	case <-conn.ReceivedSettings():
++		settings := conn.Settings()
++		if !settings.EnableExtendedConnect {
++			return nil, nil, errors.New("connect-ip: server didn't enable Extended CONNECT")
++		}
++		if !settings.EnableDatagrams {
++			return nil, nil, errors.New("connect-ip: server didn't enable datagrams")
++		}
++	default:
+ 	}
+-	settings := conn.Settings()
+-	if !settings.EnableExtendedConnect {
+-		return nil, nil, errors.New("connect-ip: server didn't enable Extended CONNECT")
+-	}
+-	if !settings.EnableDatagrams {
+-		return nil, nil, errors.New("connect-ip: server didn't enable datagrams")
++
++	head := header.Clone()
++	if head == nil {
++		head = http.Header{}
+ 	}
++	head.Set(http3.CapsuleProtocolHeader, capsuleProtocolHeaderValue)
+ 
+ 	rstr, err := conn.OpenRequestStream(ctx)
+ 	if err != nil {
+@@ -45,7 +52,7 @@
+ 		Method: http.MethodConnect,
+ 		Proto:  requestProtocol,
+ 		Host:   u.Host,
+-		Header: http.Header{http3.CapsuleProtocolHeader: []string{capsuleProtocolHeaderValue}},
++		Header: head,
+ 		URL:    u,
+ 	}); err != nil {
+ 		return nil, nil, fmt.Errorf("connect-ip: failed to send request: %w", err)
+--- a/conn.go	2026-09-29 23:09:41.739470000 +0300
++++ b/conn.go	2026-09-29 23:09:41.770168900 +0300
 @@ -257,30 +257,34 @@
  }
  

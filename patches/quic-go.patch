@@ -1,6 +1,115 @@
-diff -ruN '--exclude=.git' qg-orig/datagram_queue.go C:/Users/jaywehosl/Desktop/quic-diver/third_party/quic-go/datagram_queue.go
---- a/datagram_queue.go	2026-09-03 18:08:01.662963200 +0300
-+++ b/datagram_queue.go	2026-09-03 00:52:25.978313000 +0300
+--- a/connection.go	2026-09-29 23:22:11.735176600 +0300
++++ b/connection.go	2026-09-29 23:22:11.988418400 +0300
+@@ -8,6 +8,7 @@
+ 	"fmt"
+ 	"io"
+ 	"net"
++	"os"
+ 	"reflect"
+ 	"slices"
+ 	"sync"
+@@ -210,6 +211,9 @@
+ 	// pacingDeadline is the time when the next packet should be sent
+ 	pacingDeadline monotime.Time
+ 
++	qdFreqSeq   uint64
++	qdFreqDelay time.Duration
++
+ 	peerParams *wire.TransportParameters
+ 
+ 	timer *time.Timer
+@@ -346,6 +350,8 @@
+ 		InitialSourceConnectionID: srcConnID,
+ 		RetrySourceConnectionID:   retrySrcConnID,
+ 		EnableResetStreamAt:       conf.EnableStreamResetPartialDelivery,
++		GreaseQUICBit:             qdOn("QD_GREASE"),
++		MinAckDelay:               qdMinAckDelay(),
+ 	}
+ 	if s.config.EnableDatagrams {
+ 		params.MaxDatagramFrameSize = wire.MaxDatagramSize
+@@ -472,6 +478,8 @@
+ 		ActiveConnectionIDLimit:   protocol.MaxActiveConnectionIDs,
+ 		InitialSourceConnectionID: srcConnID,
+ 		EnableResetStreamAt:       conf.EnableStreamResetPartialDelivery,
++		GreaseQUICBit:             qdOn("QD_GREASE"),
++		MinAckDelay:               qdMinAckDelay(),
+ 	}
+ 	if s.config.EnableDatagrams {
+ 		params.MaxDatagramFrameSize = wire.MaxDatagramSize
+@@ -518,7 +526,7 @@
+ 	c.frameParser = *wire.NewFrameParser(
+ 		c.config.EnableDatagrams,
+ 		c.config.EnableStreamResetPartialDelivery,
+-		false, // ACK_FREQUENCY is not supported yet
++		true,
+ 	)
+ 	c.rttStats = utils.NewRTTStats()
+ 	c.connFlowController = flowcontrol.NewConnectionFlowController(
+@@ -1943,6 +1951,10 @@
+ 		err = c.connIDGenerator.Retire(frame.SequenceNumber, destConnID, rcvTime.Add(3*c.rttStats.PTO(false)))
+ 	case *wire.HandshakeDoneFrame:
+ 		err = c.handleHandshakeDoneFrame(rcvTime)
++	case *wire.AckFrequencyFrame:
++		c.receivedPacketHandler.QDAckFrequency(frame)
++	case *wire.ImmediateAckFrame:
++		c.receivedPacketHandler.QDImmediateAck()
+ 	default:
+ 		err = fmt.Errorf("unexpected frame type: %s", reflect.ValueOf(&frame).Elem().Type().Name())
+ 	}
+@@ -2135,6 +2147,7 @@
+ 			c.sentPacketHandler.SetMaxDatagramSize(mtu)
+ 		}
+ 	}
++	c.qdTuneAckFrequency()
+ 	return c.cryptoStreamHandler.SetLargest1RTTAcked(frame.LargestAcked())
+ }
+ 
+@@ -2423,6 +2436,9 @@
+ 	c.keepAliveInterval = min(c.config.KeepAlivePeriod, c.idleTimeout/2)
+ 	c.streamsMap.HandleTransportParameters(params)
+ 	c.frameParser.SetAckDelayExponent(params.AckDelayExponent)
++	if pp, ok := c.packer.(*packetPacker); ok {
++		pp.grease = params.GreaseQUICBit && qdOn("QD_GREASE")
++	}
+ 	c.connFlowController.UpdateSendWindow(params.InitialMaxData)
+ 	c.rttStats.SetMaxAckDelay(params.MaxAckDelay)
+ 	c.connIDGenerator.SetMaxActiveConnIDs(params.ActiveConnectionIDLimit)
+@@ -3147,3 +3163,33 @@
+ func estimateMaxPayloadSize(mtu protocol.ByteCount) protocol.ByteCount {
+ 	return mtu - 1 /* type byte */ - 20 /* maximum connection ID length */ - 16 /* tag size */
+ }
++
++const qdAckThreshold = 9
++
++func qdOn(name string) bool { return os.Getenv(name) != "off" }
++
++func qdMinAckDelay() *time.Duration {
++	if !qdOn("QD_ACKFREQ") {
++		return nil
++	}
++	d := protocol.QDMinAckDelay
++	return &d
++}
++
++func (c *Conn) qdTuneAckFrequency() {
++	if !c.handshakeConfirmed || c.peerParams == nil || c.peerParams.MinAckDelay == nil || !qdOn("QD_ACKFREQ") {
++		return
++	}
++	want := min(max(c.rttStats.SmoothedRTT()/4, *c.peerParams.MinAckDelay), c.peerParams.MaxAckDelay)
++	if last := c.qdFreqDelay; last != 0 && want*4 > last*3 && want*4 < last*5 {
++		return
++	}
++	c.qdFreqDelay = want
++	c.framer.QueueControlFrame(&wire.AckFrequencyFrame{
++		SequenceNumber:        c.qdFreqSeq,
++		AckElicitingThreshold: qdAckThreshold,
++		RequestMaxAckDelay:    want,
++		ReorderingThreshold:   1,
++	})
++	c.qdFreqSeq++
++}
+--- a/datagram_queue.go	2026-09-29 23:22:11.690467000 +0300
++++ b/datagram_queue.go	2026-09-29 23:22:11.988418400 +0300
 @@ -3,15 +3,35 @@
  import (
  	"context"
@@ -12,7 +121,7 @@ diff -ruN '--exclude=.git' qg-orig/datagram_queue.go C:/Users/jaywehosl/Desktop/
  	"github.com/quic-go/quic-go/internal/wire"
  )
  
-+// qd: диагностика потерь датаграмм. Дроп на приёме = потеря IP-пакета в
++// QUIC Diver: диагностика потерь датаграмм. Дроп на приёме = потеря IP-пакета в
 +// туннеле → TCP внутри видит потерю и рушит cwnd. Счётчики глобальные, читаются
 +// из приложения (DatagramStats).
 +var (
@@ -29,7 +138,7 @@ diff -ruN '--exclude=.git' qg-orig/datagram_queue.go C:/Users/jaywehosl/Desktop/
  const (
 -	maxDatagramSendQueueLen = 32
 -	maxDatagramRcvQueueLen  = 128
-+	// qd: очереди под bulk-трафик, но НАМЕРЕННО небольшие.
++	// QUIC Diver: очереди под bulk-трафик, но НАМЕРЕННО небольшие.
 +	// Upstream (32/128) рассчитан на редкие сигнальные датаграммы: send блокировал
 +	// отправителя (stop-and-go), rcv молча дропал при burst. Раздувать тоже нельзя:
 +	// длинная очередь = bufferbloat (пакет ждёт дренажа → RTT под нагрузкой растёт).
@@ -48,17 +157,98 @@ diff -ruN '--exclude=.git' qg-orig/datagram_queue.go C:/Users/jaywehosl/Desktop/
 +	if queued {
 +		datagramsRcvd.Add(1)
 +	} else {
-+		datagramsDropped.Add(1) // qd: потеря IP-пакета в туннеле
++		datagramsDropped.Add(1) // QUIC Diver: потеря IP-пакета в туннеле
 +		if h.logger.Debug() {
 +			h.logger.Debugf("Discarding received DATAGRAM frame (%d bytes payload)", len(f.Data))
 +		}
  	}
  }
  
-diff -ruN '--exclude=.git' qg-orig/internal/ackhandler/sent_packet_handler.go C:/Users/jaywehosl/Desktop/quic-diver/third_party/quic-go/internal/ackhandler/sent_packet_handler.go
---- a/internal/ackhandler/sent_packet_handler.go	2026-09-03 18:08:01.841916700 +0300
-+++ b/internal/ackhandler/sent_packet_handler.go	2026-09-03 00:52:25.978313000 +0300
-@@ -3,6 +3,8 @@
+--- a/interface.go	2026-09-29 23:22:11.726750200 +0300
++++ b/interface.go	2026-09-29 23:22:11.868643200 +0300
+@@ -39,6 +39,14 @@
+ 	rtt  time.Duration
+ }
+ 
++func NewClientToken(data []byte, rtt time.Duration) *ClientToken {
++	return &ClientToken{data: data, rtt: rtt}
++}
++
++func (t *ClientToken) Data() []byte { return t.data }
++
++func (t *ClientToken) RTT() time.Duration { return t.rtt }
++
+ type TokenStore interface {
+ 	// Pop searches for a ClientToken associated with the given key.
+ 	// Since tokens are not supposed to be reused, it must remove the token from the cache.
+--- a/internal/ackhandler/received_packet_handler.go	2026-09-29 23:22:11.745989500 +0300
++++ b/internal/ackhandler/received_packet_handler.go	2026-09-29 23:22:11.972369400 +0300
+@@ -77,6 +77,14 @@
+ 	}
+ }
+ 
++func (h *ReceivedPacketHandler) QDAckFrequency(f *wire.AckFrequencyFrame) {
++	h.appDataPackets.qdAckFrequency(f)
++}
++
++func (h *ReceivedPacketHandler) QDImmediateAck() {
++	h.appDataPackets.qdImmediateAck()
++}
++
+ func (h *ReceivedPacketHandler) GetAlarmTimeout() monotime.Time {
+ 	return h.appDataPackets.GetAlarmTimeout()
+ }
+--- a/internal/ackhandler/received_packet_tracker.go	2026-09-29 23:22:11.743979500 +0300
++++ b/internal/ackhandler/received_packet_tracker.go	2026-09-29 23:22:11.971851800 +0300
+@@ -91,6 +91,10 @@
+ 	maxAckDelay time.Duration
+ 	ackQueued   bool // true if we need send a new ACK
+ 
++	ackThreshold int
++	freqSeq      uint64
++	freqSet      bool
++
+ 	ackElicitingPacketsReceivedSinceLastAck int
+ 	ackAlarm                                monotime.Time
+ 
+@@ -101,6 +105,7 @@
+ 	h := &appDataReceivedPacketTracker{
+ 		receivedPacketTracker: *newReceivedPacketTracker(),
+ 		maxAckDelay:           protocol.MaxAckDelay,
++		ackThreshold:          packetsBeforeAck,
+ 		logger:                logger,
+ 	}
+ 	return h
+@@ -184,7 +189,7 @@
+ 	}
+ 
+ 	// send an ACK every 2 ack-eliciting packets
+-	if h.ackElicitingPacketsReceivedSinceLastAck >= packetsBeforeAck {
++	if h.ackElicitingPacketsReceivedSinceLastAck >= h.ackThreshold {
+ 		if h.logger.Debug() {
+ 			h.logger.Debugf("\tQueueing ACK because packet %d packets were received after the last ACK (using initial threshold: %d).", h.ackElicitingPacketsReceivedSinceLastAck, packetsBeforeAck)
+ 		}
+@@ -226,3 +231,17 @@
+ }
+ 
+ func (h *appDataReceivedPacketTracker) GetAlarmTimeout() monotime.Time { return h.ackAlarm }
++
++func (h *appDataReceivedPacketTracker) qdAckFrequency(f *wire.AckFrequencyFrame) {
++	if h.freqSet && f.SequenceNumber <= h.freqSeq {
++		return
++	}
++	h.freqSet, h.freqSeq = true, f.SequenceNumber
++	h.ackThreshold = int(min(f.AckElicitingThreshold, 255)) + 1
++	h.maxAckDelay = min(max(f.RequestMaxAckDelay, protocol.QDMinAckDelay), protocol.MaxMaxAckDelay)
++}
++
++func (h *appDataReceivedPacketTracker) qdImmediateAck() {
++	h.ackQueued = true
++	h.ackAlarm = 0
++}
+--- a/internal/ackhandler/sent_packet_handler.go	2026-09-29 23:22:11.744982500 +0300
++++ b/internal/ackhandler/sent_packet_handler.go	2026-09-29 23:22:11.976301200 +0300
+@@ -3,9 +3,12 @@
  import (
  	"errors"
  	"fmt"
@@ -67,7 +257,21 @@ diff -ruN '--exclude=.git' qg-orig/internal/ackhandler/sent_packet_handler.go C:
  	"time"
  
  	"github.com/quic-go/quic-go/internal/congestion"
-@@ -129,14 +131,7 @@
++	"github.com/quic-go/quic-go/internal/congestion/bbr"
+ 	"github.com/quic-go/quic-go/internal/monotime"
+ 	"github.com/quic-go/quic-go/internal/protocol"
+ 	"github.com/quic-go/quic-go/internal/qerr"
+@@ -90,6 +93,9 @@
+ 	bytesInFlight protocol.ByteCount
+ 
+ 	congestion congestion.SendAlgorithmWithDebugInfos
++	qdDatagram protocol.ByteCount
++	qdAcked    []congestion.AckedPacketInfo
++	qdLost     []congestion.LostPacketInfo
+ 	rttStats   *utils.RTTStats
+ 	connStats  *utils.ConnectionStats
+ 
+@@ -129,16 +135,10 @@
  	qlogger qlogwriter.Recorder,
  	logger utils.Logger,
  ) SentPacketHandler {
@@ -79,24 +283,96 @@ diff -ruN '--exclude=.git' qg-orig/internal/ackhandler/sent_packet_handler.go C:
 -		true, // use Reno
 -		qlogger,
 -	)
-+	congestion := qdNewCongestion(rttStats, connStats, initialMaxDatagramSize, qlogger)
++	congestion := qdNewCongestion(rttStats, connStats, initialMaxDatagramSize, qlogger, false)
  
  	h := &sentPacketHandler{
++		qdDatagram:                     initialMaxDatagramSize,
  		peerCompletedAddressValidation: pers == protocol.PerspectiveServer,
-@@ -1131,13 +1126,41 @@
+ 		peerAddressValidated:           pers == protocol.PerspectiveClient || clientAddressValidated,
+ 		initialPackets:                 newPacketNumberSpace(initialPN, false),
+@@ -197,6 +197,9 @@
+ 		// see section 4.9.2 of RFC 9001.
+ 		h.handshakeConfirmed = true
+ 		h.handshakePackets = nil
++		if qdBBR() {
++			h.congestion = qdNewBBR(h.rttStats, h.qdDatagram)
++		}
+ 	case protocol.Encryption0RTT:
+ 		// This function is only called when 0-RTT is rejected,
+ 		// and not when the client drops 0-RTT keys when the handshake completes.
+@@ -435,10 +438,12 @@
+ 	if encLevel == protocol.Encryption1RTT {
+ 		h.detectLostPathProbes(rcvTime)
+ 	}
++	h.qdAcked = h.qdAcked[:0]
+ 	var acked1RTTPacket bool
+ 	for _, p := range ackedPackets {
+ 		if p.includedInBytesInFlight {
+ 			h.congestion.OnPacketAcked(p.PacketNumber, p.Length, priorInFlight, rcvTime)
++			h.qdAcked = append(h.qdAcked, congestion.AckedPacketInfo{PacketNumber: p.PacketNumber, BytesAcked: p.Length})
+ 		}
+ 		if p.EncryptionLevel == protocol.Encryption1RTT {
+ 			acked1RTTPacket = true
+@@ -448,6 +453,9 @@
+ 			putPacket(p.packet)
+ 		}
+ 	}
++	if ex, ok := h.congestion.(congestion.SendAlgorithmEx); ok && (len(h.qdAcked) != 0 || len(h.qdLost) != 0) {
++		ex.OnCongestionEventEx(priorInFlight, rcvTime, h.qdAcked, h.qdLost)
++	}
+ 
+ 	// detect spurious losses for application data packets, if the ACK was not reordered
+ 	if encLevel == protocol.Encryption1RTT && largestAcked == pnSpace.largestAcked {
+@@ -785,6 +793,7 @@
+ }
+ 
+ func (h *sentPacketHandler) detectLostPackets(now monotime.Time, encLevel protocol.EncryptionLevel) {
++	h.qdLost = h.qdLost[:0]
+ 	pnSpace := h.getPacketNumberSpace(encLevel)
+ 	pnSpace.lossTime = 0
+ 
+@@ -856,6 +865,7 @@
+ 				if !p.IsPathMTUProbePacket {
+ 					h.congestion.OnCongestionEvent(pn, p.Length, priorInFlight)
+ 				}
++				h.qdLost = append(h.qdLost, congestion.LostPacketInfo{PacketNumber: pn, BytesLost: p.Length})
+ 				if encLevel == protocol.Encryption1RTT && h.ecnTracker != nil {
+ 					h.ecnTracker.LostPacket(pn)
+ 				}
+@@ -884,7 +894,11 @@
+ 			})
+ 		}
+ 		// Early retransmit or time loss detection
++		priorInFlight := h.bytesInFlight
+ 		h.detectLostPackets(now, encLevel)
++		if ex, ok := h.congestion.(congestion.SendAlgorithmEx); ok && len(h.qdLost) != 0 {
++			ex.OnCongestionEventEx(priorInFlight, now, nil, h.qdLost)
++		}
+ 		return nil
+ 	}
+ 
+@@ -1028,6 +1042,7 @@
+ }
+ 
+ func (h *sentPacketHandler) SetMaxDatagramSize(s protocol.ByteCount) {
++	h.qdDatagram = s
+ 	h.congestion.SetMaxDatagramSize(s)
+ }
+ 
+@@ -1131,13 +1146,60 @@
  	for pn := range h.appDataPackets.history.PathProbes() {
  		h.appDataPackets.history.RemovePathProbe(pn)
  	}
 -	h.congestion = congestion.NewCubicSender(
-+	h.congestion = qdNewCongestion(h.rttStats, h.connStats, initialMaxDatagramSize, h.qlogger)
++	h.qdDatagram = initialMaxDatagramSize
++	h.congestion = qdNewCongestion(h.rttStats, h.connStats, initialMaxDatagramSize, h.qlogger, h.handshakeConfirmed)
 +	h.setLossDetectionTimer(now)
 +}
 +
-+// qdNewCongestion — qd: выбор congestion control.
++// qdNewCongestion — QUIC Diver: выбор congestion control.
 +//
-+// По умолчанию Cubic. Upstream хардкодил Reno («true, // use Reno»), а тот режет
-+// окно вдвое на каждой потере и растёт линейно — на длинном плече не успевает
-+// восстанавливаться между редкими потерями.
++// По умолчанию BBR (перенос из hysteria), но только после подтверждения рукопожатия:
++// до него Cubic. QD_CC=cubic оставляет Cubic на всё соединение.
 +//
 +// QD_BRUTAL_MBPS=N включает brutal: слать ровно N Мбит/с, игнорируя потери.
 +// Он нужен там, где канал свободен (RTT под нагрузкой не растёт), но сеть даёт
@@ -108,14 +384,18 @@ diff -ruN '--exclude=.git' qg-orig/internal/ackhandler/sent_packet_handler.go C:
 +	connStats *utils.ConnectionStats,
 +	initialMaxDatagramSize protocol.ByteCount,
 +	qlogger qlogwriter.Recorder,
++	confirmed bool,
 +) congestion.SendAlgorithmWithDebugInfos {
-+	if mbps, _ := strconv.Atoi(os.Getenv("QD_BRUTAL_MBPS")); mbps > 0 {
++	if mbps := qdBrutalMbps(); mbps > 0 {
 +		return congestion.NewBrutalSender(
 +			congestion.DefaultClock{},
 +			rttStats,
 +			congestion.Bandwidth(mbps)*1_000_000*congestion.BitsPerSecond,
 +			initialMaxDatagramSize,
 +		)
++	}
++	if confirmed && qdBBR() {
++		return qdNewBBR(rttStats, initialMaxDatagramSize)
 +	}
 +	return congestion.NewCubicSender(
  		congestion.DefaultClock{},
@@ -130,10 +410,2628 @@ diff -ruN '--exclude=.git' qg-orig/internal/ackhandler/sent_packet_handler.go C:
 +		qlogger,
  	)
 -	h.setLossDetectionTimer(now)
++}
++
++func qdBrutalMbps() int {
++	mbps, _ := strconv.Atoi(os.Getenv("QD_BRUTAL_MBPS"))
++	return mbps
++}
++
++func qdBBR() bool {
++	return qdBrutalMbps() <= 0 && os.Getenv("QD_CC") != "cubic"
++}
++
++func qdNewBBR(rttStats *utils.RTTStats, maxDatagramSize protocol.ByteCount) congestion.SendAlgorithmWithDebugInfos {
++	s := bbr.NewBbrSender(bbr.DefaultClock{}, maxDatagramSize, bbr.ProfileStandard)
++	s.SetRTTStatsProvider(rttStats)
++	return s
  }
-diff -ruN '--exclude=.git' qg-orig/internal/congestion/brutal_sender.go C:/Users/jaywehosl/Desktop/quic-diver/third_party/quic-go/internal/congestion/brutal_sender.go
+--- a/internal/congestion/bbr/LICENSE.md	1970-01-01 03:00:00.000000000 +0300
++++ b/internal/congestion/bbr/LICENSE.md	2026-09-29 23:22:11.984281300 +0300
+@@ -0,0 +1,7 @@
++Copyright 2023 Toby
++
++Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+--- a/internal/congestion/bbr/bandwidth.go	1970-01-01 03:00:00.000000000 +0300
++++ b/internal/congestion/bbr/bandwidth.go	2026-09-29 23:22:11.983755400 +0300
+@@ -0,0 +1,27 @@
++package bbr
++
++import (
++	"math"
++	"time"
++
++	"github.com/quic-go/quic-go/internal/protocol"
++)
++
++const (
++	infBandwidth = Bandwidth(math.MaxUint64)
++)
++
++// Bandwidth of a connection
++type Bandwidth uint64
++
++const (
++	// BitsPerSecond is 1 bit per second
++	BitsPerSecond Bandwidth = 1
++	// BytesPerSecond is 1 byte per second
++	BytesPerSecond = 8 * BitsPerSecond
++)
++
++// BandwidthFromDelta calculates the bandwidth from a number of bytes and a time delta
++func BandwidthFromDelta(bytes protocol.ByteCount, delta time.Duration) Bandwidth {
++	return Bandwidth(bytes) * Bandwidth(time.Second) / Bandwidth(delta) * BytesPerSecond
++}
+--- a/internal/congestion/bbr/bandwidth_sampler.go	1970-01-01 03:00:00.000000000 +0300
++++ b/internal/congestion/bbr/bandwidth_sampler.go	2026-09-29 23:22:11.983625900 +0300
+@@ -0,0 +1,878 @@
++package bbr
++
++import (
++	"math"
++	"time"
++
++	"github.com/quic-go/quic-go/internal/congestion"
++	"github.com/quic-go/quic-go/internal/monotime"
++	"github.com/quic-go/quic-go/internal/protocol"
++)
++
++const (
++	infRTT                             = time.Duration(math.MaxInt64)
++	defaultConnectionStateMapQueueSize = 256
++	defaultCandidatesBufferSize        = 256
++)
++
++type roundTripCount uint64
++
++// SendTimeState is a subset of ConnectionStateOnSentPacket which is returned
++// to the caller when the packet is acked or lost.
++type sendTimeState struct {
++	// Whether other states in this object is valid.
++	isValid bool
++	// Whether the sender is app limited at the time the packet was sent.
++	// App limited bandwidth sample might be artificially low because the sender
++	// did not have enough data to send in order to saturate the link.
++	isAppLimited bool
++	// Total number of sent bytes at the time the packet was sent.
++	// Includes the packet itself.
++	totalBytesSent protocol.ByteCount
++	// Total number of acked bytes at the time the packet was sent.
++	totalBytesAcked protocol.ByteCount
++	// Total number of lost bytes at the time the packet was sent.
++	totalBytesLost protocol.ByteCount
++	// Total number of inflight bytes at the time the packet was sent.
++	// Includes the packet itself.
++	// It should be equal to |total_bytes_sent| minus the sum of
++	// |total_bytes_acked|, |total_bytes_lost| and total neutered bytes.
++	bytesInFlight protocol.ByteCount
++}
++
++func newSendTimeState(
++	isAppLimited bool,
++	totalBytesSent protocol.ByteCount,
++	totalBytesAcked protocol.ByteCount,
++	totalBytesLost protocol.ByteCount,
++	bytesInFlight protocol.ByteCount,
++) *sendTimeState {
++	return &sendTimeState{
++		isValid:         true,
++		isAppLimited:    isAppLimited,
++		totalBytesSent:  totalBytesSent,
++		totalBytesAcked: totalBytesAcked,
++		totalBytesLost:  totalBytesLost,
++		bytesInFlight:   bytesInFlight,
++	}
++}
++
++type extraAckedEvent struct {
++	// The excess bytes acknowlwedged in the time delta for this event.
++	extraAcked protocol.ByteCount
++
++	// The bytes acknowledged and time delta from the event.
++	bytesAcked protocol.ByteCount
++	timeDelta  time.Duration
++	// The round trip of the event.
++	round roundTripCount
++}
++
++func maxExtraAckedEventFunc(a, b extraAckedEvent) int {
++	if a.extraAcked > b.extraAcked {
++		return 1
++	} else if a.extraAcked < b.extraAcked {
++		return -1
++	}
++	return 0
++}
++
++// BandwidthSample
++type bandwidthSample struct {
++	// The bandwidth at that particular sample. Zero if no valid bandwidth sample
++	// is available.
++	bandwidth Bandwidth
++	// The RTT measurement at this particular sample.  Zero if no RTT sample is
++	// available.  Does not correct for delayed ack time.
++	rtt time.Duration
++	// |send_rate| is computed from the current packet being acked('P') and an
++	// earlier packet that is acked before P was sent.
++	sendRate Bandwidth
++	// States captured when the packet was sent.
++	stateAtSend sendTimeState
++}
++
++func newBandwidthSample() *bandwidthSample {
++	return &bandwidthSample{
++		sendRate: infBandwidth,
++	}
++}
++
++// MaxAckHeightTracker is part of the BandwidthSampler. It is called after every
++// ack event to keep track the degree of ack aggregation(a.k.a "ack height").
++type maxAckHeightTracker struct {
++	// Tracks the maximum number of bytes acked faster than the estimated
++	// bandwidth.
++	maxAckHeightFilter *WindowedFilter[extraAckedEvent, roundTripCount]
++	// The time this aggregation started and the number of bytes acked during it.
++	aggregationEpochStartTime monotime.Time
++	aggregationEpochBytes     protocol.ByteCount
++	// The last sent packet number before the current aggregation epoch started.
++	lastSentPacketNumberBeforeEpoch protocol.PacketNumber
++	// The number of ack aggregation epochs ever started, including the ongoing
++	// one. Stats only.
++	numAckAggregationEpochs                uint64
++	ackAggregationBandwidthThreshold       float64
++	startNewAggregationEpochAfterFullRound bool
++	reduceExtraAckedOnBandwidthIncrease    bool
++}
++
++func newMaxAckHeightTracker(windowLength roundTripCount) *maxAckHeightTracker {
++	return &maxAckHeightTracker{
++		maxAckHeightFilter:               NewWindowedFilter(windowLength, maxExtraAckedEventFunc),
++		lastSentPacketNumberBeforeEpoch:  invalidPacketNumber,
++		ackAggregationBandwidthThreshold: 1.0,
++	}
++}
++
++func (m *maxAckHeightTracker) Get() protocol.ByteCount {
++	return m.maxAckHeightFilter.GetBest().extraAcked
++}
++
++func (m *maxAckHeightTracker) Update(
++	bandwidthEstimate Bandwidth,
++	isNewMaxBandwidth bool,
++	roundTripCount roundTripCount,
++	lastSentPacketNumber protocol.PacketNumber,
++	lastAckedPacketNumber protocol.PacketNumber,
++	ackTime monotime.Time,
++	bytesAcked protocol.ByteCount,
++) protocol.ByteCount {
++	forceNewEpoch := false
++
++	if m.reduceExtraAckedOnBandwidthIncrease && isNewMaxBandwidth {
++		// Save and clear existing entries.
++		best := m.maxAckHeightFilter.GetBest()
++		secondBest := m.maxAckHeightFilter.GetSecondBest()
++		thirdBest := m.maxAckHeightFilter.GetThirdBest()
++		m.maxAckHeightFilter.Clear()
++
++		// Reinsert the heights into the filter after recalculating.
++		expectedBytesAcked := bytesFromBandwidthAndTimeDelta(bandwidthEstimate, best.timeDelta)
++		if expectedBytesAcked < best.bytesAcked {
++			best.extraAcked = best.bytesAcked - expectedBytesAcked
++			m.maxAckHeightFilter.Update(best, best.round)
++		}
++		expectedBytesAcked = bytesFromBandwidthAndTimeDelta(bandwidthEstimate, secondBest.timeDelta)
++		if expectedBytesAcked < secondBest.bytesAcked {
++			secondBest.extraAcked = secondBest.bytesAcked - expectedBytesAcked
++			m.maxAckHeightFilter.Update(secondBest, secondBest.round)
++		}
++		expectedBytesAcked = bytesFromBandwidthAndTimeDelta(bandwidthEstimate, thirdBest.timeDelta)
++		if expectedBytesAcked < thirdBest.bytesAcked {
++			thirdBest.extraAcked = thirdBest.bytesAcked - expectedBytesAcked
++			m.maxAckHeightFilter.Update(thirdBest, thirdBest.round)
++		}
++	}
++
++	// If any packet sent after the start of the epoch has been acked, start a new
++	// epoch.
++	if m.startNewAggregationEpochAfterFullRound &&
++		m.lastSentPacketNumberBeforeEpoch != invalidPacketNumber &&
++		lastAckedPacketNumber != invalidPacketNumber &&
++		lastAckedPacketNumber > m.lastSentPacketNumberBeforeEpoch {
++		forceNewEpoch = true
++	}
++	if m.aggregationEpochStartTime.IsZero() || forceNewEpoch {
++		m.aggregationEpochBytes = bytesAcked
++		m.aggregationEpochStartTime = ackTime
++		m.lastSentPacketNumberBeforeEpoch = lastSentPacketNumber
++		m.numAckAggregationEpochs++
++		return 0
++	}
++
++	// Compute how many bytes are expected to be delivered, assuming max bandwidth
++	// is correct.
++	aggregationDelta := ackTime.Sub(m.aggregationEpochStartTime)
++	expectedBytesAcked := bytesFromBandwidthAndTimeDelta(bandwidthEstimate, aggregationDelta)
++	// Reset the current aggregation epoch as soon as the ack arrival rate is less
++	// than or equal to the max bandwidth.
++	if m.aggregationEpochBytes <= protocol.ByteCount(m.ackAggregationBandwidthThreshold*float64(expectedBytesAcked)) {
++		// Reset to start measuring a new aggregation epoch.
++		m.aggregationEpochBytes = bytesAcked
++		m.aggregationEpochStartTime = ackTime
++		m.lastSentPacketNumberBeforeEpoch = lastSentPacketNumber
++		m.numAckAggregationEpochs++
++		return 0
++	}
++
++	m.aggregationEpochBytes += bytesAcked
++
++	// Compute how many extra bytes were delivered vs max bandwidth.
++	extraBytesAcked := m.aggregationEpochBytes - expectedBytesAcked
++	newEvent := extraAckedEvent{
++		extraAcked: extraBytesAcked,
++		bytesAcked: m.aggregationEpochBytes,
++		timeDelta:  aggregationDelta,
++	}
++	m.maxAckHeightFilter.Update(newEvent, roundTripCount)
++	return extraBytesAcked
++}
++
++func (m *maxAckHeightTracker) SetFilterWindowLength(length roundTripCount) {
++	m.maxAckHeightFilter.SetWindowLength(length)
++}
++
++func (m *maxAckHeightTracker) Reset(newHeight protocol.ByteCount, newTime roundTripCount) {
++	newEvent := extraAckedEvent{
++		extraAcked: newHeight,
++		round:      newTime,
++	}
++	m.maxAckHeightFilter.Reset(newEvent, newTime)
++}
++
++func (m *maxAckHeightTracker) SetAckAggregationBandwidthThreshold(threshold float64) {
++	m.ackAggregationBandwidthThreshold = threshold
++}
++
++func (m *maxAckHeightTracker) SetStartNewAggregationEpochAfterFullRound(value bool) {
++	m.startNewAggregationEpochAfterFullRound = value
++}
++
++func (m *maxAckHeightTracker) SetReduceExtraAckedOnBandwidthIncrease(value bool) {
++	m.reduceExtraAckedOnBandwidthIncrease = value
++}
++
++func (m *maxAckHeightTracker) AckAggregationBandwidthThreshold() float64 {
++	return m.ackAggregationBandwidthThreshold
++}
++
++func (m *maxAckHeightTracker) NumAckAggregationEpochs() uint64 {
++	return m.numAckAggregationEpochs
++}
++
++// AckPoint represents a point on the ack line.
++type ackPoint struct {
++	ackTime         monotime.Time
++	totalBytesAcked protocol.ByteCount
++}
++
++// RecentAckPoints maintains the most recent 2 ack points at distinct times.
++type recentAckPoints struct {
++	ackPoints [2]ackPoint
++}
++
++func (r *recentAckPoints) Update(ackTime monotime.Time, totalBytesAcked protocol.ByteCount) {
++	if ackTime.Before(r.ackPoints[1].ackTime) {
++		r.ackPoints[1].ackTime = ackTime
++	} else if ackTime.After(r.ackPoints[1].ackTime) {
++		r.ackPoints[0] = r.ackPoints[1]
++		r.ackPoints[1].ackTime = ackTime
++	}
++
++	r.ackPoints[1].totalBytesAcked = totalBytesAcked
++}
++
++func (r *recentAckPoints) Clear() {
++	r.ackPoints[0] = ackPoint{}
++	r.ackPoints[1] = ackPoint{}
++}
++
++func (r *recentAckPoints) MostRecentPoint() *ackPoint {
++	return &r.ackPoints[1]
++}
++
++func (r *recentAckPoints) LessRecentPoint() *ackPoint {
++	if r.ackPoints[0].totalBytesAcked != 0 {
++		return &r.ackPoints[0]
++	}
++
++	return &r.ackPoints[1]
++}
++
++// ConnectionStateOnSentPacket represents the information about a sent packet
++// and the state of the connection at the moment the packet was sent,
++// specifically the information about the most recently acknowledged packet at
++// that moment.
++type connectionStateOnSentPacket struct {
++	// Time at which the packet is sent.
++	sentTime monotime.Time
++	// Size of the packet.
++	size protocol.ByteCount
++	// The value of |totalBytesSentAtLastAckedPacket| at the time the
++	// packet was sent.
++	totalBytesSentAtLastAckedPacket protocol.ByteCount
++	// The value of |lastAckedPacketSentTime| at the time the packet was
++	// sent.
++	lastAckedPacketSentTime monotime.Time
++	// The value of |lastAckedPacketAckTime| at the time the packet was
++	// sent.
++	lastAckedPacketAckTime monotime.Time
++	// Send time states that are returned to the congestion controller when the
++	// packet is acked or lost.
++	sendTimeState sendTimeState
++}
++
++// Snapshot constructor. Records the current state of the bandwidth
++// sampler.
++// |bytes_in_flight| is the bytes in flight right after the packet is sent.
++func newConnectionStateOnSentPacket(
++	sentTime monotime.Time,
++	size protocol.ByteCount,
++	bytesInFlight protocol.ByteCount,
++	sampler *bandwidthSampler,
++) *connectionStateOnSentPacket {
++	return &connectionStateOnSentPacket{
++		sentTime:                        sentTime,
++		size:                            size,
++		totalBytesSentAtLastAckedPacket: sampler.totalBytesSentAtLastAckedPacket,
++		lastAckedPacketSentTime:         sampler.lastAckedPacketSentTime,
++		lastAckedPacketAckTime:          sampler.lastAckedPacketAckTime,
++		sendTimeState: *newSendTimeState(
++			sampler.isAppLimited,
++			sampler.totalBytesSent,
++			sampler.totalBytesAcked,
++			sampler.totalBytesLost,
++			bytesInFlight,
++		),
++	}
++}
++
++// BandwidthSampler keeps track of sent and acknowledged packets and outputs a
++// bandwidth sample for every packet acknowledged. The samples are taken for
++// individual packets, and are not filtered; the consumer has to filter the
++// bandwidth samples itself. In certain cases, the sampler will locally severely
++// underestimate the bandwidth, hence a maximum filter with a size of at least
++// one RTT is recommended.
++//
++// This class bases its samples on the slope of two curves: the number of bytes
++// sent over time, and the number of bytes acknowledged as received over time.
++// It produces a sample of both slopes for every packet that gets acknowledged,
++// based on a slope between two points on each of the corresponding curves. Note
++// that due to the packet loss, the number of bytes on each curve might get
++// further and further away from each other, meaning that it is not feasible to
++// compare byte values coming from different curves with each other.
++//
++// The obvious points for measuring slope sample are the ones corresponding to
++// the packet that was just acknowledged. Let us denote them as S_1 (point at
++// which the current packet was sent) and A_1 (point at which the current packet
++// was acknowledged). However, taking a slope requires two points on each line,
++// so estimating bandwidth requires picking a packet in the past with respect to
++// which the slope is measured.
++//
++// For that purpose, BandwidthSampler always keeps track of the most recently
++// acknowledged packet, and records it together with every outgoing packet.
++// When a packet gets acknowledged (A_1), it has not only information about when
++// it itself was sent (S_1), but also the information about the latest
++// acknowledged packet right before it was sent (S_0 and A_0).
++//
++// Based on that data, send and ack rate are estimated as:
++//
++//	send_rate = (bytes(S_1) - bytes(S_0)) / (time(S_1) - time(S_0))
++//	ack_rate = (bytes(A_1) - bytes(A_0)) / (time(A_1) - time(A_0))
++//
++// Here, the ack rate is intuitively the rate we want to treat as bandwidth.
++// However, in certain cases (e.g. ack compression) the ack rate at a point may
++// end up higher than the rate at which the data was originally sent, which is
++// not indicative of the real bandwidth. Hence, we use the send rate as an upper
++// bound, and the sample value is
++//
++//	rate_sample = min(send_rate, ack_rate)
++//
++// An important edge case handled by the sampler is tracking the app-limited
++// samples. There are multiple meaning of "app-limited" used interchangeably,
++// hence it is important to understand and to be able to distinguish between
++// them.
++//
++// Meaning 1: connection state. The connection is said to be app-limited when
++// there is no outstanding data to send. This means that certain bandwidth
++// samples in the future would not be an accurate indication of the link
++// capacity, and it is important to inform consumer about that. Whenever
++// connection becomes app-limited, the sampler is notified via OnAppLimited()
++// method.
++//
++// Meaning 2: a phase in the bandwidth sampler. As soon as the bandwidth
++// sampler becomes notified about the connection being app-limited, it enters
++// app-limited phase. In that phase, all *sent* packets are marked as
++// app-limited. Note that the connection itself does not have to be
++// app-limited during the app-limited phase, and in fact it will not be
++// (otherwise how would it send packets?). The boolean flag below indicates
++// whether the sampler is in that phase.
++//
++// Meaning 3: a flag on the sent packet and on the sample. If a sent packet is
++// sent during the app-limited phase, the resulting sample related to the
++// packet will be marked as app-limited.
++//
++// With the terminology issue out of the way, let us consider the question of
++// what kind of situation it addresses.
++//
++// Consider a scenario where we first send packets 1 to 20 at a regular
++// bandwidth, and then immediately run out of data. After a few seconds, we send
++// packets 21 to 60, and only receive ack for 21 between sending packets 40 and
++// 41. In this case, when we sample bandwidth for packets 21 to 40, the S_0/A_0
++// we use to compute the slope is going to be packet 20, a few seconds apart
++// from the current packet, hence the resulting estimate would be extremely low
++// and not indicative of anything. Only at packet 41 the S_0/A_0 will become 21,
++// meaning that the bandwidth sample would exclude the quiescence.
++//
++// Based on the analysis of that scenario, we implement the following rule: once
++// OnAppLimited() is called, all sent packets will produce app-limited samples
++// up until an ack for a packet that was sent after OnAppLimited() was called.
++// Note that while the scenario above is not the only scenario when the
++// connection is app-limited, the approach works in other cases too.
++
++type congestionEventSample struct {
++	// The maximum bandwidth sample from all acked packets.
++	// QuicBandwidth::Zero() if no samples are available.
++	sampleMaxBandwidth Bandwidth
++	// Whether |sample_max_bandwidth| is from a app-limited sample.
++	sampleIsAppLimited bool
++	// The minimum rtt sample from all acked packets.
++	// QuicTime::Delta::Infinite() if no samples are available.
++	sampleRtt time.Duration
++	// For each packet p in acked packets, this is the max value of INFLIGHT(p),
++	// where INFLIGHT(p) is the number of bytes acked while p is inflight.
++	sampleMaxInflight protocol.ByteCount
++	// The send state of the largest packet in acked_packets, unless it is
++	// empty. If acked_packets is empty, it's the send state of the largest
++	// packet in lost_packets.
++	lastPacketSendState sendTimeState
++	// The number of extra bytes acked from this ack event, compared to what is
++	// expected from the flow's bandwidth. Larger value means more ack
++	// aggregation.
++	extraAcked protocol.ByteCount
++}
++
++func newCongestionEventSample() *congestionEventSample {
++	return &congestionEventSample{
++		sampleRtt: infRTT,
++	}
++}
++
++type bandwidthSampler struct {
++	// The total number of congestion controlled bytes sent during the connection.
++	totalBytesSent protocol.ByteCount
++
++	// The total number of congestion controlled bytes which were acknowledged.
++	totalBytesAcked protocol.ByteCount
++
++	// The total number of congestion controlled bytes which were lost.
++	totalBytesLost protocol.ByteCount
++
++	// The total number of congestion controlled bytes which have been neutered.
++	totalBytesNeutered protocol.ByteCount
++
++	// The value of |total_bytes_sent_| at the time the last acknowledged packet
++	// was sent. Valid only when |last_acked_packet_sent_time_| is valid.
++	totalBytesSentAtLastAckedPacket protocol.ByteCount
++
++	// The time at which the last acknowledged packet was sent. Set to
++	// QuicTime::Zero() if no valid timestamp is available.
++	lastAckedPacketSentTime monotime.Time
++
++	// The time at which the most recent packet was acknowledged.
++	lastAckedPacketAckTime monotime.Time
++
++	// The most recently sent packet.
++	lastSentPacket protocol.PacketNumber
++
++	// The most recently acked packet.
++	lastAckedPacket protocol.PacketNumber
++
++	// Indicates whether the bandwidth sampler is currently in an app-limited
++	// phase.
++	isAppLimited bool
++
++	// The packet that will be acknowledged after this one will cause the sampler
++	// to exit the app-limited phase.
++	endOfAppLimitedPhase protocol.PacketNumber
++
++	// Record of the connection state at the point where each packet in flight was
++	// sent, indexed by the packet number.
++	connectionStateMap *packetNumberIndexedQueue[connectionStateOnSentPacket]
++
++	recentAckPoints recentAckPoints
++	a0Candidates    RingBuffer[ackPoint]
++
++	// Maximum number of tracked packets.
++	maxTrackedPackets protocol.ByteCount
++
++	maxAckHeightTracker              *maxAckHeightTracker
++	totalBytesAckedAfterLastAckEvent protocol.ByteCount
++
++	// True if connection option 'BSAO' is set.
++	overestimateAvoidance bool
++
++	// True if connection option 'BBRB' is set.
++	limitMaxAckHeightTrackerBySendRate bool
++}
++
++func newBandwidthSampler(maxAckHeightTrackerWindowLength roundTripCount) *bandwidthSampler {
++	b := &bandwidthSampler{
++		maxAckHeightTracker:  newMaxAckHeightTracker(maxAckHeightTrackerWindowLength),
++		connectionStateMap:   newPacketNumberIndexedQueue[connectionStateOnSentPacket](defaultConnectionStateMapQueueSize),
++		lastSentPacket:       invalidPacketNumber,
++		lastAckedPacket:      invalidPacketNumber,
++		endOfAppLimitedPhase: invalidPacketNumber,
++	}
++
++	b.a0Candidates.Init(defaultCandidatesBufferSize)
++
++	return b
++}
++
++func (b *bandwidthSampler) MaxAckHeight() protocol.ByteCount {
++	return b.maxAckHeightTracker.Get()
++}
++
++func (b *bandwidthSampler) NumAckAggregationEpochs() uint64 {
++	return b.maxAckHeightTracker.NumAckAggregationEpochs()
++}
++
++func (b *bandwidthSampler) SetMaxAckHeightTrackerWindowLength(length roundTripCount) {
++	b.maxAckHeightTracker.SetFilterWindowLength(length)
++}
++
++func (b *bandwidthSampler) ResetMaxAckHeightTracker(newHeight protocol.ByteCount, newTime roundTripCount) {
++	b.maxAckHeightTracker.Reset(newHeight, newTime)
++}
++
++func (b *bandwidthSampler) SetStartNewAggregationEpochAfterFullRound(value bool) {
++	b.maxAckHeightTracker.SetStartNewAggregationEpochAfterFullRound(value)
++}
++
++func (b *bandwidthSampler) SetLimitMaxAckHeightTrackerBySendRate(value bool) {
++	b.limitMaxAckHeightTrackerBySendRate = value
++}
++
++func (b *bandwidthSampler) SetReduceExtraAckedOnBandwidthIncrease(value bool) {
++	b.maxAckHeightTracker.SetReduceExtraAckedOnBandwidthIncrease(value)
++}
++
++func (b *bandwidthSampler) EnableOverestimateAvoidance() {
++	if b.overestimateAvoidance {
++		return
++	}
++
++	b.overestimateAvoidance = true
++	b.maxAckHeightTracker.SetAckAggregationBandwidthThreshold(2.0)
++}
++
++func (b *bandwidthSampler) IsOverestimateAvoidanceEnabled() bool {
++	return b.overestimateAvoidance
++}
++
++func (b *bandwidthSampler) OnPacketSent(
++	sentTime monotime.Time,
++	packetNumber protocol.PacketNumber,
++	bytes protocol.ByteCount,
++	bytesInFlight protocol.ByteCount,
++	isRetransmittable bool,
++) {
++	b.lastSentPacket = packetNumber
++
++	if !isRetransmittable {
++		return
++	}
++
++	b.totalBytesSent += bytes
++
++	// If there are no packets in flight, the time at which the new transmission
++	// opens can be treated as the A_0 point for the purpose of bandwidth
++	// sampling. This underestimates bandwidth to some extent, and produces some
++	// artificially low samples for most packets in flight, but it provides with
++	// samples at important points where we would not have them otherwise, most
++	// importantly at the beginning of the connection.
++	if bytesInFlight == 0 {
++		b.lastAckedPacketAckTime = sentTime
++		if b.overestimateAvoidance {
++			b.recentAckPoints.Clear()
++			b.recentAckPoints.Update(sentTime, b.totalBytesAcked)
++			b.a0Candidates.Clear()
++			b.a0Candidates.PushBack(*b.recentAckPoints.MostRecentPoint())
++		}
++		b.totalBytesSentAtLastAckedPacket = b.totalBytesSent
++
++		// In this situation ack compression is not a concern, set send rate to
++		// effectively infinite.
++		b.lastAckedPacketSentTime = sentTime
++	}
++
++	b.connectionStateMap.Emplace(packetNumber, newConnectionStateOnSentPacket(
++		sentTime,
++		bytes,
++		bytesInFlight+bytes,
++		b,
++	))
++}
++
++func (b *bandwidthSampler) OnCongestionEvent(
++	ackTime monotime.Time,
++	ackedPackets []congestion.AckedPacketInfo,
++	lostPackets []congestion.LostPacketInfo,
++	maxBandwidth Bandwidth,
++	estBandwidthUpperBound Bandwidth,
++	roundTripCount roundTripCount,
++) congestionEventSample {
++	eventSample := newCongestionEventSample()
++
++	var lastLostPacketSendState sendTimeState
++
++	for _, p := range lostPackets {
++		sendState := b.OnPacketLost(p.PacketNumber, p.BytesLost)
++		if sendState.isValid {
++			lastLostPacketSendState = sendState
++		}
++	}
++
++	if len(ackedPackets) == 0 {
++		// Only populate send state for a loss-only event.
++		eventSample.lastPacketSendState = lastLostPacketSendState
++		return *eventSample
++	}
++
++	var lastAckedPacketSendState sendTimeState
++	var maxSendRate Bandwidth
++
++	for _, p := range ackedPackets {
++		sample := b.onPacketAcknowledged(ackTime, p.PacketNumber)
++		if !sample.stateAtSend.isValid {
++			continue
++		}
++
++		lastAckedPacketSendState = sample.stateAtSend
++
++		if sample.rtt != 0 {
++			eventSample.sampleRtt = min(eventSample.sampleRtt, sample.rtt)
++		}
++		if sample.bandwidth > eventSample.sampleMaxBandwidth {
++			eventSample.sampleMaxBandwidth = sample.bandwidth
++			eventSample.sampleIsAppLimited = sample.stateAtSend.isAppLimited
++		}
++		if sample.sendRate != infBandwidth {
++			maxSendRate = max(maxSendRate, sample.sendRate)
++		}
++		inflightSample := b.totalBytesAcked - lastAckedPacketSendState.totalBytesAcked
++		if inflightSample > eventSample.sampleMaxInflight {
++			eventSample.sampleMaxInflight = inflightSample
++		}
++	}
++
++	if !lastLostPacketSendState.isValid {
++		eventSample.lastPacketSendState = lastAckedPacketSendState
++	} else if !lastAckedPacketSendState.isValid {
++		eventSample.lastPacketSendState = lastLostPacketSendState
++	} else {
++		// If two packets are inflight and an alarm is armed to lose a packet and it
++		// wakes up late, then the first of two in flight packets could have been
++		// acknowledged before the wakeup, which re-evaluates loss detection, and
++		// could declare the later of the two lost.
++		if lostPackets[len(lostPackets)-1].PacketNumber > ackedPackets[len(ackedPackets)-1].PacketNumber {
++			eventSample.lastPacketSendState = lastLostPacketSendState
++		} else {
++			eventSample.lastPacketSendState = lastAckedPacketSendState
++		}
++	}
++
++	isNewMaxBandwidth := eventSample.sampleMaxBandwidth > maxBandwidth
++	maxBandwidth = max(maxBandwidth, eventSample.sampleMaxBandwidth)
++	if b.limitMaxAckHeightTrackerBySendRate {
++		maxBandwidth = max(maxBandwidth, maxSendRate)
++	}
++
++	eventSample.extraAcked = b.onAckEventEnd(min(estBandwidthUpperBound, maxBandwidth), isNewMaxBandwidth, roundTripCount)
++
++	return *eventSample
++}
++
++func (b *bandwidthSampler) OnPacketLost(packetNumber protocol.PacketNumber, bytesLost protocol.ByteCount) (s sendTimeState) {
++	b.totalBytesLost += bytesLost
++	if sentPacketPointer := b.connectionStateMap.GetEntry(packetNumber); sentPacketPointer != nil {
++		sentPacketToSendTimeState(sentPacketPointer, &s)
++	}
++	return s
++}
++
++func (b *bandwidthSampler) OnPacketNeutered(packetNumber protocol.PacketNumber) {
++	b.connectionStateMap.Remove(packetNumber, func(sentPacket connectionStateOnSentPacket) {
++		b.totalBytesNeutered += sentPacket.size
++	})
++}
++
++func (b *bandwidthSampler) OnAppLimited() {
++	b.isAppLimited = true
++	b.endOfAppLimitedPhase = b.lastSentPacket
++}
++
++func (b *bandwidthSampler) RemoveObsoletePackets(leastUnacked protocol.PacketNumber) {
++	// A packet can become obsolete when it is removed from QuicUnackedPacketMap's
++	// view of inflight before it is acked or marked as lost. For example, when
++	// QuicSentPacketManager::RetransmitCryptoPackets retransmits a crypto packet,
++	// the packet is removed from QuicUnackedPacketMap's inflight, but is not
++	// marked as acked or lost in the BandwidthSampler.
++	b.connectionStateMap.RemoveUpTo(leastUnacked)
++}
++
++func (b *bandwidthSampler) TotalBytesSent() protocol.ByteCount {
++	return b.totalBytesSent
++}
++
++func (b *bandwidthSampler) TotalBytesLost() protocol.ByteCount {
++	return b.totalBytesLost
++}
++
++func (b *bandwidthSampler) TotalBytesAcked() protocol.ByteCount {
++	return b.totalBytesAcked
++}
++
++func (b *bandwidthSampler) TotalBytesNeutered() protocol.ByteCount {
++	return b.totalBytesNeutered
++}
++
++func (b *bandwidthSampler) IsAppLimited() bool {
++	return b.isAppLimited
++}
++
++func (b *bandwidthSampler) EndOfAppLimitedPhase() protocol.PacketNumber {
++	return b.endOfAppLimitedPhase
++}
++
++func (b *bandwidthSampler) max_ack_height() protocol.ByteCount {
++	return b.maxAckHeightTracker.Get()
++}
++
++func (b *bandwidthSampler) chooseA0Point(totalBytesAcked protocol.ByteCount, a0 *ackPoint) bool {
++	if b.a0Candidates.Empty() {
++		return false
++	}
++
++	if b.a0Candidates.Len() == 1 {
++		*a0 = *b.a0Candidates.Front()
++		return true
++	}
++
++	for i := 1; i < b.a0Candidates.Len(); i++ {
++		if b.a0Candidates.Offset(i).totalBytesAcked > totalBytesAcked {
++			*a0 = *b.a0Candidates.Offset(i - 1)
++			if i > 1 {
++				for j := 0; j < i-1; j++ {
++					b.a0Candidates.PopFront()
++				}
++			}
++			return true
++		}
++	}
++
++	*a0 = *b.a0Candidates.Back()
++	for k := 0; k < b.a0Candidates.Len()-1; k++ {
++		b.a0Candidates.PopFront()
++	}
++	return true
++}
++
++func (b *bandwidthSampler) onPacketAcknowledged(ackTime monotime.Time, packetNumber protocol.PacketNumber) bandwidthSample {
++	sample := newBandwidthSample()
++	b.lastAckedPacket = packetNumber
++	sentPacketPointer := b.connectionStateMap.GetEntry(packetNumber)
++	if sentPacketPointer == nil {
++		return *sample
++	}
++
++	// OnPacketAcknowledgedInner
++	b.totalBytesAcked += sentPacketPointer.size
++	b.totalBytesSentAtLastAckedPacket = sentPacketPointer.sendTimeState.totalBytesSent
++	b.lastAckedPacketSentTime = sentPacketPointer.sentTime
++	b.lastAckedPacketAckTime = ackTime
++	if b.overestimateAvoidance {
++		b.recentAckPoints.Update(ackTime, b.totalBytesAcked)
++	}
++
++	if b.isAppLimited {
++		// Exit app-limited phase in two cases:
++		// (1) end_of_app_limited_phase_ is not initialized, i.e., so far all
++		// packets are sent while there are buffered packets or pending data.
++		// (2) The current acked packet is after the sent packet marked as the end
++		// of the app limit phase.
++		if b.endOfAppLimitedPhase == invalidPacketNumber ||
++			packetNumber > b.endOfAppLimitedPhase {
++			b.isAppLimited = false
++		}
++	}
++
++	// There might have been no packets acknowledged at the moment when the
++	// current packet was sent. In that case, there is no bandwidth sample to
++	// make.
++	if sentPacketPointer.lastAckedPacketSentTime.IsZero() {
++		return *sample
++	}
++
++	// Infinite rate indicates that the sampler is supposed to discard the
++	// current send rate sample and use only the ack rate.
++	sendRate := infBandwidth
++	if sentPacketPointer.sentTime.After(sentPacketPointer.lastAckedPacketSentTime) {
++		sendRate = BandwidthFromDelta(
++			sentPacketPointer.sendTimeState.totalBytesSent-sentPacketPointer.totalBytesSentAtLastAckedPacket,
++			sentPacketPointer.sentTime.Sub(sentPacketPointer.lastAckedPacketSentTime),
++		)
++	}
++
++	var a0 ackPoint
++	if b.overestimateAvoidance && b.chooseA0Point(sentPacketPointer.sendTimeState.totalBytesAcked, &a0) {
++	} else {
++		a0.ackTime = sentPacketPointer.lastAckedPacketAckTime
++		a0.totalBytesAcked = sentPacketPointer.sendTimeState.totalBytesAcked
++	}
++
++	// During the slope calculation, ensure that ack time of the current packet is
++	// always larger than the time of the previous packet, otherwise division by
++	// zero or integer underflow can occur.
++	if ackTime.Sub(a0.ackTime) <= 0 {
++		return *sample
++	}
++
++	ackRate := BandwidthFromDelta(b.totalBytesAcked-a0.totalBytesAcked, ackTime.Sub(a0.ackTime))
++
++	sample.bandwidth = min(sendRate, ackRate)
++	// Note: this sample does not account for delayed acknowledgement time.  This
++	// means that the RTT measurements here can be artificially high, especially
++	// on low bandwidth connections.
++	sample.rtt = ackTime.Sub(sentPacketPointer.sentTime)
++	sample.sendRate = sendRate
++	sentPacketToSendTimeState(sentPacketPointer, &sample.stateAtSend)
++
++	return *sample
++}
++
++func (b *bandwidthSampler) onAckEventEnd(
++	bandwidthEstimate Bandwidth,
++	isNewMaxBandwidth bool,
++	roundTripCount roundTripCount,
++) protocol.ByteCount {
++	newlyAckedBytes := b.totalBytesAcked - b.totalBytesAckedAfterLastAckEvent
++	if newlyAckedBytes == 0 {
++		return 0
++	}
++	b.totalBytesAckedAfterLastAckEvent = b.totalBytesAcked
++	extraAcked := b.maxAckHeightTracker.Update(
++		bandwidthEstimate,
++		isNewMaxBandwidth,
++		roundTripCount,
++		b.lastSentPacket,
++		b.lastAckedPacket,
++		b.lastAckedPacketAckTime,
++		newlyAckedBytes,
++	)
++	// If |extra_acked| is zero, i.e. this ack event marks the start of a new ack
++	// aggregation epoch, save LessRecentPoint, which is the last ack point of the
++	// previous epoch, as a A0 candidate.
++	if b.overestimateAvoidance && extraAcked == 0 {
++		b.a0Candidates.PushBack(*b.recentAckPoints.LessRecentPoint())
++	}
++	return extraAcked
++}
++
++func sentPacketToSendTimeState(sentPacket *connectionStateOnSentPacket, sendTimeState *sendTimeState) {
++	*sendTimeState = sentPacket.sendTimeState
++	sendTimeState.isValid = true
++}
++
++// BytesFromBandwidthAndTimeDelta calculates the bytes
++// from a bandwidth(bits per second) and a time delta
++func bytesFromBandwidthAndTimeDelta(bandwidth Bandwidth, delta time.Duration) protocol.ByteCount {
++	return (protocol.ByteCount(bandwidth) * protocol.ByteCount(delta)) /
++		(protocol.ByteCount(time.Second) * 8)
++}
++
++func timeDeltaFromBytesAndBandwidth(bytes protocol.ByteCount, bandwidth Bandwidth) time.Duration {
++	return time.Duration(bytes*8) * time.Second / time.Duration(bandwidth)
++}
+--- a/internal/congestion/bbr/bbr_sender.go	1970-01-01 03:00:00.000000000 +0300
++++ b/internal/congestion/bbr/bbr_sender.go	2026-09-29 23:22:11.982603000 +0300
+@@ -0,0 +1,1088 @@
++package bbr
++
++import (
++	"fmt"
++	"math/rand"
++	"net"
++	"os"
++	"strconv"
++	"strings"
++	"time"
++
++	"github.com/quic-go/quic-go/internal/congestion"
++	"github.com/quic-go/quic-go/internal/monotime"
++	"github.com/quic-go/quic-go/internal/protocol"
++	"github.com/quic-go/quic-go/internal/utils"
++)
++
++// BbrSender implements BBR congestion control algorithm.  BBR aims to estimate
++// the current available Bottleneck Bandwidth and RTT (hence the name), and
++// regulates the pacing rate and the size of the congestion window based on
++// those signals.
++//
++// BBR relies on pacing in order to function properly.  Do not use BBR when
++// pacing is disabled.
++//
++
++const (
++	minBps = 65536 // 64 KB/s
++
++	invalidPacketNumber            = -1
++	initialCongestionWindowPackets = 32
++	minCongestionWindowPackets     = 4
++
++	// Constants based on TCP defaults.
++	// The minimum CWND to ensure delayed acks don't reduce bandwidth measurements.
++	// Does not inflate the pacing rate.
++	// The gain used for the STARTUP, equal to 2/ln(2).
++	defaultHighGain = 2.885
++	// The newly derived CWND gain for STARTUP, 2.
++	derivedHighCWNDGain = 2.0
++
++	debugEnv = "HYSTERIA_BBR_DEBUG"
++)
++
++// The cycle of gains used during the PROBE_BW stage.
++var pacingGain = [...]float64{1.25, 0.75, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0}
++
++const (
++	// The length of the gain cycle.
++	gainCycleLength = len(pacingGain)
++	// The size of the bandwidth filter window, in round-trips.
++	bandwidthWindowSize = gainCycleLength + 2
++
++	// The time after which the current min_rtt value expires.
++	minRttExpiry = 10 * time.Second
++	// The minimum time the connection can spend in PROBE_RTT mode.
++	probeRttTime = 200 * time.Millisecond
++	// If the bandwidth does not increase by the factor of |kStartupGrowthTarget|
++	// within |kRoundTripsWithoutGrowthBeforeExitingStartup| rounds, the connection
++	// will exit the STARTUP mode.
++	startupGrowthTarget                         = 1.25
++	roundTripsWithoutGrowthBeforeExitingStartup = int64(3)
++
++	// Flag.
++	defaultStartupFullLossCount  = 8
++	quicBbr2DefaultLossThreshold = 0.02
++)
++
++type bbrMode int
++
++const (
++	// Startup phase of the connection.
++	bbrModeStartup = iota
++	// After achieving the highest possible bandwidth during the startup, lower
++	// the pacing rate in order to drain the queue.
++	bbrModeDrain
++	// Cruising mode.
++	bbrModeProbeBw
++	// Temporarily slow down sending in order to empty the buffer and measure
++	// the real minimum RTT.
++	bbrModeProbeRtt
++)
++
++// Indicates how the congestion control limits the amount of bytes in flight.
++type bbrRecoveryState int
++
++const (
++	// Do not limit.
++	bbrRecoveryStateNotInRecovery = iota
++	// Allow an extra outstanding byte for each byte acknowledged.
++	bbrRecoveryStateConservation
++	// Allow two extra outstanding bytes for each byte acknowledged (slow
++	// start).
++	bbrRecoveryStateGrowth
++)
++
++type Profile string
++
++const (
++	ProfileConservative Profile = "conservative"
++	ProfileStandard     Profile = "standard"
++	ProfileAggressive   Profile = "aggressive"
++)
++
++type profileConfig struct {
++	highGain                            float64
++	highCwndGain                        float64
++	congestionWindowGainConstant        float64
++	numStartupRtts                      int64
++	drainToTarget                       bool
++	detectOvershooting                  bool
++	bytesLostMultiplier                 uint8
++	enableAckAggregationStartup         bool
++	expireAckAggregationStartup         bool
++	enableOverestimateAvoidance         bool
++	reduceExtraAckedOnBandwidthIncrease bool
++}
++
++func ParseProfile(profile string) (Profile, error) {
++	switch normalized := strings.ToLower(profile); normalized {
++	case "", string(ProfileStandard):
++		return ProfileStandard, nil
++	case string(ProfileConservative):
++		return ProfileConservative, nil
++	case string(ProfileAggressive):
++		return ProfileAggressive, nil
++	default:
++		return "", fmt.Errorf("unsupported BBR profile %q", profile)
++	}
++}
++
++func configForProfile(profile Profile) profileConfig {
++	switch profile {
++	case ProfileConservative:
++		return profileConfig{
++			highGain:                            2.25,
++			highCwndGain:                        1.75,
++			congestionWindowGainConstant:        1.75,
++			numStartupRtts:                      2,
++			drainToTarget:                       true,
++			detectOvershooting:                  true,
++			bytesLostMultiplier:                 1,
++			enableOverestimateAvoidance:         true,
++			reduceExtraAckedOnBandwidthIncrease: true,
++		}
++	case ProfileAggressive:
++		return profileConfig{
++			highGain:                     3.0,
++			highCwndGain:                 2.25,
++			congestionWindowGainConstant: 2.5,
++			numStartupRtts:               4,
++			bytesLostMultiplier:          2,
++			enableAckAggregationStartup:  true,
++			expireAckAggregationStartup:  true,
++		}
++	default:
++		return profileConfig{
++			highGain:                     defaultHighGain,
++			highCwndGain:                 derivedHighCWNDGain,
++			congestionWindowGainConstant: 2.0,
++			numStartupRtts:               roundTripsWithoutGrowthBeforeExitingStartup,
++			bytesLostMultiplier:          2,
++		}
++	}
++}
++
++type bbrSender struct {
++	rttStats *utils.RTTStats
++	clock    Clock
++	pacer    *Pacer
++
++	mode bbrMode
++
++	// Bandwidth sampler provides BBR with the bandwidth measurements at
++	// individual points.
++	sampler *bandwidthSampler
++
++	// The number of the round trips that have occurred during the connection.
++	roundTripCount roundTripCount
++
++	// The packet number of the most recently sent packet.
++	lastSentPacket protocol.PacketNumber
++	// Acknowledgement of any packet after |current_round_trip_end_| will cause
++	// the round trip counter to advance.
++	currentRoundTripEnd protocol.PacketNumber
++
++	// Number of congestion events with some losses, in the current round.
++	numLossEventsInRound uint64
++
++	// Number of total bytes lost in the current round.
++	bytesLostInRound protocol.ByteCount
++
++	// The filter that tracks the maximum bandwidth over the multiple recent
++	// round-trips.
++	maxBandwidth *WindowedFilter[Bandwidth, roundTripCount]
++
++	// Minimum RTT estimate.  Automatically expires within 10 seconds (and
++	// triggers PROBE_RTT mode) if no new value is sampled during that period.
++	minRtt time.Duration
++	// The time at which the current value of |min_rtt_| was assigned.
++	minRttTimestamp monotime.Time
++
++	// The maximum allowed number of bytes in flight.
++	congestionWindow protocol.ByteCount
++
++	// The initial value of the |congestion_window_|.
++	initialCongestionWindow protocol.ByteCount
++
++	// The largest value the |congestion_window_| can achieve.
++	maxCongestionWindow protocol.ByteCount
++
++	// The smallest value the |congestion_window_| can achieve.
++	minCongestionWindow protocol.ByteCount
++
++	// The BBR profile used by the sender.
++	profile Profile
++
++	// The pacing gain applied during the STARTUP phase.
++	highGain float64
++
++	// The CWND gain applied during the STARTUP phase.
++	highCwndGain float64
++
++	// The pacing gain applied during the DRAIN phase.
++	drainGain float64
++
++	// The current pacing rate of the connection.
++	pacingRate Bandwidth
++
++	// The gain currently applied to the pacing rate.
++	pacingGain float64
++	// The gain currently applied to the congestion window.
++	congestionWindowGain float64
++
++	// The gain used for the congestion window during PROBE_BW.  Latched from
++	// quic_bbr_cwnd_gain flag.
++	congestionWindowGainConstant float64
++	// The number of RTTs to stay in STARTUP mode.  Defaults to 3.
++	numStartupRtts int64
++
++	// Number of round-trips in PROBE_BW mode, used for determining the current
++	// pacing gain cycle.
++	cycleCurrentOffset int
++	// The time at which the last pacing gain cycle was started.
++	lastCycleStart monotime.Time
++
++	// Indicates whether the connection has reached the full bandwidth mode.
++	isAtFullBandwidth bool
++	// Number of rounds during which there was no significant bandwidth increase.
++	roundsWithoutBandwidthGain int64
++	// The bandwidth compared to which the increase is measured.
++	bandwidthAtLastRound Bandwidth
++
++	// Set to true upon exiting quiescence.
++	exitingQuiescence bool
++
++	// Time at which PROBE_RTT has to be exited.  Setting it to zero indicates
++	// that the time is yet unknown as the number of packets in flight has not
++	// reached the required value.
++	exitProbeRttAt monotime.Time
++	// Indicates whether a round-trip has passed since PROBE_RTT became active.
++	probeRttRoundPassed bool
++
++	// Indicates whether the most recent bandwidth sample was marked as
++	// app-limited.
++	lastSampleIsAppLimited bool
++	// Indicates whether any non app-limited samples have been recorded.
++	hasNoAppLimitedSample bool
++
++	// Current state of recovery.
++	recoveryState bbrRecoveryState
++	// Receiving acknowledgement of a packet after |end_recovery_at_| will cause
++	// BBR to exit the recovery mode.  A value above zero indicates at least one
++	// loss has been detected, so it must not be set back to zero.
++	endRecoveryAt protocol.PacketNumber
++	// A window used to limit the number of bytes in flight during loss recovery.
++	recoveryWindow protocol.ByteCount
++	// If true, consider all samples in recovery app-limited.
++	isAppLimitedRecovery bool // not used
++
++	// When true, pace at 1.5x and disable packet conservation in STARTUP.
++	slowerStartup bool // not used
++	// When true, disables packet conservation in STARTUP.
++	rateBasedStartup bool // not used
++
++	// When true, add the most recent ack aggregation measurement during STARTUP.
++	enableAckAggregationDuringStartup bool
++	// When true, expire the windowed ack aggregation values in STARTUP when
++	// bandwidth increases more than 25%.
++	expireAckAggregationInStartup bool
++
++	// If true, will not exit low gain mode until bytes_in_flight drops below BDP
++	// or it's time for high gain mode.
++	drainToTarget bool
++
++	// If true, slow down pacing rate in STARTUP when overshooting is detected.
++	detectOvershooting bool
++	// Bytes lost while detect_overshooting_ is true.
++	bytesLostWhileDetectingOvershooting protocol.ByteCount
++	// Slow down pacing rate if
++	// bytes_lost_while_detecting_overshooting_ *
++	// bytes_lost_multiplier_while_detecting_overshooting_ > IW.
++	bytesLostMultiplierWhileDetectingOvershooting uint8
++	// When overshooting is detected, do not drop pacing_rate_ below this value /
++	// min_rtt.
++	cwndToCalculateMinPacingRate protocol.ByteCount
++
++	// Max congestion window when adjusting network parameters.
++	maxCongestionWindowWithNetworkParametersAdjusted protocol.ByteCount // not used
++
++	// Params.
++	maxDatagramSize protocol.ByteCount
++	// Recorded on packet sent. equivalent |unacked_packets_->bytes_in_flight()|
++	bytesInFlight protocol.ByteCount
++
++	debug bool
++}
++
++var _ congestion.SendAlgorithmWithDebugInfos = &bbrSender{}
++
++func NewBbrSender(
++	clock Clock,
++	initialMaxDatagramSize protocol.ByteCount,
++	profile Profile,
++) *bbrSender {
++	return newBbrSender(
++		clock,
++		initialMaxDatagramSize,
++		initialCongestionWindowPackets*initialMaxDatagramSize,
++		protocol.MaxCongestionWindowPackets*initialMaxDatagramSize,
++		profile,
++	)
++}
++
++func newBbrSender(
++	clock Clock,
++	initialMaxDatagramSize,
++	initialCongestionWindow,
++	initialMaxCongestionWindow protocol.ByteCount,
++	profile Profile,
++) *bbrSender {
++	debug, _ := strconv.ParseBool(os.Getenv(debugEnv))
++	b := &bbrSender{
++		clock:                        clock,
++		mode:                         bbrModeStartup,
++		sampler:                      newBandwidthSampler(roundTripCount(bandwidthWindowSize)),
++		lastSentPacket:               invalidPacketNumber,
++		currentRoundTripEnd:          invalidPacketNumber,
++		maxBandwidth:                 NewWindowedFilter(roundTripCount(bandwidthWindowSize), MaxFilter[Bandwidth]),
++		congestionWindow:             initialCongestionWindow,
++		initialCongestionWindow:      initialCongestionWindow,
++		maxCongestionWindow:          initialMaxCongestionWindow,
++		minCongestionWindow:          minCongestionWindowForMaxDatagramSize(initialMaxDatagramSize),
++		profile:                      ProfileStandard,
++		highGain:                     defaultHighGain,
++		highCwndGain:                 derivedHighCWNDGain,
++		drainGain:                    1.0 / defaultHighGain,
++		pacingGain:                   1.0,
++		congestionWindowGain:         1.0,
++		congestionWindowGainConstant: 2.0,
++		numStartupRtts:               roundTripsWithoutGrowthBeforeExitingStartup,
++		recoveryState:                bbrRecoveryStateNotInRecovery,
++		endRecoveryAt:                invalidPacketNumber,
++		recoveryWindow:               initialMaxCongestionWindow,
++		bytesLostMultiplierWhileDetectingOvershooting:    2,
++		cwndToCalculateMinPacingRate:                     initialCongestionWindow,
++		maxCongestionWindowWithNetworkParametersAdjusted: initialMaxCongestionWindow,
++		maxDatagramSize: initialMaxDatagramSize,
++		debug:           debug,
++	}
++	b.pacer = NewPacer(b.bandwidthForPacer)
++	b.applyProfile(profile)
++	if b.debug {
++		b.debugPrint("Profile: %s", b.profile)
++	}
++
++	b.enterStartupMode(b.clock.Now())
++
++	return b
++}
++
++func (b *bbrSender) applyProfile(profile Profile) {
++	if profile == "" {
++		profile = ProfileStandard
++	}
++	cfg := configForProfile(profile)
++	b.profile = profile
++	b.highGain = cfg.highGain
++	b.highCwndGain = cfg.highCwndGain
++	b.drainGain = 1.0 / cfg.highGain
++	b.congestionWindowGainConstant = cfg.congestionWindowGainConstant
++	b.numStartupRtts = cfg.numStartupRtts
++	b.drainToTarget = cfg.drainToTarget
++	b.detectOvershooting = cfg.detectOvershooting
++	b.bytesLostMultiplierWhileDetectingOvershooting = cfg.bytesLostMultiplier
++	b.enableAckAggregationDuringStartup = cfg.enableAckAggregationStartup
++	b.expireAckAggregationInStartup = cfg.expireAckAggregationStartup
++	if cfg.enableOverestimateAvoidance {
++		b.sampler.EnableOverestimateAvoidance()
++	}
++	b.sampler.SetReduceExtraAckedOnBandwidthIncrease(cfg.reduceExtraAckedOnBandwidthIncrease)
++}
++
++func minCongestionWindowForMaxDatagramSize(maxDatagramSize protocol.ByteCount) protocol.ByteCount {
++	return minCongestionWindowPackets * maxDatagramSize
++}
++
++func scaleByteWindowForDatagramSize(window, oldMaxDatagramSize, newMaxDatagramSize protocol.ByteCount) protocol.ByteCount {
++	if oldMaxDatagramSize == newMaxDatagramSize {
++		return window
++	}
++	return protocol.ByteCount(uint64(window) * uint64(newMaxDatagramSize) / uint64(oldMaxDatagramSize))
++}
++
++func (b *bbrSender) rescalePacketSizedWindows(maxDatagramSize protocol.ByteCount) {
++	oldMaxDatagramSize := b.maxDatagramSize
++	b.maxDatagramSize = maxDatagramSize
++	b.initialCongestionWindow = scaleByteWindowForDatagramSize(b.initialCongestionWindow, oldMaxDatagramSize, maxDatagramSize)
++	b.maxCongestionWindow = scaleByteWindowForDatagramSize(b.maxCongestionWindow, oldMaxDatagramSize, maxDatagramSize)
++	b.minCongestionWindow = minCongestionWindowForMaxDatagramSize(maxDatagramSize)
++	b.cwndToCalculateMinPacingRate = scaleByteWindowForDatagramSize(b.cwndToCalculateMinPacingRate, oldMaxDatagramSize, maxDatagramSize)
++	b.maxCongestionWindowWithNetworkParametersAdjusted = scaleByteWindowForDatagramSize(
++		b.maxCongestionWindowWithNetworkParametersAdjusted,
++		oldMaxDatagramSize,
++		maxDatagramSize,
++	)
++}
++
++func (b *bbrSender) SetRTTStatsProvider(provider *utils.RTTStats) {
++	b.rttStats = provider
++}
++
++// TimeUntilSend implements the SendAlgorithm interface.
++func (b *bbrSender) TimeUntilSend(bytesInFlight protocol.ByteCount) monotime.Time {
++	return b.pacer.TimeUntilSend()
++}
++
++// HasPacingBudget implements the SendAlgorithm interface.
++func (b *bbrSender) HasPacingBudget(now monotime.Time) bool {
++	return b.pacer.Budget(now) >= b.maxDatagramSize
++}
++
++// OnPacketSent implements the SendAlgorithm interface.
++func (b *bbrSender) OnPacketSent(
++	sentTime monotime.Time,
++	bytesInFlight protocol.ByteCount,
++	packetNumber protocol.PacketNumber,
++	bytes protocol.ByteCount,
++	isRetransmittable bool,
++) {
++	b.pacer.SentPacket(sentTime, bytes)
++
++	b.lastSentPacket = packetNumber
++	b.bytesInFlight = bytesInFlight
++
++	if bytesInFlight == 0 {
++		b.exitingQuiescence = true
++	}
++
++	b.sampler.OnPacketSent(sentTime, packetNumber, bytes, bytesInFlight, isRetransmittable)
++}
++
++// CanSend implements the SendAlgorithm interface.
++func (b *bbrSender) CanSend(bytesInFlight protocol.ByteCount) bool {
++	return bytesInFlight < b.GetCongestionWindow()
++}
++
++// MaybeExitSlowStart implements the SendAlgorithm interface.
++func (b *bbrSender) MaybeExitSlowStart() {
++	// Do nothing
++}
++
++// OnPacketAcked implements the SendAlgorithm interface.
++func (b *bbrSender) OnPacketAcked(number protocol.PacketNumber, ackedBytes, priorInFlight protocol.ByteCount, eventTime monotime.Time) {
++	// Do nothing.
++}
++
++// OnPacketLost implements the SendAlgorithm interface.
++func (b *bbrSender) OnPacketLost(number protocol.PacketNumber, lostBytes, priorInFlight protocol.ByteCount) {
++	// Do nothing.
++}
++
++// OnRetransmissionTimeout implements the SendAlgorithm interface.
++func (b *bbrSender) OnRetransmissionTimeout(packetsRetransmitted bool) {
++	// Do nothing.
++}
++
++// SetMaxDatagramSize implements the SendAlgorithm interface.
++func (b *bbrSender) SetMaxDatagramSize(s protocol.ByteCount) {
++	if b.debug {
++		b.debugPrint("Max Datagram Size: %d", s)
++	}
++	if s < b.maxDatagramSize {
++		panic(fmt.Sprintf("congestion BUG: decreased max datagram size from %d to %d", b.maxDatagramSize, s))
++	}
++	oldMinCongestionWindow := b.minCongestionWindow
++	oldInitialCongestionWindow := b.initialCongestionWindow
++	b.rescalePacketSizedWindows(s)
++	switch b.congestionWindow {
++	case oldMinCongestionWindow:
++		b.congestionWindow = b.minCongestionWindow
++	case oldInitialCongestionWindow:
++		b.congestionWindow = b.initialCongestionWindow
++	default:
++		b.congestionWindow = min(b.maxCongestionWindow, max(b.congestionWindow, b.minCongestionWindow))
++	}
++	b.recoveryWindow = min(b.maxCongestionWindow, max(b.recoveryWindow, b.minCongestionWindow))
++	b.pacer.SetMaxDatagramSize(s)
++}
++
++// InSlowStart implements the SendAlgorithmWithDebugInfos interface.
++func (b *bbrSender) InSlowStart() bool {
++	return b.mode == bbrModeStartup
++}
++
++// InRecovery implements the SendAlgorithmWithDebugInfos interface.
++func (b *bbrSender) InRecovery() bool {
++	return b.recoveryState != bbrRecoveryStateNotInRecovery
++}
++
++// GetCongestionWindow implements the SendAlgorithmWithDebugInfos interface.
++func (b *bbrSender) GetCongestionWindow() protocol.ByteCount {
++	if b.mode == bbrModeProbeRtt {
++		return b.probeRttCongestionWindow()
++	}
++
++	if b.InRecovery() {
++		return min(b.congestionWindow, b.recoveryWindow)
++	}
++
++	return b.congestionWindow
++}
++
++func (b *bbrSender) OnCongestionEvent(number protocol.PacketNumber, lostBytes, priorInFlight protocol.ByteCount) {
++	// Do nothing.
++}
++
++func (b *bbrSender) OnCongestionEventEx(priorInFlight protocol.ByteCount, eventTime monotime.Time, ackedPackets []congestion.AckedPacketInfo, lostPackets []congestion.LostPacketInfo) {
++	totalBytesAckedBefore := b.sampler.TotalBytesAcked()
++	totalBytesLostBefore := b.sampler.TotalBytesLost()
++
++	var isRoundStart, minRttExpired bool
++	var excessAcked, bytesLost protocol.ByteCount
++
++	// The send state of the largest packet in acked_packets, unless it is
++	// empty. If acked_packets is empty, it's the send state of the largest
++	// packet in lost_packets.
++	var lastPacketSendState sendTimeState
++
++	b.maybeAppLimited(priorInFlight)
++
++	// Update bytesInFlight
++	b.bytesInFlight = priorInFlight
++	for _, p := range ackedPackets {
++		b.bytesInFlight -= p.BytesAcked
++	}
++	for _, p := range lostPackets {
++		b.bytesInFlight -= p.BytesLost
++	}
++
++	if len(ackedPackets) != 0 {
++		lastAckedPacket := ackedPackets[len(ackedPackets)-1].PacketNumber
++		isRoundStart = b.updateRoundTripCounter(lastAckedPacket)
++		b.updateRecoveryState(lastAckedPacket, len(lostPackets) != 0, isRoundStart)
++	}
++
++	sample := b.sampler.OnCongestionEvent(eventTime,
++		ackedPackets, lostPackets, b.maxBandwidth.GetBest(), infBandwidth, b.roundTripCount)
++	if sample.lastPacketSendState.isValid {
++		b.lastSampleIsAppLimited = sample.lastPacketSendState.isAppLimited
++		b.hasNoAppLimitedSample = b.hasNoAppLimitedSample || !b.lastSampleIsAppLimited
++	}
++	// Avoid updating |max_bandwidth_| if a) this is a loss-only event, or b) all
++	// packets in |acked_packets| did not generate valid samples. (e.g. ack of
++	// ack-only packets). In both cases, sampler_.total_bytes_acked() will not
++	// change.
++	if totalBytesAckedBefore != b.sampler.TotalBytesAcked() {
++		if !sample.sampleIsAppLimited || sample.sampleMaxBandwidth > b.maxBandwidth.GetBest() {
++			b.maxBandwidth.Update(sample.sampleMaxBandwidth, b.roundTripCount)
++		}
++	}
++
++	if sample.sampleRtt != infRTT {
++		minRttExpired = b.maybeUpdateMinRtt(eventTime, sample.sampleRtt)
++	}
++	bytesLost = b.sampler.TotalBytesLost() - totalBytesLostBefore
++
++	excessAcked = sample.extraAcked
++	lastPacketSendState = sample.lastPacketSendState
++
++	if len(lostPackets) != 0 {
++		b.numLossEventsInRound++
++		b.bytesLostInRound += bytesLost
++	}
++
++	// Handle logic specific to PROBE_BW mode.
++	if b.mode == bbrModeProbeBw {
++		b.updateGainCyclePhase(eventTime, priorInFlight, len(lostPackets) != 0)
++	}
++
++	// Handle logic specific to STARTUP and DRAIN modes.
++	if isRoundStart && !b.isAtFullBandwidth {
++		b.checkIfFullBandwidthReached(&lastPacketSendState)
++	}
++
++	b.maybeExitStartupOrDrain(eventTime)
++
++	// Handle logic specific to PROBE_RTT.
++	b.maybeEnterOrExitProbeRtt(eventTime, isRoundStart, minRttExpired)
++
++	// Calculate number of packets acked and lost.
++	bytesAcked := b.sampler.TotalBytesAcked() - totalBytesAckedBefore
++
++	// After the model is updated, recalculate the pacing rate and congestion
++	// window.
++	b.calculatePacingRate(bytesLost)
++	b.calculateCongestionWindow(bytesAcked, excessAcked)
++	b.calculateRecoveryWindow(bytesAcked, bytesLost)
++
++	// Cleanup internal state.
++	// This is where we clean up obsolete (acked or lost) packets from the bandwidth sampler.
++	// The "least unacked" should actually be FirstOutstanding, but since we are not passing
++	// that through OnCongestionEventEx, we will only do an estimate using acked/lost packets
++	// for now. Because of fast retransmission, they should differ by no more than 2 packets.
++	// (this is controlled by packetThreshold in quic-go's sentPacketHandler)
++	var leastUnacked protocol.PacketNumber
++	if len(ackedPackets) != 0 {
++		leastUnacked = ackedPackets[len(ackedPackets)-1].PacketNumber - 2
++	} else {
++		leastUnacked = lostPackets[len(lostPackets)-1].PacketNumber + 1
++	}
++	b.sampler.RemoveObsoletePackets(leastUnacked)
++
++	if isRoundStart {
++		b.numLossEventsInRound = 0
++		b.bytesLostInRound = 0
++	}
++}
++
++func (b *bbrSender) PacingRate() Bandwidth {
++	if b.pacingRate == 0 {
++		return Bandwidth(b.highGain * float64(
++			BandwidthFromDelta(b.initialCongestionWindow, b.getMinRtt()),
++		))
++	}
++
++	return b.pacingRate
++}
++
++// Sets the CWND gain used in STARTUP.  Must be greater than 1.
++func (b *bbrSender) setHighCwndGain(highCwndGain float64) {
++	b.highCwndGain = highCwndGain
++	if b.mode == bbrModeStartup {
++		b.congestionWindowGain = highCwndGain
++	}
++}
++
++// Get the current bandwidth estimate. Note that Bandwidth is in bits per second.
++func (b *bbrSender) bandwidthEstimate() Bandwidth {
++	return b.maxBandwidth.GetBest()
++}
++
++func (b *bbrSender) bandwidthForPacer() protocol.ByteCount {
++	bps := protocol.ByteCount(float64(b.PacingRate()) / float64(BytesPerSecond))
++	if bps < minBps {
++		// We need to make sure that the bandwidth value for pacer is never zero,
++		// otherwise it will go into an edge case where HasPacingBudget = false
++		// but TimeUntilSend is before, causing the quic-go send loop to go crazy and get stuck.
++		return minBps
++	}
++	return bps
++}
++
++// Returns the current estimate of the RTT of the connection.  Outside of the
++// edge cases, this is minimum RTT.
++func (b *bbrSender) getMinRtt() time.Duration {
++	if b.minRtt != 0 {
++		return b.minRtt
++	}
++	// min_rtt could be available if the handshake packet gets neutered then
++	// gets acknowledged. This could only happen for QUIC crypto where we do not
++	// drop keys.
++	minRtt := b.rttStats.MinRTT()
++	if minRtt == 0 {
++		return 100 * time.Millisecond
++	} else {
++		return minRtt
++	}
++}
++
++// Computes the target congestion window using the specified gain.
++func (b *bbrSender) getTargetCongestionWindow(gain float64) protocol.ByteCount {
++	bdp := bdpFromRttAndBandwidth(b.getMinRtt(), b.bandwidthEstimate())
++	congestionWindow := protocol.ByteCount(gain * float64(bdp))
++
++	// BDP estimate will be zero if no bandwidth samples are available yet.
++	if congestionWindow == 0 {
++		congestionWindow = protocol.ByteCount(gain * float64(b.initialCongestionWindow))
++	}
++
++	return max(congestionWindow, b.minCongestionWindow)
++}
++
++// The target congestion window during PROBE_RTT.
++func (b *bbrSender) probeRttCongestionWindow() protocol.ByteCount {
++	return b.minCongestionWindow
++}
++
++func (b *bbrSender) maybeUpdateMinRtt(now monotime.Time, sampleMinRtt time.Duration) bool {
++	// Do not expire min_rtt if none was ever available.
++	minRttExpired := b.minRtt != 0 && now.After(b.minRttTimestamp.Add(minRttExpiry))
++	if minRttExpired || sampleMinRtt < b.minRtt || b.minRtt == 0 {
++		b.minRtt = sampleMinRtt
++		b.minRttTimestamp = now
++	}
++
++	return minRttExpired
++}
++
++// Enters the STARTUP mode.
++func (b *bbrSender) enterStartupMode(now monotime.Time) {
++	b.mode = bbrModeStartup
++	// b.maybeTraceStateChange(logging.CongestionStateStartup)
++	b.pacingGain = b.highGain
++	b.congestionWindowGain = b.highCwndGain
++
++	if b.debug {
++		b.debugPrint("Phase: STARTUP")
++	}
++}
++
++// Enters the PROBE_BW mode.
++func (b *bbrSender) enterProbeBandwidthMode(now monotime.Time) {
++	b.mode = bbrModeProbeBw
++	// b.maybeTraceStateChange(logging.CongestionStateProbeBw)
++	b.congestionWindowGain = b.congestionWindowGainConstant
++
++	// Pick a random offset for the gain cycle out of {0, 2..7} range. 1 is
++	// excluded because in that case increased gain and decreased gain would not
++	// follow each other.
++	b.cycleCurrentOffset = int(rand.Int31n(protocol.PacketsPerConnectionID)) % (gainCycleLength - 1)
++	if b.cycleCurrentOffset >= 1 {
++		b.cycleCurrentOffset += 1
++	}
++
++	b.lastCycleStart = now
++	b.pacingGain = pacingGain[b.cycleCurrentOffset]
++
++	if b.debug {
++		b.debugPrint("Phase: PROBE_BW")
++	}
++}
++
++// Updates the round-trip counter if a round-trip has passed.  Returns true if
++// the counter has been advanced.
++func (b *bbrSender) updateRoundTripCounter(lastAckedPacket protocol.PacketNumber) bool {
++	if b.currentRoundTripEnd == invalidPacketNumber || lastAckedPacket > b.currentRoundTripEnd {
++		b.roundTripCount++
++		b.currentRoundTripEnd = b.lastSentPacket
++		return true
++	}
++	return false
++}
++
++// Updates the current gain used in PROBE_BW mode.
++func (b *bbrSender) updateGainCyclePhase(now monotime.Time, priorInFlight protocol.ByteCount, hasLosses bool) {
++	// In most cases, the cycle is advanced after an RTT passes.
++	shouldAdvanceGainCycling := now.After(b.lastCycleStart.Add(b.getMinRtt()))
++	// If the pacing gain is above 1.0, the connection is trying to probe the
++	// bandwidth by increasing the number of bytes in flight to at least
++	// pacing_gain * BDP.  Make sure that it actually reaches the target, as long
++	// as there are no losses suggesting that the buffers are not able to hold
++	// that much.
++	if b.pacingGain > 1.0 && !hasLosses && priorInFlight < b.getTargetCongestionWindow(b.pacingGain) {
++		shouldAdvanceGainCycling = false
++	}
++
++	// If pacing gain is below 1.0, the connection is trying to drain the extra
++	// queue which could have been incurred by probing prior to it.  If the number
++	// of bytes in flight falls down to the estimated BDP value earlier, conclude
++	// that the queue has been successfully drained and exit this cycle early.
++	if b.pacingGain < 1.0 && b.bytesInFlight <= b.getTargetCongestionWindow(1) {
++		shouldAdvanceGainCycling = true
++	}
++
++	if shouldAdvanceGainCycling {
++		b.cycleCurrentOffset = (b.cycleCurrentOffset + 1) % gainCycleLength
++		b.lastCycleStart = now
++		// Stay in low gain mode until the target BDP is hit.
++		// Low gain mode will be exited immediately when the target BDP is achieved.
++		if b.drainToTarget && b.pacingGain < 1 &&
++			pacingGain[b.cycleCurrentOffset] == 1 &&
++			b.bytesInFlight > b.getTargetCongestionWindow(1) {
++			return
++		}
++		b.pacingGain = pacingGain[b.cycleCurrentOffset]
++	}
++}
++
++// Tracks for how many round-trips the bandwidth has not increased
++// significantly.
++func (b *bbrSender) checkIfFullBandwidthReached(lastPacketSendState *sendTimeState) {
++	if b.lastSampleIsAppLimited {
++		return
++	}
++
++	target := Bandwidth(float64(b.bandwidthAtLastRound) * startupGrowthTarget)
++	if b.bandwidthEstimate() >= target {
++		b.bandwidthAtLastRound = b.bandwidthEstimate()
++		b.roundsWithoutBandwidthGain = 0
++		if b.expireAckAggregationInStartup {
++			// Expire old excess delivery measurements now that bandwidth increased.
++			b.sampler.ResetMaxAckHeightTracker(0, b.roundTripCount)
++		}
++		return
++	}
++
++	b.roundsWithoutBandwidthGain++
++	if b.roundsWithoutBandwidthGain >= b.numStartupRtts ||
++		b.shouldExitStartupDueToLoss(lastPacketSendState) {
++		b.isAtFullBandwidth = true
++	}
++}
++
++func (b *bbrSender) maybeAppLimited(bytesInFlight protocol.ByteCount) {
++	if bytesInFlight < b.getTargetCongestionWindow(1) {
++		b.sampler.OnAppLimited()
++	}
++}
++
++// Transitions from STARTUP to DRAIN and from DRAIN to PROBE_BW if
++// appropriate.
++func (b *bbrSender) maybeExitStartupOrDrain(now monotime.Time) {
++	if b.mode == bbrModeStartup && b.isAtFullBandwidth {
++		b.mode = bbrModeDrain
++		// b.maybeTraceStateChange(logging.CongestionStateDrain)
++		b.pacingGain = b.drainGain
++		b.congestionWindowGain = b.highCwndGain
++
++		if b.debug {
++			b.debugPrint("Phase: DRAIN")
++		}
++	}
++	if b.mode == bbrModeDrain && b.bytesInFlight <= b.getTargetCongestionWindow(1) {
++		b.enterProbeBandwidthMode(now)
++	}
++}
++
++// Decides whether to enter or exit PROBE_RTT.
++func (b *bbrSender) maybeEnterOrExitProbeRtt(now monotime.Time, isRoundStart, minRttExpired bool) {
++	if minRttExpired && !b.exitingQuiescence && b.mode != bbrModeProbeRtt {
++		b.mode = bbrModeProbeRtt
++		// b.maybeTraceStateChange(logging.CongestionStateProbRtt)
++		b.pacingGain = 1.0
++		// Do not decide on the time to exit PROBE_RTT until the |bytes_in_flight|
++		// is at the target small value.
++		b.exitProbeRttAt = 0
++
++		if b.debug {
++			b.debugPrint("BandwidthEstimate: %s, CongestionWindowGain: %.2f, PacingGain: %.2f, PacingRate: %s",
++				formatSpeed(b.bandwidthEstimate()), b.congestionWindowGain, b.pacingGain, formatSpeed(b.PacingRate()))
++			b.debugPrint("Phase: PROBE_RTT")
++		}
++	}
++
++	if b.mode == bbrModeProbeRtt {
++		b.sampler.OnAppLimited()
++		// b.maybeTraceStateChange(logging.CongestionStateApplicationLimited)
++
++		if b.exitProbeRttAt.IsZero() {
++			// If the window has reached the appropriate size, schedule exiting
++			// PROBE_RTT.  The CWND during PROBE_RTT is kMinimumCongestionWindow, but
++			// we allow an extra packet since QUIC checks CWND before sending a
++			// packet.
++			if b.bytesInFlight < b.probeRttCongestionWindow()+protocol.MaxPacketBufferSize {
++				b.exitProbeRttAt = now.Add(probeRttTime)
++				b.probeRttRoundPassed = false
++			}
++		} else {
++			if isRoundStart {
++				b.probeRttRoundPassed = true
++			}
++			if now.Sub(b.exitProbeRttAt) >= 0 && b.probeRttRoundPassed {
++				b.minRttTimestamp = now
++				if b.debug {
++					b.debugPrint("MinRTT: %s", b.getMinRtt())
++				}
++				if !b.isAtFullBandwidth {
++					b.enterStartupMode(now)
++				} else {
++					b.enterProbeBandwidthMode(now)
++				}
++			}
++		}
++	}
++
++	b.exitingQuiescence = false
++}
++
++// Determines whether BBR needs to enter, exit or advance state of the
++// recovery.
++func (b *bbrSender) updateRecoveryState(lastAckedPacket protocol.PacketNumber, hasLosses, isRoundStart bool) {
++	// Disable recovery in startup, if loss-based exit is enabled.
++	if !b.isAtFullBandwidth {
++		return
++	}
++
++	// Exit recovery when there are no losses for a round.
++	if hasLosses {
++		b.endRecoveryAt = b.lastSentPacket
++	}
++
++	switch b.recoveryState {
++	case bbrRecoveryStateNotInRecovery:
++		if hasLosses {
++			b.recoveryState = bbrRecoveryStateConservation
++			// This will cause the |recovery_window_| to be set to the correct
++			// value in CalculateRecoveryWindow().
++			b.recoveryWindow = 0
++			// Since the conservation phase is meant to be lasting for a whole
++			// round, extend the current round as if it were started right now.
++			b.currentRoundTripEnd = b.lastSentPacket
++		}
++	case bbrRecoveryStateConservation:
++		if isRoundStart {
++			b.recoveryState = bbrRecoveryStateGrowth
++		}
++		fallthrough
++	case bbrRecoveryStateGrowth:
++		// Exit recovery if appropriate.
++		if !hasLosses && lastAckedPacket > b.endRecoveryAt {
++			b.recoveryState = bbrRecoveryStateNotInRecovery
++		}
++	}
++}
++
++// Determines the appropriate pacing rate for the connection.
++func (b *bbrSender) calculatePacingRate(bytesLost protocol.ByteCount) {
++	if b.bandwidthEstimate() == 0 {
++		return
++	}
++
++	targetRate := Bandwidth(b.pacingGain * float64(b.bandwidthEstimate()))
++	if b.isAtFullBandwidth {
++		b.pacingRate = targetRate
++		return
++	}
++
++	// Pace at the rate of initial_window / RTT as soon as RTT measurements are
++	// available.
++	if b.pacingRate == 0 && b.rttStats.MinRTT() != 0 {
++		b.pacingRate = BandwidthFromDelta(b.initialCongestionWindow, b.rttStats.MinRTT())
++		return
++	}
++
++	if b.detectOvershooting {
++		b.bytesLostWhileDetectingOvershooting += bytesLost
++		// Check for overshooting with network parameters adjusted when pacing rate
++		// > target_rate and loss has been detected.
++		if b.pacingRate > targetRate && b.bytesLostWhileDetectingOvershooting > 0 {
++			if b.hasNoAppLimitedSample ||
++				b.bytesLostWhileDetectingOvershooting*protocol.ByteCount(b.bytesLostMultiplierWhileDetectingOvershooting) > b.initialCongestionWindow {
++				// We are fairly sure overshoot happens if 1) there is at least one
++				// non app-limited bw sample or 2) half of IW gets lost. Slow pacing
++				// rate.
++				b.pacingRate = max(targetRate, BandwidthFromDelta(b.cwndToCalculateMinPacingRate, b.rttStats.MinRTT()))
++				b.bytesLostWhileDetectingOvershooting = 0
++				b.detectOvershooting = false
++			}
++		}
++	}
++
++	// Do not decrease the pacing rate during startup.
++	b.pacingRate = max(b.pacingRate, targetRate)
++}
++
++// Determines the appropriate congestion window for the connection.
++func (b *bbrSender) calculateCongestionWindow(bytesAcked, excessAcked protocol.ByteCount) {
++	if b.mode == bbrModeProbeRtt {
++		return
++	}
++
++	targetWindow := b.getTargetCongestionWindow(b.congestionWindowGain)
++	if b.isAtFullBandwidth {
++		// Add the max recently measured ack aggregation to CWND.
++		targetWindow += b.sampler.MaxAckHeight()
++	} else if b.enableAckAggregationDuringStartup {
++		// Add the most recent excess acked.  Because CWND never decreases in
++		// STARTUP, this will automatically create a very localized max filter.
++		targetWindow += excessAcked
++	}
++
++	// Instead of immediately setting the target CWND as the new one, BBR grows
++	// the CWND towards |target_window| by only increasing it |bytes_acked| at a
++	// time.
++	if b.isAtFullBandwidth {
++		b.congestionWindow = min(targetWindow, b.congestionWindow+bytesAcked)
++	} else if b.congestionWindow < targetWindow ||
++		b.sampler.TotalBytesAcked() < b.initialCongestionWindow {
++		// If the connection is not yet out of startup phase, do not decrease the
++		// window.
++		b.congestionWindow += bytesAcked
++	}
++
++	// Enforce the limits on the congestion window.
++	b.congestionWindow = max(b.congestionWindow, b.minCongestionWindow)
++	b.congestionWindow = min(b.congestionWindow, b.maxCongestionWindow)
++}
++
++// Determines the appropriate window that constrains the in-flight during recovery.
++func (b *bbrSender) calculateRecoveryWindow(bytesAcked, bytesLost protocol.ByteCount) {
++	if b.recoveryState == bbrRecoveryStateNotInRecovery {
++		return
++	}
++
++	// Set up the initial recovery window.
++	if b.recoveryWindow == 0 {
++		b.recoveryWindow = b.bytesInFlight + bytesAcked
++		b.recoveryWindow = max(b.minCongestionWindow, b.recoveryWindow)
++		return
++	}
++
++	// Remove losses from the recovery window, while accounting for a potential
++	// integer underflow.
++	if b.recoveryWindow >= bytesLost {
++		b.recoveryWindow = b.recoveryWindow - bytesLost
++	} else {
++		b.recoveryWindow = b.maxDatagramSize
++	}
++
++	// In CONSERVATION mode, just subtracting losses is sufficient.  In GROWTH,
++	// release additional |bytes_acked| to achieve a slow-start-like behavior.
++	if b.recoveryState == bbrRecoveryStateGrowth {
++		b.recoveryWindow += bytesAcked
++	}
++
++	// Always allow sending at least |bytes_acked| in response.
++	b.recoveryWindow = max(b.recoveryWindow, b.bytesInFlight+bytesAcked)
++	b.recoveryWindow = max(b.minCongestionWindow, b.recoveryWindow)
++}
++
++// Return whether we should exit STARTUP due to excessive loss.
++func (b *bbrSender) shouldExitStartupDueToLoss(lastPacketSendState *sendTimeState) bool {
++	if b.numLossEventsInRound < defaultStartupFullLossCount || !lastPacketSendState.isValid {
++		return false
++	}
++
++	inflightAtSend := lastPacketSendState.bytesInFlight
++
++	if inflightAtSend > 0 && b.bytesLostInRound > 0 {
++		if b.bytesLostInRound > protocol.ByteCount(float64(inflightAtSend)*quicBbr2DefaultLossThreshold) {
++			return true
++		}
++		return false
++	}
++	return false
++}
++
++func (b *bbrSender) debugPrint(format string, a ...any) {
++	fmt.Printf("[BBRSender] [%s] %s\n",
++		time.Now().Format("15:04:05"),
++		fmt.Sprintf(format, a...))
++}
++
++func bdpFromRttAndBandwidth(rtt time.Duration, bandwidth Bandwidth) protocol.ByteCount {
++	return protocol.ByteCount(rtt) * protocol.ByteCount(bandwidth) / protocol.ByteCount(BytesPerSecond) / protocol.ByteCount(time.Second)
++}
++
++func GetInitialPacketSize(addr net.Addr) protocol.ByteCount {
++	// If this is not a UDP address, we don't know anything about the MTU.
++	// Use the minimum size of an Initial packet as the max packet size.
++	if _, ok := addr.(*net.UDPAddr); ok {
++		return protocol.InitialPacketSize
++	} else {
++		return protocol.MinInitialPacketSize
++	}
++}
++
++func formatSpeed(bw Bandwidth) string {
++	bwf := float64(bw)
++	units := []string{"bps", "Kbps", "Mbps", "Gbps"}
++	unitIndex := 0
++	for bwf > 1000 && unitIndex < len(units)-1 {
++		bwf /= 1000
++		unitIndex++
++	}
++	return fmt.Sprintf("%.2f %s", bwf, units[unitIndex])
++}
+--- a/internal/congestion/bbr/clock.go	1970-01-01 03:00:00.000000000 +0300
++++ b/internal/congestion/bbr/clock.go	2026-09-29 23:22:11.982603000 +0300
+@@ -0,0 +1,18 @@
++package bbr
++
++import "github.com/quic-go/quic-go/internal/monotime"
++
++// A Clock returns the current time
++type Clock interface {
++	Now() monotime.Time
++}
++
++// DefaultClock implements the Clock interface using the Go stdlib clock.
++type DefaultClock struct{}
++
++var _ Clock = DefaultClock{}
++
++// Now gets the current time
++func (DefaultClock) Now() monotime.Time {
++	return monotime.Now()
++}
+--- a/internal/congestion/bbr/pacer.go	1970-01-01 03:00:00.000000000 +0300
++++ b/internal/congestion/bbr/pacer.go	2026-09-29 23:22:11.984281300 +0300
+@@ -0,0 +1,80 @@
++package bbr
++
++import (
++	"time"
++
++	"github.com/quic-go/quic-go/internal/monotime"
++	"github.com/quic-go/quic-go/internal/protocol"
++)
++
++const (
++	maxBurstPackets               = 10
++	maxBurstPacingDelayMultiplier = 4
++)
++
++// Pacer implements a token bucket pacing algorithm.
++type Pacer struct {
++	budgetAtLastSent protocol.ByteCount
++	maxDatagramSize  protocol.ByteCount
++	lastSentTime     monotime.Time
++	getBandwidth     func() protocol.ByteCount // in bytes/s
++}
++
++func NewPacer(getBandwidth func() protocol.ByteCount) *Pacer {
++	p := &Pacer{
++		budgetAtLastSent: maxBurstPackets * protocol.InitialPacketSize,
++		maxDatagramSize:  protocol.InitialPacketSize,
++		getBandwidth:     getBandwidth,
++	}
++	return p
++}
++
++func (p *Pacer) SentPacket(sendTime monotime.Time, size protocol.ByteCount) {
++	budget := p.Budget(sendTime)
++	if size > budget {
++		p.budgetAtLastSent = 0
++	} else {
++		p.budgetAtLastSent = budget - size
++	}
++	p.lastSentTime = sendTime
++}
++
++func (p *Pacer) Budget(now monotime.Time) protocol.ByteCount {
++	if p.lastSentTime.IsZero() {
++		return p.maxBurstSize()
++	}
++	budget := p.budgetAtLastSent + (p.getBandwidth()*protocol.ByteCount(now.Sub(p.lastSentTime).Nanoseconds()))/1e9
++	if budget < 0 { // protect against overflows
++		budget = protocol.ByteCount(1<<62 - 1)
++	}
++	return min(p.maxBurstSize(), budget)
++}
++
++func (p *Pacer) maxBurstSize() protocol.ByteCount {
++	return max(
++		protocol.ByteCount((maxBurstPacingDelayMultiplier*protocol.MinPacingDelay).Nanoseconds())*p.getBandwidth()/1e9,
++		maxBurstPackets*p.maxDatagramSize,
++	)
++}
++
++// TimeUntilSend returns when the next packet should be sent.
++// It returns the zero value if a packet can be sent immediately.
++func (p *Pacer) TimeUntilSend() monotime.Time {
++	if p.budgetAtLastSent >= p.maxDatagramSize {
++		return 0
++	}
++	diff := 1e9 * uint64(p.maxDatagramSize-p.budgetAtLastSent)
++	bw := uint64(p.getBandwidth())
++	// We might need to round up this value.
++	// Otherwise, we might have a budget (slightly) smaller than the datagram size when the timer expires.
++	d := diff / bw
++	// this is effectively a math.Ceil, but using only integer math
++	if diff%bw > 0 {
++		d++
++	}
++	return p.lastSentTime.Add(max(protocol.MinPacingDelay, time.Duration(d)*time.Nanosecond))
++}
++
++func (p *Pacer) SetMaxDatagramSize(s protocol.ByteCount) {
++	p.maxDatagramSize = s
++}
+--- a/internal/congestion/bbr/packet_number_indexed_queue.go	1970-01-01 03:00:00.000000000 +0300
++++ b/internal/congestion/bbr/packet_number_indexed_queue.go	2026-09-29 23:22:11.982603000 +0300
+@@ -0,0 +1,199 @@
++package bbr
++
++import (
++	"github.com/quic-go/quic-go/internal/protocol"
++)
++
++// packetNumberIndexedQueue is a queue of mostly continuous numbered entries
++// which supports the following operations:
++// - adding elements to the end of the queue, or at some point past the end
++// - removing elements in any order
++// - retrieving elements
++// If all elements are inserted in order, all of the operations above are
++// amortized O(1) time.
++//
++// Internally, the data structure is a deque where each element is marked as
++// present or not.  The deque starts at the lowest present index.  Whenever an
++// element is removed, it's marked as not present, and the front of the deque is
++// cleared of elements that are not present.
++//
++// The tail of the queue is not cleared due to the assumption of entries being
++// inserted in order, though removing all elements of the queue will return it
++// to its initial state.
++//
++// Note that this data structure is inherently hazardous, since an addition of
++// just two entries will cause it to consume all of the memory available.
++// Because of that, it is not a general-purpose container and should not be used
++// as one.
++
++type entryWrapper[T any] struct {
++	present bool
++	entry   T
++}
++
++type packetNumberIndexedQueue[T any] struct {
++	entries                RingBuffer[entryWrapper[T]]
++	numberOfPresentEntries int
++	firstPacket            protocol.PacketNumber
++}
++
++func newPacketNumberIndexedQueue[T any](size int) *packetNumberIndexedQueue[T] {
++	q := &packetNumberIndexedQueue[T]{
++		firstPacket: invalidPacketNumber,
++	}
++
++	q.entries.Init(size)
++
++	return q
++}
++
++// Emplace inserts data associated |packet_number| into (or past) the end of the
++// queue, filling up the missing intermediate entries as necessary.  Returns
++// true if the element has been inserted successfully, false if it was already
++// in the queue or inserted out of order.
++func (p *packetNumberIndexedQueue[T]) Emplace(packetNumber protocol.PacketNumber, entry *T) bool {
++	if packetNumber == invalidPacketNumber || entry == nil {
++		return false
++	}
++
++	if p.IsEmpty() {
++		p.entries.PushBack(entryWrapper[T]{
++			present: true,
++			entry:   *entry,
++		})
++		p.numberOfPresentEntries = 1
++		p.firstPacket = packetNumber
++		return true
++	}
++
++	// Do not allow insertion out-of-order.
++	if packetNumber <= p.LastPacket() {
++		return false
++	}
++
++	// Handle potentially missing elements.
++	offset := int(packetNumber - p.FirstPacket())
++	if gap := offset - p.entries.Len(); gap > 0 {
++		for i := 0; i < gap; i++ {
++			p.entries.PushBack(entryWrapper[T]{})
++		}
++	}
++
++	p.entries.PushBack(entryWrapper[T]{
++		present: true,
++		entry:   *entry,
++	})
++	p.numberOfPresentEntries++
++	return true
++}
++
++// GetEntry Retrieve the entry associated with the packet number.  Returns the pointer
++// to the entry in case of success, or nullptr if the entry does not exist.
++func (p *packetNumberIndexedQueue[T]) GetEntry(packetNumber protocol.PacketNumber) *T {
++	ew := p.getEntryWraper(packetNumber)
++	if ew == nil {
++		return nil
++	}
++
++	return &ew.entry
++}
++
++// Remove, Same as above, but if an entry is present in the queue, also call f(entry)
++// before removing it.
++func (p *packetNumberIndexedQueue[T]) Remove(packetNumber protocol.PacketNumber, f func(T)) bool {
++	ew := p.getEntryWraper(packetNumber)
++	if ew == nil {
++		return false
++	}
++	if f != nil {
++		f(ew.entry)
++	}
++	ew.present = false
++	p.numberOfPresentEntries--
++
++	if packetNumber == p.FirstPacket() {
++		p.clearup()
++	}
++
++	return true
++}
++
++// RemoveUpTo, but not including |packet_number|.
++// Unused slots in the front are also removed, which means when the function
++// returns, |first_packet()| can be larger than |packet_number|.
++func (p *packetNumberIndexedQueue[T]) RemoveUpTo(packetNumber protocol.PacketNumber) {
++	for !p.entries.Empty() &&
++		p.firstPacket != invalidPacketNumber &&
++		p.firstPacket < packetNumber {
++		if p.entries.Front().present {
++			p.numberOfPresentEntries--
++		}
++		p.entries.PopFront()
++		p.firstPacket++
++	}
++	p.clearup()
++
++	return
++}
++
++// IsEmpty return if queue is empty.
++func (p *packetNumberIndexedQueue[T]) IsEmpty() bool {
++	return p.numberOfPresentEntries == 0
++}
++
++// NumberOfPresentEntries returns the number of entries in the queue.
++func (p *packetNumberIndexedQueue[T]) NumberOfPresentEntries() int {
++	return p.numberOfPresentEntries
++}
++
++// EntrySlotsUsed returns the number of entries allocated in the underlying deque.  This is
++// proportional to the memory usage of the queue.
++func (p *packetNumberIndexedQueue[T]) EntrySlotsUsed() int {
++	return p.entries.Len()
++}
++
++// FirstPacket returns packet number of the first entry in the queue.
++func (p *packetNumberIndexedQueue[T]) FirstPacket() (packetNumber protocol.PacketNumber) {
++	return p.firstPacket
++}
++
++// LastPacket returns packet number of the last entry ever inserted in the queue.  Note that the
++// entry in question may have already been removed.  Zero if the queue is
++// empty.
++func (p *packetNumberIndexedQueue[T]) LastPacket() (packetNumber protocol.PacketNumber) {
++	if p.IsEmpty() {
++		return invalidPacketNumber
++	}
++
++	return p.firstPacket + protocol.PacketNumber(p.entries.Len()-1)
++}
++
++func (p *packetNumberIndexedQueue[T]) clearup() {
++	for !p.entries.Empty() && !p.entries.Front().present {
++		p.entries.PopFront()
++		p.firstPacket++
++	}
++	if p.entries.Empty() {
++		p.firstPacket = invalidPacketNumber
++	}
++}
++
++func (p *packetNumberIndexedQueue[T]) getEntryWraper(packetNumber protocol.PacketNumber) *entryWrapper[T] {
++	if packetNumber == invalidPacketNumber ||
++		p.IsEmpty() ||
++		packetNumber < p.firstPacket {
++		return nil
++	}
++
++	offset := int(packetNumber - p.firstPacket)
++	if offset >= p.entries.Len() {
++		return nil
++	}
++
++	ew := p.entries.Offset(offset)
++	if ew == nil || !ew.present {
++		return nil
++	}
++
++	return ew
++}
+--- a/internal/congestion/bbr/ringbuffer.go	1970-01-01 03:00:00.000000000 +0300
++++ b/internal/congestion/bbr/ringbuffer.go	2026-09-29 23:22:11.983114500 +0300
+@@ -0,0 +1,118 @@
++package bbr
++
++// A RingBuffer is a ring buffer.
++// It acts as a heap that doesn't cause any allocations.
++type RingBuffer[T any] struct {
++	ring             []T
++	headPos, tailPos int
++	full             bool
++}
++
++// Init preallocs a buffer with a certain size.
++func (r *RingBuffer[T]) Init(size int) {
++	r.ring = make([]T, size)
++}
++
++// Len returns the number of elements in the ring buffer.
++func (r *RingBuffer[T]) Len() int {
++	if r.full {
++		return len(r.ring)
++	}
++	if r.tailPos >= r.headPos {
++		return r.tailPos - r.headPos
++	}
++	return r.tailPos - r.headPos + len(r.ring)
++}
++
++// Empty says if the ring buffer is empty.
++func (r *RingBuffer[T]) Empty() bool {
++	return !r.full && r.headPos == r.tailPos
++}
++
++// PushBack adds a new element.
++// If the ring buffer is full, its capacity is increased first.
++func (r *RingBuffer[T]) PushBack(t T) {
++	if r.full || len(r.ring) == 0 {
++		r.grow()
++	}
++	r.ring[r.tailPos] = t
++	r.tailPos++
++	if r.tailPos == len(r.ring) {
++		r.tailPos = 0
++	}
++	if r.tailPos == r.headPos {
++		r.full = true
++	}
++}
++
++// PopFront returns the next element.
++// It must not be called when the buffer is empty, that means that
++// callers might need to check if there are elements in the buffer first.
++func (r *RingBuffer[T]) PopFront() T {
++	if r.Empty() {
++		panic("github.com/quic-go/quic-go/internal/utils/ringbuffer: pop from an empty queue")
++	}
++	r.full = false
++	t := r.ring[r.headPos]
++	r.ring[r.headPos] = *new(T)
++	r.headPos++
++	if r.headPos == len(r.ring) {
++		r.headPos = 0
++	}
++	return t
++}
++
++// Offset returns the offset element.
++// It must not be called when the buffer is empty, that means that
++// callers might need to check if there are elements in the buffer first
++// and check if the index larger than buffer length.
++func (r *RingBuffer[T]) Offset(index int) *T {
++	if r.Empty() || index >= r.Len() {
++		panic("github.com/quic-go/quic-go/internal/utils/ringbuffer: offset from invalid index")
++	}
++	offset := (r.headPos + index) % len(r.ring)
++	return &r.ring[offset]
++}
++
++// Front returns the front element.
++// It must not be called when the buffer is empty, that means that
++// callers might need to check if there are elements in the buffer first.
++func (r *RingBuffer[T]) Front() *T {
++	if r.Empty() {
++		panic("github.com/quic-go/quic-go/internal/utils/ringbuffer: front from an empty queue")
++	}
++	return &r.ring[r.headPos]
++}
++
++// Back returns the back element.
++// It must not be called when the buffer is empty, that means that
++// callers might need to check if there are elements in the buffer first.
++func (r *RingBuffer[T]) Back() *T {
++	if r.Empty() {
++		panic("github.com/quic-go/quic-go/internal/utils/ringbuffer: back from an empty queue")
++	}
++	return r.Offset(r.Len() - 1)
++}
++
++// Grow the maximum size of the queue.
++// This method assume the queue is full.
++func (r *RingBuffer[T]) grow() {
++	oldRing := r.ring
++	newSize := len(oldRing) * 2
++	if newSize == 0 {
++		newSize = 1
++	}
++	r.ring = make([]T, newSize)
++	headLen := copy(r.ring, oldRing[r.headPos:])
++	copy(r.ring[headLen:], oldRing[:r.headPos])
++	r.headPos, r.tailPos, r.full = 0, len(oldRing), false
++}
++
++// Clear removes all elements.
++func (r *RingBuffer[T]) Clear() {
++	var zeroValue T
++	for i := range r.ring {
++		r.ring[i] = zeroValue
++	}
++	r.headPos, r.tailPos, r.full = 0, 0, false
++}
+--- a/internal/congestion/bbr/windowed_filter.go	1970-01-01 03:00:00.000000000 +0300
++++ b/internal/congestion/bbr/windowed_filter.go	2026-09-29 23:22:11.984801900 +0300
+@@ -0,0 +1,162 @@
++package bbr
++
++import (
++	"cmp"
++)
++
++// Implements Kathleen Nichols' algorithm for tracking the minimum (or maximum)
++// estimate of a stream of samples over some fixed time interval. (E.g.,
++// the minimum RTT over the past five minutes.) The algorithm keeps track of
++// the best, second best, and third best min (or max) estimates, maintaining an
++// invariant that the measurement time of the n'th best >= n-1'th best.
++
++// The algorithm works as follows. On a reset, all three estimates are set to
++// the same sample. The second best estimate is then recorded in the second
++// quarter of the window, and a third best estimate is recorded in the second
++// half of the window, bounding the worst case error when the true min is
++// monotonically increasing (or true max is monotonically decreasing) over the
++// window.
++//
++// A new best sample replaces all three estimates, since the new best is lower
++// (or higher) than everything else in the window and it is the most recent.
++// The window thus effectively gets reset on every new min. The same property
++// holds true for second best and third best estimates. Specifically, when a
++// sample arrives that is better than the second best but not better than the
++// best, it replaces the second and third best estimates but not the best
++// estimate. Similarly, a sample that is better than the third best estimate
++// but not the other estimates replaces only the third best estimate.
++//
++// Finally, when the best expires, it is replaced by the second best, which in
++// turn is replaced by the third best. The newest sample replaces the third
++// best.
++
++type WindowedFilterValue interface {
++	any
++}
++
++type WindowedFilterTime interface {
++	~int | ~int8 | ~int16 | ~int32 | ~int64 | ~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr | ~float32 | ~float64
++}
++
++type WindowedFilter[V WindowedFilterValue, T WindowedFilterTime] struct {
++	// Time length of window.
++	windowLength T
++	estimates    []entry[V, T]
++	comparator   func(V, V) int
++}
++
++type entry[V WindowedFilterValue, T WindowedFilterTime] struct {
++	sample V
++	time   T
++}
++
++// Compares two values and returns true if the first is greater than or equal
++// to the second.
++func MaxFilter[O cmp.Ordered](a, b O) int {
++	if a > b {
++		return 1
++	} else if a < b {
++		return -1
++	}
++	return 0
++}
++
++// Compares two values and returns true if the first is less than or equal
++// to the second.
++func MinFilter[O cmp.Ordered](a, b O) int {
++	if a < b {
++		return 1
++	} else if a > b {
++		return -1
++	}
++	return 0
++}
++
++func NewWindowedFilter[V WindowedFilterValue, T WindowedFilterTime](windowLength T, comparator func(V, V) int) *WindowedFilter[V, T] {
++	return &WindowedFilter[V, T]{
++		windowLength: windowLength,
++		estimates:    make([]entry[V, T], 3, 3),
++		comparator:   comparator,
++	}
++}
++
++// Changes the window length.  Does not update any current samples.
++func (f *WindowedFilter[V, T]) SetWindowLength(windowLength T) {
++	f.windowLength = windowLength
++}
++
++func (f *WindowedFilter[V, T]) GetBest() V {
++	return f.estimates[0].sample
++}
++
++func (f *WindowedFilter[V, T]) GetSecondBest() V {
++	return f.estimates[1].sample
++}
++
++func (f *WindowedFilter[V, T]) GetThirdBest() V {
++	return f.estimates[2].sample
++}
++
++// Updates best estimates with |sample|, and expires and updates best
++// estimates as necessary.
++func (f *WindowedFilter[V, T]) Update(newSample V, newTime T) {
++	// Reset all estimates if they have not yet been initialized, if new sample
++	// is a new best, or if the newest recorded estimate is too old.
++	if f.comparator(f.estimates[0].sample, *new(V)) == 0 ||
++		f.comparator(newSample, f.estimates[0].sample) >= 0 ||
++		newTime-f.estimates[2].time > f.windowLength {
++		f.Reset(newSample, newTime)
++		return
++	}
++
++	if f.comparator(newSample, f.estimates[1].sample) >= 0 {
++		f.estimates[1] = entry[V, T]{newSample, newTime}
++		f.estimates[2] = f.estimates[1]
++	} else if f.comparator(newSample, f.estimates[2].sample) >= 0 {
++		f.estimates[2] = entry[V, T]{newSample, newTime}
++	}
++
++	// Expire and update estimates as necessary.
++	if newTime-f.estimates[0].time > f.windowLength {
++		// The best estimate hasn't been updated for an entire window, so promote
++		// second and third best estimates.
++		f.estimates[0] = f.estimates[1]
++		f.estimates[1] = f.estimates[2]
++		f.estimates[2] = entry[V, T]{newSample, newTime}
++		// Need to iterate one more time. Check if the new best estimate is
++		// outside the window as well, since it may also have been recorded a
++		// long time ago. Don't need to iterate once more since we cover that
++		// case at the beginning of the method.
++		if newTime-f.estimates[0].time > f.windowLength {
++			f.estimates[0] = f.estimates[1]
++			f.estimates[1] = f.estimates[2]
++		}
++		return
++	}
++	if f.comparator(f.estimates[1].sample, f.estimates[0].sample) == 0 &&
++		newTime-f.estimates[1].time > f.windowLength/4 {
++		// A quarter of the window has passed without a better sample, so the
++		// second-best estimate is taken from the second quarter of the window.
++		f.estimates[1] = entry[V, T]{newSample, newTime}
++		f.estimates[2] = f.estimates[1]
++		return
++	}
++
++	if f.comparator(f.estimates[2].sample, f.estimates[1].sample) == 0 &&
++		newTime-f.estimates[2].time > f.windowLength/2 {
++		// We've passed a half of the window without a better estimate, so take
++		// a third-best estimate from the second half of the window.
++		f.estimates[2] = entry[V, T]{newSample, newTime}
++	}
++}
++
++// Resets all estimates to new sample.
++func (f *WindowedFilter[V, T]) Reset(newSample V, newTime T) {
++	f.estimates[2] = entry[V, T]{newSample, newTime}
++	f.estimates[1] = f.estimates[2]
++	f.estimates[0] = f.estimates[1]
++}
++
++func (f *WindowedFilter[V, T]) Clear() {
++	f.estimates = make([]entry[V, T], 3, 3)
++}
 --- a/internal/congestion/brutal_sender.go	1970-01-01 03:00:00.000000000 +0300
-+++ b/internal/congestion/brutal_sender.go	2026-09-03 00:52:25.985199800 +0300
++++ b/internal/congestion/brutal_sender.go	2026-09-29 23:22:11.980010400 +0300
 @@ -0,0 +1,92 @@
 +package congestion
 +
@@ -227,9 +3125,117 @@ diff -ruN '--exclude=.git' qg-orig/internal/congestion/brutal_sender.go C:/Users
 +func (b *brutalSender) InRecovery() bool                    { return false }
 +func (b *brutalSender) GetSlowStartThreshold() protocol.ByteCount { return 0 }
 +func (b *brutalSender) BandwidthEstimate() Bandwidth        { return b.bps }
-diff -ruN '--exclude=.git' qg-orig/send_queue.go C:/Users/jaywehosl/Desktop/quic-diver/third_party/quic-go/send_queue.go
---- a/send_queue.go	2026-09-03 18:08:02.009639400 +0300
-+++ b/send_queue.go	2026-09-03 18:07:27.073180400 +0300
+--- a/internal/congestion/interface.go	2026-09-29 23:22:11.751813200 +0300
++++ b/internal/congestion/interface.go	2026-09-29 23:22:11.982091800 +0300
+@@ -25,3 +25,18 @@
+ 	InRecovery() bool
+ 	GetCongestionWindow() protocol.ByteCount
+ }
++
++type AckedPacketInfo struct {
++	PacketNumber protocol.PacketNumber
++	BytesAcked   protocol.ByteCount
++	ReceivedTime monotime.Time
++}
++
++type LostPacketInfo struct {
++	PacketNumber protocol.PacketNumber
++	BytesLost    protocol.ByteCount
++}
++
++type SendAlgorithmEx interface {
++	OnCongestionEventEx(priorInFlight protocol.ByteCount, eventTime monotime.Time, ackedPackets []AckedPacketInfo, lostPackets []LostPacketInfo)
++}
+--- a/internal/protocol/params.go	2026-09-29 23:22:11.766664400 +0300
++++ b/internal/protocol/params.go	2026-09-29 23:22:11.963195700 +0300
+@@ -149,6 +149,8 @@
+ // MaxAckDelay is the maximum time by which we delay sending ACKs.
+ const MaxAckDelay = 25 * time.Millisecond
+ 
++const QDMinAckDelay = time.Millisecond
++
+ // MaxAckDelayInclGranularity is the max_ack_delay including the timer granularity.
+ // This is the value that should be advertised to the peer.
+ const MaxAckDelayInclGranularity = MaxAckDelay + TimerGranularity
+--- a/internal/wire/short_header.go	2026-09-29 23:22:11.789803400 +0300
++++ b/internal/wire/short_header.go	2026-09-29 23:22:11.954924400 +0300
+@@ -18,9 +18,6 @@
+ 	if data[0]&0x80 > 0 {
+ 		return 0, 0, 0, 0, errors.New("not a short header packet")
+ 	}
+-	if data[0]&0x40 == 0 {
+-		return 0, 0, 0, 0, errors.New("not a QUIC packet")
+-	}
+ 	pnLen := protocol.PacketNumberLen(data[0]&0b11) + 1
+ 	if len(data) < 1+int(pnLen)+connIDLen {
+ 		return 0, 0, 0, 0, io.EOF
+--- a/internal/wire/transport_parameters.go	2026-09-29 23:22:11.784742300 +0300
++++ b/internal/wire/transport_parameters.go	2026-09-29 23:22:11.950441700 +0300
+@@ -50,6 +50,8 @@
+ 	resetStreamAtParameterID transportParameterID = 0x17f7586d2cb571
+ 	// https://datatracker.ietf.org/doc/draft-ietf-quic-ack-frequency/11/
+ 	minAckDelayParameterID transportParameterID = 0xff04de1b
++	// RFC 9287
++	greaseQUICBitParameterID transportParameterID = 0x2ab2
+ )
+ 
+ // PreferredAddress is the value encoding in the preferred_address transport parameter
+@@ -88,7 +90,8 @@
+ 	ActiveConnectionIDLimit uint64
+ 
+ 	MaxDatagramFrameSize protocol.ByteCount // RFC 9221
+-	EnableResetStreamAt  bool               // https://datatracker.ietf.org/doc/draft-ietf-quic-reliable-stream-reset/06/
++	GreaseQUICBit        bool
++	EnableResetStreamAt  bool // https://datatracker.ietf.org/doc/draft-ietf-quic-reliable-stream-reset/06/
+ 	MinAckDelay          *time.Duration
+ }
+ 
+@@ -210,6 +213,11 @@
+ 				return fmt.Errorf("wrong length for reset_stream_at: %d (expected empty)", paramLen)
+ 			}
+ 			p.EnableResetStreamAt = true
++		case greaseQUICBitParameterID:
++			if paramLen != 0 {
++				return fmt.Errorf("wrong length for grease_quic_bit: %d (expected empty)", paramLen)
++			}
++			p.GreaseQUICBit = true
+ 		default:
+ 			b = b[paramLen:]
+ 		}
+@@ -455,6 +463,10 @@
+ 		b = quicvarint.Append(b, uint64(resetStreamAtParameterID))
+ 		b = quicvarint.Append(b, 0)
+ 	}
++	if p.GreaseQUICBit {
++		b = quicvarint.Append(b, uint64(greaseQUICBitParameterID))
++		b = quicvarint.Append(b, 0)
++	}
+ 	if p.MinAckDelay != nil {
+ 		b = p.marshalVarintParam(b, minAckDelayParameterID, uint64(*p.MinAckDelay/time.Microsecond))
+ 	}
+--- a/packet_packer.go	2026-09-29 23:22:11.799502000 +0300
++++ b/packet_packer.go	2026-09-29 23:22:11.881883300 +0300
+@@ -116,6 +116,8 @@
+ }
+ 
+ type packetPacker struct {
++	grease bool
++
+ 	srcConnID     protocol.ConnectionID
+ 	getDestConnID func() protocol.ConnectionID
+ 
+@@ -918,6 +920,9 @@
+ 	if err != nil {
+ 		return shortHeaderPacket{}, err
+ 	}
++	if p.grease && p.rand.IntN(2) == 0 {
++		raw[0] &^= 0x40
++	}
+ 	payloadOffset := protocol.ByteCount(len(raw))
+ 
+ 	raw, err = p.appendPacketPayload(raw, pl, paddingLen, v)
+--- a/send_queue.go	2026-09-29 23:22:11.804610400 +0300
++++ b/send_queue.go	2026-09-29 23:22:11.988418400 +0300
 @@ -87,12 +87,16 @@
  			// make sure that all queued packets are actually sent out
  			shouldClose = true
@@ -249,9 +3255,8 @@ diff -ruN '--exclude=.git' qg-orig/send_queue.go C:/Users/jaywehosl/Desktop/quic
  					return err
  				}
  			}
-diff -ruN '--exclude=.git' qg-orig/send_transient_other.go C:/Users/jaywehosl/Desktop/quic-diver/third_party/quic-go/send_transient_other.go
 --- a/send_transient_other.go	1970-01-01 03:00:00.000000000 +0300
-+++ b/send_transient_other.go	2026-09-03 18:07:17.723219900 +0300
++++ b/send_transient_other.go	2026-09-29 23:22:11.926685100 +0300
 @@ -0,0 +1,9 @@
 +//go:build !windows && !linux
 +
@@ -262,51 +3267,8 @@ diff -ruN '--exclude=.git' qg-orig/send_transient_other.go C:/Users/jaywehosl/De
 +func isTransientSendErr(error) bool { return false }
 +
 +func retrySend(_ func() error, err error) error { return err }
-diff -ruN '--exclude=.git' qg-orig/send_transient_windows.go C:/Users/jaywehosl/Desktop/quic-diver/third_party/quic-go/send_transient_windows.go
---- a/send_transient_windows.go	1970-01-01 03:00:00.000000000 +0300
-+++ b/send_transient_windows.go	2026-09-03 18:07:17.684880700 +0300
-@@ -0,0 +1,38 @@
-+//go:build windows
-+
-+package quic
-+
-+import (
-+	"errors"
-+	"time"
-+
-+	"golang.org/x/sys/windows"
-+)
-+
-+// Ядро Windows отвечает WSAENOBUFS, когда очередь сокета переполнена: на отдаче
-+// в сотни мегабит это «повтори позже», а не отказ пути. Upstream роняет по любой
-+// ошибке записи всю сессию (sendQueue.Run), и туннель умирал на середине
-+// аплоада — с ним и все живые соединения приложений.
-+//
-+// Ждём столько, сколько нужно ядру, чтобы разгрести очередь, и повторяем. Если
-+// не помогло за transientTries — пакет теряется, но соединение остаётся: потерю
-+// QUIC закроет своим ретрансмитом.
-+const (
-+	transientTries = 12
-+	transientPause = 250 * time.Microsecond
-+)
-+
-+func isTransientSendErr(err error) bool {
-+	return errors.Is(err, windows.WSAENOBUFS) || errors.Is(err, windows.WSAEWOULDBLOCK)
-+}
-+
-+func retrySend(send func() error, err error) error {
-+	for i := 0; i < transientTries && isTransientSendErr(err); i++ {
-+		time.Sleep(transientPause)
-+		err = send()
-+	}
-+	if isTransientSendErr(err) {
-+		return nil // сдались на этом пакете, но сессию не рвём
-+	}
-+	return err
-+}
-diff -ruN '--exclude=.git' qg-orig/send_transient_unix.go C:/Users/jaywehosl/Desktop/quic-diver/third_party/quic-go/send_transient_unix.go
 --- a/send_transient_unix.go	1970-01-01 03:00:00.000000000 +0300
-+++ b/send_transient_unix.go	2026-09-04 19:13:32.000000000 +0300
++++ b/send_transient_unix.go	2026-09-29 23:22:11.922573800 +0300
 @@ -0,0 +1,49 @@
 +//go:build linux
 +
@@ -357,3 +3319,199 @@ diff -ruN '--exclude=.git' qg-orig/send_transient_unix.go C:/Users/jaywehosl/Des
 +	}
 +	return err
 +}
+--- a/send_transient_windows.go	1970-01-01 03:00:00.000000000 +0300
++++ b/send_transient_windows.go	2026-09-29 23:22:11.919990200 +0300
+@@ -0,0 +1,38 @@
++//go:build windows
++
++package quic
++
++import (
++	"errors"
++	"time"
++
++	"golang.org/x/sys/windows"
++)
++
++// Ядро Windows отвечает WSAENOBUFS, когда очередь сокета переполнена: на отдаче
++// в сотни мегабит это «повтори позже», а не отказ пути. Upstream роняет по любой
++// ошибке записи всю сессию (sendQueue.Run), и туннель умирал на середине
++// аплоада — с ним и все живые соединения приложений.
++//
++// Ждём столько, сколько нужно ядру, чтобы разгрести очередь, и повторяем. Если
++// не помогло за transientTries — пакет теряется, но соединение остаётся: потерю
++// QUIC закроет своим ретрансмитом.
++const (
++	transientTries = 12
++	transientPause = 250 * time.Microsecond
++)
++
++func isTransientSendErr(err error) bool {
++	return errors.Is(err, windows.WSAENOBUFS) || errors.Is(err, windows.WSAEWOULDBLOCK)
++}
++
++func retrySend(send func() error, err error) error {
++	for i := 0; i < transientTries && isTransientSendErr(err); i++ {
++		time.Sleep(transientPause)
++		err = send()
++	}
++	if isTransientSendErr(err) {
++		return nil // сдались на этом пакете, но сессию не рвём
++	}
++	return err
++}
+--- a/sys_conn_uso_windows.go	1970-01-01 03:00:00.000000000 +0300
++++ b/sys_conn_uso_windows.go	2026-09-29 23:22:11.925654400 +0300
+@@ -0,0 +1,126 @@
++//go:build windows
++
++package quic
++
++import (
++	"errors"
++	"net"
++	"os"
++	"sync/atomic"
++	"syscall"
++	"unsafe"
++
++	"golang.org/x/sys/windows"
++
++	"github.com/quic-go/quic-go/internal/protocol"
++)
++
++const qdUDPSendMsgSize = 2
++
++type usoConn struct {
++	*basicConn
++	raw syscall.RawConn
++	v6  bool
++	off atomic.Bool
++}
++
++func qdWrapUSO(c OOBCapablePacketConn, supportsDF bool) rawConn {
++	b := &basicConn{PacketConn: c, supportsDF: supportsDF}
++	if os.Getenv("QD_USO") == "off" {
++		return b
++	}
++	raw, err := c.SyscallConn()
++	if err != nil {
++		return b
++	}
++	var serr error
++	if err := raw.Control(func(fd uintptr) {
++		_, serr = windows.GetsockoptInt(windows.Handle(fd), windows.IPPROTO_UDP, qdUDPSendMsgSize)
++	}); err != nil || serr != nil {
++		return b
++	}
++	local, _ := c.LocalAddr().(*net.UDPAddr)
++	return &usoConn{basicConn: b, raw: raw, v6: local == nil || local.IP.To4() == nil}
++}
++
++func (c *usoConn) capabilities() connCapabilities {
++	return connCapabilities{DF: c.supportsDF, GSO: !c.off.Load()}
++}
++
++func (c *usoConn) WritePacket(b []byte, addr net.Addr, _ []byte, gsoSize uint16, _ protocol.ECN) (int, error) {
++	if gsoSize == 0 || len(b) <= int(gsoSize) {
++		return c.WriteTo(b, addr)
++	}
++	if !c.off.Load() {
++		n, err := c.sendSegmented(b, addr, gsoSize)
++		if err == nil || isTransientSendErr(err) {
++			return n, err
++		}
++	}
++	total := len(b)
++	for len(b) > 0 {
++		seg := b[:min(len(b), int(gsoSize))]
++		if _, err := c.WriteTo(seg, addr); err != nil {
++			return 0, err
++		}
++		b = b[len(seg):]
++	}
++	c.off.Store(true)
++	return total, nil
++}
++
++func (c *usoConn) sendSegmented(b []byte, addr net.Addr, gsoSize uint16) (int, error) {
++	ua, ok := addr.(*net.UDPAddr)
++	if !ok {
++		return 0, errors.New("uso: not a UDP address")
++	}
++	ap := ua.AddrPort()
++	var sa4 windows.RawSockaddrInet4
++	var sa6 windows.RawSockaddrInet6
++	var name unsafe.Pointer
++	var namelen int32
++	if c.v6 {
++		sa6.Family = windows.AF_INET6
++		port := (*[2]byte)(unsafe.Pointer(&sa6.Port))
++		port[0], port[1] = byte(ap.Port()>>8), byte(ap.Port())
++		sa6.Addr = ap.Addr().As16()
++		name, namelen = unsafe.Pointer(&sa6), int32(unsafe.Sizeof(sa6))
++	} else {
++		sa4.Family = windows.AF_INET
++		port := (*[2]byte)(unsafe.Pointer(&sa4.Port))
++		port[0], port[1] = byte(ap.Port()>>8), byte(ap.Port())
++		sa4.Addr = ap.Addr().Unmap().As4()
++		name, namelen = unsafe.Pointer(&sa4), int32(unsafe.Sizeof(sa4))
++	}
++
++	const word = unsafe.Sizeof(uintptr(0))
++	const head = (word + 8 + word - 1) &^ (word - 1)
++	const space = head + (4+word-1)&^(word-1)
++	var ctl [4]uint64
++	raw := unsafe.Slice((*byte)(unsafe.Pointer(&ctl[0])), space)
++	*(*uintptr)(unsafe.Pointer(&raw[0])) = head + 4
++	*(*int32)(unsafe.Pointer(&raw[word])) = windows.IPPROTO_UDP
++	*(*int32)(unsafe.Pointer(&raw[word+4])) = qdUDPSendMsgSize
++	*(*uint32)(unsafe.Pointer(&raw[head])) = uint32(gsoSize)
++
++	buf := windows.WSABuf{Len: uint32(len(b)), Buf: &b[0]}
++	msg := windows.WSAMsg{
++		Name:        (*syscall.RawSockaddrAny)(name),
++		Namelen:     namelen,
++		Buffers:     &buf,
++		BufferCount: 1,
++		Control:     windows.WSABuf{Len: uint32(space), Buf: &raw[0]},
++	}
++	var sent uint32
++	var serr error
++	if err := c.raw.Write(func(fd uintptr) bool {
++		serr = windows.WSASendMsg(windows.Handle(fd), &msg, 0, &sent, nil, nil)
++		return true
++	}); err != nil {
++		return 0, err
++	}
++	if serr != nil {
++		return 0, serr
++	}
++	return int(sent), nil
++}
+--- a/sys_conn_windows.go	2026-09-29 23:22:11.726750200 +0300
++++ b/sys_conn_windows.go	2026-09-29 23:22:11.923603000 +0300
+@@ -9,8 +9,8 @@
+ 	"golang.org/x/sys/windows"
+ )
+ 
+-func newConn(c OOBCapablePacketConn, supportsDF bool) (*basicConn, error) {
+-	return &basicConn{PacketConn: c, supportsDF: supportsDF}, nil
++func newConn(c OOBCapablePacketConn, supportsDF bool) (rawConn, error) {
++	return qdWrapUSO(c, supportsDF), nil
+ }
+ 
+ func inspectReadBuffer(c syscall.RawConn) (int, error) {
+--- a/transport.go	2026-09-29 23:22:11.812035700 +0300
++++ b/transport.go	2026-09-29 23:22:11.909792300 +0300
+@@ -563,10 +563,6 @@
+ 	if len(p.data) == 0 {
+ 		return
+ 	}
+-	if !wire.IsPotentialQUICPacket(p.data[0]) && !wire.IsLongHeaderPacket(p.data[0]) {
+-		t.handleNonQUICPacket(p)
+-		return
+-	}
+ 	connID, err := wire.ParseConnectionID(p.data, t.connIDLen)
+ 	if err != nil {
+ 		t.logger.Debugf("error parsing connection ID on packet from %s: %s", p.remoteAddr, err)

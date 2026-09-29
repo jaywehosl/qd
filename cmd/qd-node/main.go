@@ -197,12 +197,18 @@ func main() {
 		certPath, keyPath = "", ""
 	}
 
-	tlsConf, err := loadTLS(certPath, keyPath, authority)
+	tlsConf, err := loadTLS(certPath, keyPath, authority, conf.Chain == "short")
 	if err != nil {
 		fatal("tls: %v", err)
 	}
 	if err := holdTickets(tlsConf, filepath.Dir(*dbPath)); err != nil {
 		fmt.Printf("tickets    kept in memory only, they die with the process: %v\n", err)
+	}
+	var echList []byte
+	if conf.ECH != "" {
+		if echList, err = holdECH(tlsConf, filepath.Dir(*dbPath), conf.ECH); err != nil {
+			fmt.Printf("ech        off: %v\n", err)
+		}
 	}
 
 	fmt.Printf("version    %s\n", version)
@@ -215,7 +221,10 @@ func main() {
 	if certPath == "" {
 		fmt.Printf("tls        self-signed, clients pin the certificate\n")
 	} else {
-		fmt.Printf("tls        %s\n", certPath)
+		fmt.Printf("tls        %s, %d certificates served\n", certPath, len(tlsConf.Certificates[0].Certificate))
+	}
+	if echList != nil {
+		fmt.Printf("ech        on, the outer hello names %s\n", conf.ECH)
 	}
 
 	admission := newGate()
@@ -259,6 +268,7 @@ func main() {
 		epoch:   time.Now().Unix(),
 		node:    node,
 		gate:    admission,
+		ech:     echList,
 		restart: func() {
 			binary, err := os.Executable()
 			if err != nil {
@@ -283,8 +293,10 @@ func main() {
 	if settings.BrutalMbit > 0 {
 		os.Setenv("QD_BRUTAL_MBPS", fmt.Sprint(settings.BrutalMbit))
 		fmt.Printf("congestion brutal, %d Mbit/s regardless of loss\n", settings.BrutalMbit)
-	} else {
+	} else if os.Getenv("QD_CC") == "cubic" {
 		fmt.Printf("congestion cubic\n")
+	} else {
+		fmt.Printf("congestion bbr\n")
 	}
 	fmt.Println()
 
