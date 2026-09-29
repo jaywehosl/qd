@@ -10,14 +10,16 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jaywehosl/qd/internal/netstate"
+
 	"github.com/jaywehosl/qd/internal/qsrv/server/netstack"
 )
 
 var synthetic = netip.MustParsePrefix("198.18.0.0/15")
 
 const (
-	natCeiling = 8192
-	natIdle    = time.Hour
+	natSlotBits = 20
+	natIdle     = time.Hour
 )
 
 type pair struct {
@@ -31,13 +33,25 @@ type nat46 struct {
 	byV4  map[netip.Addr]*pair
 	byV6  map[netip.Addr]netip.Addr
 	next  uint32
+	own   netip.Prefix
 }
 
-func newNAT46() *nat46 {
+func newNAT46(slot int) *nat46 {
 	return &nat46{
 		byV4: map[netip.Addr]*pair{},
 		byV6: map[netip.Addr]netip.Addr{},
+		own:  NATSlot(slot),
 	}
+}
+
+func NATSlot(slot int) netip.Prefix {
+	if slot < 0 || slot >= netstate.NATSlots {
+		slot = 0
+	}
+	base := binary.BigEndian.Uint32(synthetic.Addr().AsSlice()) + uint32(slot)<<(32-natSlotBits)
+	var raw [4]byte
+	binary.BigEndian.PutUint32(raw[:], base)
+	return netip.PrefixFrom(netip.AddrFrom4(raw), natSlotBits)
 }
 
 func (n *nat46) stand(v6 netip.Addr) (netip.Addr, bool) {
@@ -63,12 +77,11 @@ func (n *nat46) stand(v6 netip.Addr) (netip.Addr, bool) {
 	if held, ok := n.byV6[v6]; ok {
 		return held, true
 	}
-	if len(n.byV4) >= natCeiling {
+	base := n.own.Addr().As4()
+	room := uint32(1)<<(32-n.own.Bits()) - 2
+	if len(n.byV4) >= int(room) {
 		n.forgetOldestLocked()
 	}
-
-	base := synthetic.Addr().As4()
-	room := uint32(1)<<(32-synthetic.Bits()) - 2
 
 	var v4 netip.Addr
 	for i := uint32(0); i < room; i++ {
@@ -182,7 +195,7 @@ func (n *nat46) load(path string) {
 	for v4text, v6text := range held.Pairs {
 		v4, err4 := netip.ParseAddr(v4text)
 		v6, err6 := netip.ParseAddr(v6text)
-		if err4 != nil || err6 != nil {
+		if err4 != nil || err6 != nil || !n.own.Contains(v4) {
 			continue
 		}
 		p := &pair{v6: v6}
@@ -244,4 +257,12 @@ func endsHere(d netstack.Dialer, dst netip.Addr) bool {
 		return !d.node.steer.has(dst)
 	}
 	return false
+}
+
+func SlotOf(p netip.Prefix) int {
+	if p.Bits() != natSlotBits || !synthetic.Contains(p.Addr()) {
+		return -1
+	}
+	off := binary.BigEndian.Uint32(p.Addr().AsSlice()) - binary.BigEndian.Uint32(synthetic.Addr().AsSlice())
+	return int(off >> (32 - natSlotBits))
 }

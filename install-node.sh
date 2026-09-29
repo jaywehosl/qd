@@ -26,6 +26,7 @@ NETWORK_KEY=""
 NODE_TAG=""
 NODE_UUID=""
 NODE_ID=""
+NAT_SLOT=""
 ROLE="ingress"
 AUTHORITY=""
 CERT=""
@@ -124,6 +125,7 @@ while [ $# -gt 0 ]; do
         --tag)         NODE_TAG="${2:-}"; shift 2 ;;
         --node-uuid)   NODE_UUID="${2:-}"; shift 2 ;;
         --node-id)     NODE_ID="${2:-}"; shift 2 ;;
+        --nat-slot)    NAT_SLOT="${2:-}"; shift 2 ;;
         --role)        ROLE="${2:-}"; shift 2 ;;
         --authority)   AUTHORITY="${2:-}"; shift 2 ;;
         --cert)        CERT="${2:-}"; shift 2 ;;
@@ -717,7 +719,7 @@ initialise_database() {
     local out
     if ! out="$("$STAGE/qd-node" -init -db "$DB" \
         -key "$NETWORK_KEY" -port "$PORT" -address "$ADDRESS" \
-        -role "$ROLE" -tag "$NODE_TAG" -node-uuid "$NODE_UUID" -node-id "${NODE_ID:-0}" \
+        -role "$ROLE" -tag "$NODE_TAG" -node-uuid "$NODE_UUID" -node-id "${NODE_ID:-0}" ${NAT_SLOT:+-nat-slot "$NAT_SLOT"} \
         -admin "$ADMIN_TAG" -admin-uuid "$ADMIN_UUID" -group "$GROUP_TAG" \
         -dns1 "$DNS1" -dns2 "$DNS2" -dns-cache "$DNS_CACHE" \
         -dns-min-ttl "$DNS_MIN_TTL" -dns-max-ttl "$DNS_MAX_TTL" -dns-stale "$DNS_STALE" \

@@ -20,6 +20,7 @@ import (
 	"github.com/jaywehosl/qd/internal/clientstate"
 	"github.com/jaywehosl/qd/internal/netstate"
 	"github.com/jaywehosl/qd/internal/qdcrypt"
+	"github.com/jaywehosl/qd/internal/qsrv"
 	"github.com/jaywehosl/qd/internal/store"
 )
 
@@ -29,6 +30,7 @@ type initOptions struct {
 	address    string
 	role       string
 	nodeID     int
+	natSlot    int
 	nodeTag    string
 	nodeUUID   string
 	adminTag   string
@@ -164,6 +166,7 @@ func runInit(dbPath, iface string, opts initOptions) error {
 		Role:    role,
 		Enable:  true,
 		UUID:    nodeUUID,
+		NATSlot: opts.natSlot,
 	}
 	nodeID := opts.nodeID
 	if nodeID > 0 {
@@ -177,6 +180,14 @@ func runInit(dbPath, iface string, opts initOptions) error {
 			return err
 		}
 		node.ID = nodeID
+	}
+
+	if saved, err := db.Nodes(); err == nil {
+		for _, n := range saved {
+			if n.ID == node.ID {
+				node.NATSlot = n.NATSlot
+			}
+		}
 	}
 
 	entryID, err := db.SaveEntrypoint(netstate.Entrypoint{
@@ -229,6 +240,7 @@ func runInit(dbPath, iface string, opts initOptions) error {
 		Role:      string(role),
 		Address:   address,
 		Port:      opts.port,
+		NAT:       qsrv.NATSlot(node.NATSlot).String(),
 	}); err != nil {
 		return err
 	}

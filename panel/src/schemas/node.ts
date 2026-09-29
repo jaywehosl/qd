@@ -30,6 +30,7 @@ export const NodeRecordSchema = z.object({
   keyPath: z.string().optional(),
   revision: z.number().optional(),
   appliedRevision: z.number().optional(),
+  natSlot: z.number().optional(),
 }).loose();
 
 export const NodeListSchema = z.array(NodeRecordSchema);
@@ -58,6 +59,7 @@ export const NodeFormSchema = NodeEditSchema.extend({
   address: z.string().trim().min(1, 'pages.nodes.toasts.fillRequired'),
   apiToken: z.string().trim().min(1, 'pages.nodes.toasts.fillRequired'),
   enable: z.boolean(),
+  natSlot: z.number().int().min(0, 'pages.nodes.toasts.noNatSlot'),
 });
 
 export type NodeRecord = z.infer<typeof NodeRecordSchema>;

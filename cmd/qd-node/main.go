@@ -53,6 +53,7 @@ func main() {
 	flag.StringVar(&opts.address, "address", "", "-init: address clients dial, empty = autodetect")
 	flag.StringVar(&opts.role, "role", string(netstate.RoleIngress), "-init: ingress or egress")
 	flag.IntVar(&opts.nodeID, "node-id", 0, "-init: number the panel gave this node, 0 = let the database choose")
+	flag.IntVar(&opts.natSlot, "nat-slot", -1, "-init: slot of 198.18.0.0/15 this node hands IPv6-only sites from, -1 = the first free")
 	flag.StringVar(&opts.nodeTag, "tag", "", "-init: name of this node, empty = pick from the pool")
 	flag.StringVar(&opts.nodeUUID, "node-uuid", "", "-init: uuid of this node, empty = mint one")
 	flag.StringVar(&opts.adminTag, "admin", "", "-init: tag of the administrator")
@@ -222,6 +223,8 @@ func main() {
 	ech.serve(tlsConf)
 	quicconn.ECH = ech.publicList
 	keepPort(*confFlag, self.Port)
+	keepNAT(*confFlag, self.NATSlot)
+	fmt.Printf("nat46      slot %d, IPv6-only sites get addresses from %s\n", self.NATSlot, qsrv.NATSlot(self.NATSlot))
 
 	admission := newGate()
 	admission.setNetwork(key)
@@ -238,6 +241,7 @@ func main() {
 		Authority: authority,
 		SelfID:    self.UUID,
 		SelfTag:   self.Tag,
+		NATSlot:   self.NATSlot,
 		Pool:      poolOf(settings.Pool),
 		TLS:       tlsConf,
 		Token:     key,

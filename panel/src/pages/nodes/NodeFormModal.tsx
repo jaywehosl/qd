@@ -19,6 +19,7 @@ interface NodeFormModalProps {
   node: NodeRecord | null;
   taken?: string[];
   usedIds?: number[];
+  usedSlots?: number[];
   save: (payload: Partial<NodeRecord>) => Promise<Msg<unknown>>;
   onOpenChange: (open: boolean) => void;
 }
@@ -50,7 +51,17 @@ function defaultValues(): NodeFormValues {
     port: 443,
     apiToken: '',
     enable: true,
+    natSlot: -1,
   };
+}
+
+const NAT_SLOTS = 32;
+
+function firstFreeSlot(used: number[]): number {
+  for (let slot = 0; slot < NAT_SLOTS; slot++) {
+    if (!used.includes(slot)) return slot;
+  }
+  return -1;
 }
 
 export default function NodeFormModal({
@@ -59,6 +70,7 @@ export default function NodeFormModal({
   node,
   taken = [],
   usedIds = [],
+  usedSlots = [],
   save,
   onOpenChange,
 }: NodeFormModalProps) {
@@ -88,8 +100,9 @@ export default function NodeFormModal({
   useEffect(() => {
     if (!open || isEdit) return;
     const next = usedIds.reduce((top, id) => (id > top ? id : top), 0) + 1;
-    setValues((prev) => (prev.id === next ? prev : { ...prev, id: next }));
-  }, [open, isEdit, usedIds]);
+    const slot = firstFreeSlot(usedSlots);
+    setValues((prev) => (prev.id === next && prev.natSlot === slot ? prev : { ...prev, id: next, natSlot: slot }));
+  }, [open, isEdit, usedIds, usedSlots]);
 
   useEffect(() => {
     if (!open || isEdit) return;
@@ -167,6 +180,7 @@ export default function NodeFormModal({
       address: v.address.trim(),
       apiToken: v.apiToken.trim(),
       enable: v.enable,
+      natSlot: v.natSlot,
       status: 'waiting',
     };
   }
@@ -200,6 +214,7 @@ export default function NodeFormModal({
       `--domain ${domain}`,
       `--port ${v.port}`,
       `--node-id ${v.id}`,
+      `--nat-slot ${v.natSlot}`,
       `--node-uuid ${v.uuid}`,
       `--admin-uuid ${identity.adminUuid}`,
       `--admin ${identity.adminTag}`,

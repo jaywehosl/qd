@@ -90,11 +90,11 @@ const DefaultPort = 51820
 
 func (d *DB) Nodes() ([]netstate.Node, error) {
 	out := []netstate.Node{}
-	err := scan(d.sql, `SELECT id, tag, address, port, role, enable, uuid, dns_primary, dns_secondary, authority, cert_path, key_path FROM nodes ORDER BY id`,
+	err := scan(d.sql, `SELECT id, tag, address, port, role, enable, uuid, dns_primary, dns_secondary, authority, cert_path, key_path, nat_slot FROM nodes ORDER BY id`,
 		func(r *sql.Rows) error {
 			var n netstate.Node
 			if err := r.Scan(&n.ID, &n.Tag, &n.Address, &n.Port, &n.Role, &n.Enable, &n.UUID,
-				&n.DNSPrimary, &n.DNSSecondary, &n.Authority, &n.CertPath, &n.KeyPath); err != nil {
+				&n.DNSPrimary, &n.DNSSecondary, &n.Authority, &n.CertPath, &n.KeyPath, &n.NATSlot); err != nil {
 				return err
 			}
 			out = append(out, n)
@@ -134,13 +134,18 @@ func (d *DB) nameNode(n netstate.Node) netstate.Node {
 
 func (d *DB) SaveNode(n netstate.Node, now int64) (int, error) {
 	n = d.nameNode(n)
+	slot, err := d.slotFor(n)
+	if err != nil {
+		return 0, err
+	}
+	n.NATSlot = slot
 
 	if n.ID == 0 {
 		res, err := d.sql.Exec(
-			`INSERT INTO nodes (tag, address, port, role, enable, uuid, dns_primary, dns_secondary, authority, cert_path, key_path, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			`INSERT INTO nodes (tag, address, port, role, enable, uuid, dns_primary, dns_secondary, authority, cert_path, key_path, nat_slot, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			n.Tag, n.Address, n.Port, string(n.Role), n.Enable, n.UUID,
-			n.DNSPrimary, n.DNSSecondary, n.Authority, n.CertPath, n.KeyPath, now)
+			n.DNSPrimary, n.DNSSecondary, n.Authority, n.CertPath, n.KeyPath, n.NATSlot, now)
 		if err != nil {
 			return 0, err
 		}
@@ -150,9 +155,9 @@ func (d *DB) SaveNode(n netstate.Node, now int64) (int, error) {
 
 	res, err := d.sql.Exec(
 		`UPDATE nodes SET tag = ?, address = ?, port = ?, role = ?, enable = ?, uuid = ?,
-		        dns_primary = ?, dns_secondary = ?, authority = ?, cert_path = ?, key_path = ? WHERE id = ?`,
+		        dns_primary = ?, dns_secondary = ?, authority = ?, cert_path = ?, key_path = ?, nat_slot = ? WHERE id = ?`,
 		n.Tag, n.Address, n.Port, string(n.Role), n.Enable, n.UUID,
-		n.DNSPrimary, n.DNSSecondary, n.Authority, n.CertPath, n.KeyPath, n.ID)
+		n.DNSPrimary, n.DNSSecondary, n.Authority, n.CertPath, n.KeyPath, n.NATSlot, n.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -183,11 +188,16 @@ func (d *DB) alignEntrypoints(n netstate.Node, now int64) {
 }
 
 func (d *DB) InsertNodeAt(n netstate.Node, now int64) error {
-	_, err := d.sql.Exec(
-		`INSERT INTO nodes (id, tag, address, port, role, enable, uuid, dns_primary, dns_secondary, authority, cert_path, key_path, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	slot, err := d.slotFor(n)
+	if err != nil {
+		return err
+	}
+	n.NATSlot = slot
+	_, err = d.sql.Exec(
+		`INSERT INTO nodes (id, tag, address, port, role, enable, uuid, dns_primary, dns_secondary, authority, cert_path, key_path, nat_slot, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		n.ID, n.Tag, n.Address, n.Port, string(n.Role), n.Enable, n.UUID,
-		n.DNSPrimary, n.DNSSecondary, n.Authority, n.CertPath, n.KeyPath, now)
+		n.DNSPrimary, n.DNSSecondary, n.Authority, n.CertPath, n.KeyPath, n.NATSlot, now)
 	return err
 }
 
@@ -658,6 +668,9 @@ func (d *DB) settle(held, want netstate.Node, now int64) (netstate.Node, error) 
 	if want.KeyPath != "" {
 		held.KeyPath = want.KeyPath
 	}
+	if held.NATSlot < 0 && want.NATSlot >= 0 {
+		held.NATSlot = want.NATSlot
+	}
 	if held == before {
 		return held, nil
 	}
@@ -687,3 +700,58 @@ func (d *DB) DeleteClient(id int) error { return d.deleteRow("clients", id) }
 func (d *DB) DeleteGroup(id int) error { return d.deleteRow("groups", id) }
 
 func (d *DB) DeleteDNSRecord(id int) error { return d.deleteRow("dns_records", id) }
+
+var ErrNoNATSlot = fmt.Errorf("every one of the %d address slots for IPv6-only sites is taken", netstate.NATSlots)
+
+func (d *DB) slotFor(n netstate.Node) (int, error) {
+	rows, err := d.Nodes()
+	if err != nil {
+		return -1, err
+	}
+	used := map[int]bool{}
+	for _, other := range rows {
+		if n.ID != 0 && other.ID == n.ID {
+			if other.NATSlot >= 0 && other.NATSlot < netstate.NATSlots {
+				return other.NATSlot, nil
+			}
+			continue
+		}
+		if other.NATSlot >= 0 {
+			used[other.NATSlot] = true
+		}
+	}
+	if n.NATSlot >= 0 && n.NATSlot < netstate.NATSlots && !used[n.NATSlot] {
+		return n.NATSlot, nil
+	}
+	for slot := 0; slot < netstate.NATSlots; slot++ {
+		if !used[slot] {
+			return slot, nil
+		}
+	}
+	return -1, ErrNoNATSlot
+}
+
+func (d *DB) settleSlots() {
+	rows, err := d.Nodes()
+	if err != nil {
+		return
+	}
+	used := map[int]bool{}
+	for _, n := range rows {
+		if n.NATSlot >= 0 {
+			used[n.NATSlot] = true
+		}
+	}
+	for _, n := range rows {
+		if n.NATSlot >= 0 {
+			continue
+		}
+		for slot := 0; slot < netstate.NATSlots; slot++ {
+			if !used[slot] {
+				used[slot] = true
+				d.sql.Exec(`UPDATE nodes SET nat_slot = ? WHERE id = ?`, slot, n.ID)
+				break
+			}
+		}
+	}
+}

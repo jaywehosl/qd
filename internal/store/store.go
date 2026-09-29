@@ -70,6 +70,7 @@ func Open(path string) (*DB, error) {
 		`ALTER TABLE network ADD COLUMN route_list TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE network ADD COLUMN route_services TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE network ADD COLUMN ech_name TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE nodes ADD COLUMN nat_slot INTEGER NOT NULL DEFAULT -1`,
 		`UPDATE network SET max_streams = 65536 WHERE max_streams = 4096`,
 	} {
 		if _, err := h.Exec(add); err != nil && !strings.Contains(err.Error(), "duplicate column") {
@@ -77,7 +78,9 @@ func Open(path string) (*DB, error) {
 			return nil, fmt.Errorf("store: %s: %w", add, err)
 		}
 	}
-	return &DB{sql: h}, nil
+	d := &DB{sql: h}
+	d.settleSlots()
+	return d, nil
 }
 
 func OpenRead(path string) (*DB, error) {

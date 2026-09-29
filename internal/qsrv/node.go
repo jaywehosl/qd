@@ -71,6 +71,7 @@ type Config struct {
 	Authority string
 	SelfID    string
 	SelfTag   string
+	NATSlot   int
 	Pool      netip.Prefix
 
 	TLS    *tls.Config
@@ -153,7 +154,7 @@ func New(cfg Config) *Node {
 	n := &Node{
 		cfg:   cfg,
 		pool:  newPool(cfg.Pool),
-		nat:   newNAT46(),
+		nat:   newNAT46(cfg.NATSlot),
 		links: newLinks(cfg.Token, cfg.SelfID, cfg.Log),
 		proxy: &connectip.Proxy{},
 		tmpl:  Template(cfg.Authority, ConnectIPPath),

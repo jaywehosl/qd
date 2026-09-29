@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 	"sync"
 
 	"github.com/jaywehosl/qd/internal/netstate"
+	"github.com/jaywehosl/qd/internal/qsrv"
 )
 
 const configPath = "/etc/qd/node.conf"
@@ -24,6 +26,7 @@ type nodeConfig struct {
 	Key       string
 	Chain     string
 	ECH       string
+	NAT       string
 
 	ID      int
 	UUID    string
@@ -69,6 +72,8 @@ func readConfig(path string) (nodeConfig, error) {
 			cfg.Chain = value
 		case "ech":
 			cfg.ECH = value
+		case "nat":
+			cfg.NAT = value
 		case "key":
 			cfg.Key = value
 		case "id":
@@ -104,7 +109,16 @@ func (c nodeConfig) identity() netstate.Node {
 		Authority: c.Authority,
 		CertPath:  c.Cert,
 		KeyPath:   c.Key,
+		NATSlot:   c.natSlot(),
 	}
+}
+
+func (c nodeConfig) natSlot() int {
+	p, err := netip.ParsePrefix(c.NAT)
+	if err != nil {
+		return -1
+	}
+	return qsrv.SlotOf(p)
 }
 
 func writeConfig(path string, cfg nodeConfig) error {
@@ -129,6 +143,7 @@ func writeConfig(path string, cfg nodeConfig) error {
 		{"key", cfg.Key},
 		{"chain", cfg.Chain},
 		{"ech", cfg.ECH},
+		{"nat", cfg.NAT},
 	} {
 		if line[1] == "" || line[1] == "0" {
 			continue
@@ -176,6 +191,17 @@ func keepECH(path, name string) {
 			return false
 		}
 		c.ECH = name
+		return true
+	})
+}
+
+func keepNAT(path string, slot int) {
+	own := qsrv.NATSlot(slot).String()
+	rewriteConfig(path, func(c *nodeConfig) bool {
+		if c.NAT == own {
+			return false
+		}
+		c.NAT = own
 		return true
 	})
 }

@@ -30,7 +30,11 @@ type Node struct {
 	Authority string `json:"authority"`
 	CertPath  string `json:"certPath"`
 	KeyPath   string `json:"keyPath"`
+
+	NATSlot int `json:"natSlot"`
 }
+
+const NATSlots = 32
 
 type Entrypoint struct {
 	ID     int    `json:"id"`

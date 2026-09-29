@@ -158,6 +158,7 @@ export default function NodesPage() {
         node={formNode}
         taken={nodes.map((n) => n.name ?? '').filter((name) => name !== '')}
         usedIds={nodes.map((n) => n.id)}
+        usedSlots={nodes.map((n) => n.natSlot ?? -1).filter((slot) => slot >= 0)}
         save={onSave}
         onOpenChange={setFormOpen}
       />

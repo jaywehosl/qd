@@ -27,6 +27,8 @@ type NodeAddress struct {
 	Authority string `json:"authority"`
 	CertPath  string `json:"certPath"`
 	KeyPath   string `json:"keyPath"`
+
+	NATSlot int `json:"natSlot"`
 }
 
 type NodeHealth struct {

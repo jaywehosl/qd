@@ -781,7 +781,7 @@ func Answer(query []byte, ip net.IP, qtype uint16) []byte {
 	out = append(out, 0xC0, 0x0C)
 	out = append(out, byte(qtype>>8), byte(qtype))
 	out = append(out, 0x00, 0x01)
-	out = append(out, 0x00, 0x00, 0x01, 0x2C)
+	out = append(out, 0x00, 0x00, 0x00, 0x1E)
 
 	if qtype == 1 {
 		v4 := ip.To4()
