@@ -31,6 +31,11 @@ type echHolder struct {
 func newECH(db *store.DB, secret, name string, renamed func(string)) *echHolder {
 	h := &echHolder{db: db, secret: secret, renamed: renamed, checked: time.Now()}
 	h.apply(name)
+	go func() {
+		for range time.Tick(echRecheck) {
+			h.current()
+		}
+	}()
 	return h
 }
 
