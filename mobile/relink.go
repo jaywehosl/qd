@@ -33,6 +33,13 @@ func (c *Client) NetworkChanged(tag string) {
 		return
 	}
 	roads.Forget()
+	if !running && c.wanted.Load() {
+		select {
+		case nudge <- struct{}{}:
+		default:
+		}
+		return
+	}
 	if first || !running {
 		return
 	}
@@ -57,6 +64,7 @@ func (c *Client) relink() {
 		c.stopCarry()
 		if err := c.api.Connect(); err != nil {
 			say("relink: could not come back: %v", err)
+			go c.comeBack()
 		}
 
 		if !again.Load() {

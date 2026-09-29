@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -199,6 +200,9 @@ func main() {
 	tlsConf, err := loadTLS(certPath, keyPath, authority)
 	if err != nil {
 		fatal("tls: %v", err)
+	}
+	if err := holdTickets(tlsConf, filepath.Dir(*dbPath)); err != nil {
+		fmt.Printf("tickets    kept in memory only, they die with the process: %v\n", err)
 	}
 
 	fmt.Printf("version    %s\n", version)

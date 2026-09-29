@@ -186,7 +186,7 @@ func (d Dialer) reach(ctx context.Context, raddr *net.UDPAddr) (*Conn, error) {
 	tr := &quic.Transport{Conn: pc}
 
 	began := time.Now()
-	qc, err := tr.Dial(ctx, raddr, ensureALPN(d.TLS), configOrDefault(d.QUIC))
+	qc, err := dialOn(ctx, tr, raddr, d.TLS, d.QUIC)
 	if err != nil {
 		fmt.Printf("dial     %s gave up after %d ms: %v\n", raddr, time.Since(began).Milliseconds(), err)
 		tr.Close()
@@ -200,7 +200,7 @@ func (d Dialer) reach(ctx context.Context, raddr *net.UDPAddr) (*Conn, error) {
 
 const headStart = 250 * time.Millisecond
 
-func OverRelay(ctx context.Context, sess *relay.Session, authority string, conf *quic.Config) (*Conn, error) {
+func OverRelay(ctx context.Context, sess *relay.Session, authority string, conf *quic.Config, tickets tls.ClientSessionCache) (*Conn, error) {
 	host, _, err := net.SplitHostPort(authority)
 	if err != nil {
 		return nil, err
@@ -213,7 +213,7 @@ func OverRelay(ctx context.Context, sess *relay.Session, authority string, conf 
 		sess.Stop()
 		return nil, err
 	}
-	qc, err := DialPacketConn(ctx, pc, relay.Peer, &tls.Config{ServerName: host}, conf)
+	qc, err := DialPacketConn(ctx, pc, relay.Peer, &tls.Config{ServerName: host, ClientSessionCache: tickets}, conf)
 	if err != nil {
 		sess.Stop()
 		return nil, err
@@ -223,7 +223,7 @@ func OverRelay(ctx context.Context, sess *relay.Session, authority string, conf 
 
 func DialPacketConn(ctx context.Context, pc net.PacketConn, raddr net.Addr, tlsConf *tls.Config, quicConf *quic.Config) (*Conn, error) {
 	tr := &quic.Transport{Conn: pc}
-	qc, err := tr.Dial(ctx, raddr, ensureALPN(tlsConf), configOrDefault(quicConf))
+	qc, err := dialOn(ctx, tr, raddr, tlsConf, quicConf)
 	if err != nil {
 		tr.Close()
 		return nil, err
@@ -394,3 +394,11 @@ func (c *Conn) listenLike(laddr *net.UDPAddr) (*net.UDPConn, error) {
 }
 
 const resolveWait = 4 * time.Second
+
+func dialOn(ctx context.Context, tr *quic.Transport, raddr net.Addr, tlsConf *tls.Config, conf *quic.Config) (*quic.Conn, error) {
+	tlsConf = ensureALPN(tlsConf)
+	if tlsConf.ClientSessionCache != nil {
+		return tr.DialEarly(ctx, raddr, tlsConf, configOrDefault(conf))
+	}
+	return tr.Dial(ctx, raddr, tlsConf, configOrDefault(conf))
+}

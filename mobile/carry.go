@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/netip"
+	"sync/atomic"
 	"time"
 
 	"github.com/jaywehosl/qd/internal/clientdns"
@@ -70,6 +71,7 @@ func (c *Client) carry(servers []string, relays []relay.Link, session uint32) er
 			Exit:      c.exitFor,
 			Direct:    c.goesDirect,
 			Loud:      loud.Load(),
+			Tickets:   c.db.Tickets(),
 		},
 		Wait: dialWait,
 		DNS: &clientdns.Config{
@@ -103,6 +105,7 @@ func (c *Client) carry(servers []string, relays []relay.Link, session uint32) er
 	c.dns, c.server, c.gone = held.DNS, held.Endpoint, held.Gone
 	c.src = held.Source
 	c.mu.Unlock()
+	c.wanted.Store(true)
 
 	say("carry: datagram limit %d with mtu %d", held.Live.DatagramLimit(), mtu)
 
@@ -166,15 +169,52 @@ func (c *Client) stopCarry() {
 
 func (c *Client) lost() {
 	c.stopCarry()
+	c.comeBack()
+}
 
-	time.Sleep(settle)
+var (
+	backing atomic.Bool
+	nudge   = make(chan struct{}, 1)
+)
 
-	sub, err := c.db.Subscription()
-	if err != nil || !sub.Imported {
+func (c *Client) comeBack() {
+	if !backing.CompareAndSwap(false, true) {
 		return
 	}
-	if err := c.api.Connect(); err != nil {
-		say("carry: could not come back: %v", err)
+	defer backing.Store(false)
+
+	for pause := settle; ; pause = longer(pause) {
+		select {
+		case <-time.After(pause):
+		case <-nudge:
+		}
+		if !c.wanted.Load() || c.Running() {
+			return
+		}
+		sub, err := c.db.Subscription()
+		if err != nil || !sub.Imported {
+			return
+		}
+		err = c.api.Connect()
+		if err == nil {
+			return
+		}
+		say("carry: could not come back, next try in %s: %v", longer(pause), err)
+	}
+}
+
+func longer(was time.Duration) time.Duration {
+	switch {
+	case was < 3*time.Second:
+		return 3 * time.Second
+	case was < 5*time.Second:
+		return 5 * time.Second
+	case was < 10*time.Second:
+		return 10 * time.Second
+	case was < 20*time.Second:
+		return 20 * time.Second
+	default:
+		return 30 * time.Second
 	}
 }
 

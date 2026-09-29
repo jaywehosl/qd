@@ -27,6 +27,7 @@ func (p platform) Start(servers []string, relays []relay.Link, session uint32) e
 }
 
 func (p platform) Stop() error {
+	p.c.wanted.Store(false)
 	p.c.stopCarry()
 	if p.c.host != nil {
 		p.c.host.Teardown()

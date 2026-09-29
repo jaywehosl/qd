@@ -61,6 +61,7 @@ type Client struct {
 	quit      chan struct{}
 
 	running  bool
+	wanted   atomic.Bool
 	stop     chan struct{}
 	live     *qcli.Tunnel
 	liveStop context.CancelFunc

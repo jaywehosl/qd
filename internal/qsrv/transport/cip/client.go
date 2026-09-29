@@ -3,12 +3,14 @@ package cip
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"net/netip"
 
 	connectip "github.com/quic-go/connect-ip-go"
+	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 	"github.com/yosida95/uritemplate/v3"
 
@@ -53,14 +55,25 @@ func DialAuth(ctx context.Context, endpoint string, tmpl *uritemplate.Template, 
 	if err != nil {
 		return nil, err
 	}
+	client, err := DialAuthConn(ctx, qc, tmpl, token, device, route, authURL)
+	if !Rejected0RTT(err) || tlsConf == nil || tlsConf.ClientSessionCache == nil {
+		return client, err
+	}
+	tlsConf.ClientSessionCache.Put(tlsConf.ServerName, nil)
+	qc, err = quicconn.Dialer{TLS: tlsConf, Keep: keep}.Dial(ctx, endpoint)
+	if err != nil {
+		return nil, err
+	}
 	return DialAuthConn(ctx, qc, tmpl, token, device, route, authURL)
 }
+
+func Rejected0RTT(err error) bool { return errors.Is(err, quic.Err0RTTRejected) }
 
 func DialAuthConn(ctx context.Context, qc *quicconn.Conn, tmpl *uritemplate.Template, token, device, route, authURL string) (*Client, error) {
 	h3tr := &http3.Transport{EnableDatagrams: true}
 	cc := h3tr.NewClientConn(qc.QUIC())
 
-	if _, err := greet(ctx, cc, token, device, route, authURL); err != nil {
+	if _, err := greet(ctx, cc, http3.MethodGet0RTT, token, device, route, authURL); err != nil {
 		h3tr.Close()
 		qc.Close()
 		return nil, err
@@ -90,8 +103,8 @@ func sign(req *http.Request, token, device, route string) {
 	req.Header.Set(qsrv.HeaderRoute, route)
 }
 
-func greet(ctx context.Context, rt roundTripper, token, device, route, url string) (http.Header, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+func greet(ctx context.Context, rt roundTripper, method, token, device, route, url string) (http.Header, error) {
+	req, err := http.NewRequestWithContext(ctx, method, url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +123,7 @@ func greet(ctx context.Context, rt roundTripper, token, device, route, url strin
 }
 
 func (c *Client) Steer(ctx context.Context, route string) error {
-	_, err := greet(ctx, c.cc, c.token, c.device, route, c.auth)
+	_, err := greet(ctx, c.cc, http.MethodGet, c.token, c.device, route, c.auth)
 	return err
 }
 

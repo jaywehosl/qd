@@ -259,6 +259,7 @@ func (n *Node) quicConfig() *quic.Config {
 	return &quic.Config{
 		MaxIncomingStreams:             t.MaxStreams,
 		EnableDatagrams:                true,
+		Allow0RTT:                      true,
 		MaxIdleTimeout:                 t.IdleTimeout,
 		KeepAlivePeriod:                t.KeepAlive,
 		InitialStreamReceiveWindow:     t.StreamWindow,
@@ -400,19 +401,34 @@ func (n *Node) serveAuth(w http.ResponseWriter, r *http.Request) {
 	route := settled(routeOf(r))
 	sessionOf(r.Context()).steer(route)
 
-	n.mu.Lock()
-	s := n.held[grant.Seat]
-	n.mu.Unlock()
+	onSeat := func() {
+		n.mu.Lock()
+		s := n.held[grant.Seat]
+		n.mu.Unlock()
 
-	turned := false
-	if s != nil {
-		s.lastSeen.Store(time.Now().Unix())
-		turned = s.steer(route)
+		turned := false
+		if s != nil {
+			s.lastSeen.Store(time.Now().Unix())
+			turned = s.steer(route)
+		}
+
+		if turned {
+			n.cfg.Log("quic      %s now steers to %q", grant.Client, route)
+			n.links.forget(grant.Seat)
+		}
 	}
-
-	if turned {
-		n.cfg.Log("quic      %s now steers to %q", grant.Client, route)
-		n.links.forget(grant.Seat)
+	if qc := sessionOf(r.Context()).quic(); qc != nil && !handshaken(qc) {
+		go func() {
+			select {
+			case <-qc.HandshakeComplete():
+				if qc.Context().Err() == nil {
+					onSeat()
+				}
+			case <-qc.Context().Done():
+			}
+		}()
+	} else {
+		onSeat()
 	}
 
 	w.Header().Set(HeaderAddr, n.pool.stream(grant.Seat).String())
@@ -564,4 +580,13 @@ func HoldsV6() bool {
 		}
 	})
 	return v6Held
+}
+
+func handshaken(qc *quic.Conn) bool {
+	select {
+	case <-qc.HandshakeComplete():
+		return qc.Context().Err() == nil
+	default:
+		return false
+	}
 }

@@ -113,7 +113,7 @@ func (o *Over) openDatagram(endpoint, route string) error {
 func (o *Over) H2Conn() *http2.ClientConn { return o.cc }
 
 func (o *Over) Steer(ctx context.Context, route string) error {
-	header, err := greet(ctx, o.cc, o.token, o.device, route, o.auth)
+	header, err := greet(ctx, o.cc, http.MethodGet, o.token, o.device, route, o.auth)
 	if err != nil {
 		return err
 	}

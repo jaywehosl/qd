@@ -4,11 +4,13 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/netip"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jaywehosl/qd/internal/clientdns"
@@ -36,6 +38,8 @@ type tunnelConfig struct {
 	Lost func()
 
 	Key *qdcrypt.Key
+
+	Tickets tls.ClientSessionCache
 }
 
 type tunnel struct {
@@ -43,6 +47,7 @@ type tunnel struct {
 
 	mu      sync.Mutex
 	running bool
+	wanted  atomic.Bool
 	stop    chan struct{}
 	wg      sync.WaitGroup
 
@@ -144,11 +149,12 @@ func (t *tunnel) Start(servers []string, relays []relay.Link, sessionID uint32) 
 		Exit:      exitFor,
 		Direct:    goesDirect,
 		Loud:      true,
+		Tickets:   t.cfg.Tickets,
 	}
 	plan.Wait = dialWait
 	plan.Say = func(format string, args ...any) { fmt.Printf(format+"\n", args...) }
 	plan.Lost = func(err error) {
-		t.Stop()
+		t.halt()
 		t.noteResult(err)
 		if t.cfg.Lost != nil {
 			t.cfg.Lost()
@@ -181,6 +187,7 @@ func (t *tunnel) Start(servers []string, relays []relay.Link, sessionID uint32) 
 	t.since = time.Now()
 	t.lastErr = nil
 	t.dns = held.DNS
+	t.wanted.Store(true)
 	liveTunnel.Store(&held.Live)
 
 	go roamWatch(held.Ctx, held.Halt, held.Live, plan.Lost)
@@ -239,7 +246,14 @@ func (t *tunnel) peerAddresses() []netip.Prefix {
 	})
 }
 
+func (t *tunnel) Wanted() bool { return t.wanted.Load() }
+
 func (t *tunnel) Stop() error {
+	t.wanted.Store(false)
+	return t.halt()
+}
+
+func (t *tunnel) halt() error {
 	t.mu.Lock()
 	if !t.running {
 		t.mu.Unlock()

@@ -333,6 +333,7 @@ func (n *Node) serveConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer out.Close()
+	defer context.AfterFunc(r.Context(), func() { out.Close() })()
 
 	if tcp, ok := out.(*net.TCPConn); ok {
 		tcp.SetNoDelay(true)

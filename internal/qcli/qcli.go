@@ -47,6 +47,7 @@ type Options struct {
 	Fast      func()
 	Loud      bool
 	Keep      func(fd uintptr)
+	Tickets   tls.ClientSessionCache
 }
 
 type Tunnel struct {
@@ -227,7 +228,7 @@ func reachRelay(ctx context.Context, opts Options, link relay.Link) (*Tunnel, er
 
 	sess := relay.New(relay.Config{Public: link.Weblink, Keep: opts.Keep})
 	sess.Log = func(f string, a ...any) { fmt.Printf(f+"\n", a...) }
-	qc, err := quicconn.OverRelay(ctx, sess, link.Authority, relayQUIC())
+	qc, err := quicconn.OverRelay(ctx, sess, link.Authority, relayQUIC(), opts.Tickets)
 	if err != nil {
 		return nil, err
 	}
@@ -236,6 +237,9 @@ func reachRelay(ctx context.Context, opts Options, link relay.Link) (*Tunnel, er
 	authURL := "https://" + link.Authority + qsrv.AuthPath
 	client, err := cip.DialAuthConn(ctx, qc, tmpl, opts.Token, opts.Device, opts.Route, authURL)
 	if err != nil {
+		if cip.Rejected0RTT(err) && opts.Tickets != nil {
+			opts.Tickets.Put(host, nil)
+		}
 		sess.Stop()
 		return nil, err
 	}
@@ -275,7 +279,7 @@ func reach(ctx context.Context, opts Options, endpoint string) (*Tunnel, error) 
 	}
 
 	tmpl := qsrv.Template(endpoint, qsrv.ConnectIPPath)
-	tlsConf := &tls.Config{ServerName: host}
+	tlsConf := &tls.Config{ServerName: host, ClientSessionCache: opts.Tickets}
 	authURL := "https://" + endpoint + qsrv.AuthPath
 
 	round, stop := context.WithCancel(ctx)

@@ -119,6 +119,8 @@ func (s *Stack) DebugStats() string {
 }
 
 func (s *Stack) Run(ctx context.Context, t Tunnel) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	go s.egress(ctx, t)
 	return s.ingress(ctx, t)
 }

@@ -92,10 +92,12 @@ func runClient(opts runOptions) error {
 
 	var admin *adminUI
 	var api *clientapi.API
+	var tun *tunnel
 
-	tun := newTunnel(tunnelConfig{
+	tun = newTunnel(tunnelConfig{
 		MTU:     mtu,
 		Workers: opts.Readers,
+		Tickets: db.Tickets(),
 		DNS:     opts.DNS,
 		OnQuery: seen.Query,
 		Token: func() string {
@@ -121,13 +123,20 @@ func runClient(opts runOptions) error {
 			return out
 		},
 		Lost: func() {
-			time.Sleep(3 * time.Second)
-			sub, err := db.Subscription()
-			if err != nil || !sub.Imported || api == nil {
-				return
-			}
-			if err := api.Connect(); err != nil {
-				fmt.Printf("carry    could not come back: %v\n", err)
+			for pause := comeBack(0); ; pause = comeBack(pause) {
+				time.Sleep(pause)
+				if !tun.Wanted() || tun.Running() {
+					return
+				}
+				sub, err := db.Subscription()
+				if err != nil || !sub.Imported || api == nil {
+					return
+				}
+				err = api.Connect()
+				if err == nil {
+					return
+				}
+				fmt.Printf("carry    could not come back, next try in %s: %v\n", comeBack(pause), err)
 			}
 		},
 		Announce: func(op string) {
@@ -264,4 +273,19 @@ func tellParent(what map[string]any) {
 		return
 	}
 	fmt.Printf("%s\n", line)
+}
+
+func comeBack(was time.Duration) time.Duration {
+	switch {
+	case was < 3*time.Second:
+		return 3 * time.Second
+	case was < 5*time.Second:
+		return 5 * time.Second
+	case was < 10*time.Second:
+		return 10 * time.Second
+	case was < 20*time.Second:
+		return 20 * time.Second
+	default:
+		return 30 * time.Second
+	}
 }

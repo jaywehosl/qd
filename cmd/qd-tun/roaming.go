@@ -42,7 +42,21 @@ func roamWatch(ctx context.Context, stop <-chan struct{}, live *qcli.Tunnel, los
 
 		case <-changed:
 			was, deaf, heardAt, last = live.Stats(), time.Time{}, time.Now(), time.Now()
-			migrate(ctx, live)
+			if !live.CanMigrate() {
+				if !pathAnswers(ctx, live) {
+					if ctx.Err() == nil {
+						lost(fmt.Errorf("the network changed and the path does not answer"))
+					}
+					return
+				}
+				continue
+			}
+			if !migrate(ctx, live) {
+				if ctx.Err() == nil {
+					lost(fmt.Errorf("the network changed and the path did not move"))
+				}
+				return
+			}
 
 		case <-tick.C:
 			stood := time.Since(last)
@@ -108,7 +122,12 @@ func roamWatch(ctx context.Context, stop <-chan struct{}, live *qcli.Tunnel, los
 			}
 			if time.Since(deaf) < deafFor+roamPatience {
 				fmt.Printf("roam     nothing comes back, trying to migrate in place\n")
-				migrate(ctx, live)
+				if !migrate(ctx, live) {
+					if ctx.Err() == nil {
+						lost(fmt.Errorf("the node stopped answering and the path did not move"))
+					}
+					return
+				}
 				deaf = time.Now().Add(-deafFor)
 				continue
 			}
@@ -129,10 +148,10 @@ func pathAnswers(ctx context.Context, live *qcli.Tunnel) bool {
 	return false
 }
 
-func migrate(ctx context.Context, live *qcli.Tunnel) {
+func migrate(ctx context.Context, live *qcli.Tunnel) bool {
 	if !live.CanMigrate() {
 		fmt.Printf("roam     this path does not migrate, bringing the tunnel up again\n")
-		return
+		return false
 	}
 
 	for try := 1; try <= roamTries; try++ {
@@ -143,19 +162,21 @@ func migrate(ctx context.Context, live *qcli.Tunnel) {
 		if err == nil {
 			fmt.Printf("roam     the path moved, the tunnel migrated in place\n")
 			nodeTalk.Reset()
-			return
+			return true
 		}
 		if ctx.Err() != nil {
-			return
+			return false
 		}
 		fmt.Printf("roam     migration attempt %d of %d failed: %v\n", try, roamTries, err)
 
 		select {
 		case <-ctx.Done():
-			return
+			return false
 		case <-time.After(roamPause):
 		}
 	}
+	fmt.Printf("roam     the path did not move, coming back through a fresh dial\n")
+	return false
 }
 
 const (

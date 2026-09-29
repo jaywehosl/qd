@@ -303,7 +303,7 @@ func dialControlRelay(ctx context.Context, link relay.Link, keep func(fd uintptr
 	sess := relay.New(relay.Config{Public: link.Weblink, Keep: keep})
 	round, cancel := context.WithTimeout(ctx, relayWait)
 	defer cancel()
-	qc, err := quicconn.OverRelay(round, sess, link.Authority, controlConfig())
+	qc, err := quicconn.OverRelay(round, sess, link.Authority, controlConfig(), nil)
 	if err != nil {
 		return nil, err
 	}
