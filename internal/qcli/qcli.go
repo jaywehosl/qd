@@ -403,6 +403,15 @@ func resolve(ctx context.Context, host string) []netip.Addr {
 
 func (t *Tunnel) Assigned() []netip.Prefix { return t.assigned }
 
+func (t *Tunnel) Six() (netip.Prefix, bool) {
+	for _, p := range t.assigned {
+		if p.Addr().Is6() {
+			return p, true
+		}
+	}
+	return netip.Prefix{}, false
+}
+
 func (t *Tunnel) Path() roads.Path {
 	return roads.Path{Endpoint: t.endpoint, OverTCP: t.overTCP, Relay: t.weblink}
 }

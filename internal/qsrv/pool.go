@@ -104,3 +104,16 @@ func (p *pool) give(prefix netip.Prefix) {
 	delete(p.taken, prefix.Addr())
 	p.mu.Unlock()
 }
+
+func sixOf(p netip.Prefix) netip.Prefix {
+	v4 := p.Addr().As4()
+	addr := netip.AddrFrom16([16]byte{0xfd, 0x00, 0x00, 0x07, 12: v4[0], v4[1], v4[2], v4[3]})
+	return netip.PrefixFrom(addr, addr.BitLen())
+}
+
+func carried(address netip.Prefix) []netip.Prefix {
+	if !HoldsV6() || !address.Addr().Is4() {
+		return []netip.Prefix{address}
+	}
+	return []netip.Prefix{address, sixOf(address)}
+}

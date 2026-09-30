@@ -27,7 +27,7 @@ type Over struct {
 	auth   string
 	token  string
 	device string
-	given  atomic.Pointer[netip.Prefix]
+	given  atomic.Pointer[[]netip.Prefix]
 
 	dgramMu sync.Mutex
 	dgramW  *io.PipeWriter
@@ -118,7 +118,13 @@ func (o *Over) Steer(ctx context.Context, route string) error {
 	if err != nil {
 		return err
 	}
-	if given, err := netip.ParsePrefix(header.Get(qsrv.HeaderAddr)); err == nil {
+	var given []netip.Prefix
+	for _, raw := range header.Values(qsrv.HeaderAddr) {
+		if p, err := netip.ParsePrefix(raw); err == nil {
+			given = append(given, p)
+		}
+	}
+	if len(given) > 0 {
 		o.given.Store(&given)
 	}
 	return nil
@@ -145,7 +151,7 @@ func (o *Over) Close() error {
 
 func (o *Over) LocalPrefixes(context.Context) ([]netip.Prefix, error) {
 	if held := o.given.Load(); held != nil {
-		return []netip.Prefix{*held}, nil
+		return *held, nil
 	}
 	return nil, fmt.Errorf("the node named no address for this path")
 }

@@ -82,7 +82,8 @@ func (c *Client) carry(servers []string, relays []relay.Link, session uint32) er
 			Blocked: func(name string) bool { return seen != nil && seen.Query(name) },
 		},
 		Source: func(ctx context.Context, live *qcli.Tunnel) (packet.Source, error) {
-			fd, err := c.hold(live.Assigned()[0], mtu)
+			six, carried := live.Six()
+			fd, err := c.hold(live.Assigned()[0], six, mtu)
 			if err != nil {
 				return nil, err
 			}
@@ -90,7 +91,7 @@ func (c *Client) carry(servers []string, relays []relay.Link, session uint32) er
 			if err != nil {
 				return nil, err
 			}
-			return watched(raw), nil
+			return watched(raw, carried), nil
 		},
 		Lost: func(error) { c.lost() },
 		Say:  say,

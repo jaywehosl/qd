@@ -91,6 +91,7 @@ type Session struct {
 	Session   uint32
 	Client    string
 	Address   netip.Prefix
+	Addresses []netip.Prefix
 	Peer      string
 	Since     int64
 	LastSeen  int64
@@ -100,6 +101,7 @@ type Session struct {
 	PktDown   uint64
 	AllowExit bool
 	Transit   bool
+	Carriage  string
 }
 
 type live struct {
@@ -208,6 +210,7 @@ func (n *Node) Sessions() []Session {
 			Seat:      seat,
 			Client:    s.grant.Client,
 			Address:   s.address,
+			Addresses: carried(s.address),
 			Peer:      s.where(),
 			Since:     s.since,
 			LastSeen:  s.lastSeen.Load(),
@@ -217,7 +220,23 @@ func (n *Node) Sessions() []Session {
 			PktDown:   s.pktDown.Load(),
 			AllowExit: s.grant.AllowExit,
 			Transit:   s.transit,
+			Carriage:  s.carriage(),
 		})
+	}
+	return out
+}
+
+func (s *live) carriage() string {
+	if s.conn == nil {
+		return "tcp"
+	}
+	st := s.conn.ConnectionState()
+	out := "quic " + st.Version.String()
+	if st.TLS.ECHAccepted {
+		out += " ech"
+	}
+	if st.Used0RTT {
+		out += " 0rtt"
 	}
 	return out
 }
@@ -432,7 +451,9 @@ func (n *Node) serveAuth(w http.ResponseWriter, r *http.Request) {
 		onSeat()
 	}
 
-	w.Header().Set(HeaderAddr, n.pool.stream(grant.Seat).String())
+	for _, p := range carried(n.pool.stream(grant.Seat)) {
+		w.Header().Add(HeaderAddr, p.String())
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

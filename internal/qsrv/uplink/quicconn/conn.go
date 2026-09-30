@@ -406,6 +406,7 @@ const resolveWait = 4 * time.Second
 
 var (
 	skipV2 atomic.Bool
+	prove  atomic.Bool
 	ECH    func(serverName string) []byte
 	noECH  sync.Map
 )
@@ -418,20 +419,21 @@ type echFailure struct {
 const echRetry = 10 * time.Minute
 
 func dialOn(ctx context.Context, tr *quic.Transport, raddr net.Addr, tlsConf *tls.Config, conf *quic.Config) (*quic.Conn, error) {
+	early := !prove.Swap(false)
 	hidden := withECH(tlsConf)
 	if hidden == nil {
-		qc, err := dialVersions(ctx, tr, raddr, tlsConf, conf)
+		qc, err := dialVersions(ctx, tr, raddr, tlsConf, conf, early)
 		if timedOut(err) && tlsConf != nil {
 			noECH.Delete(tlsConf.ServerName)
 		}
 		return qc, err
 	}
-	qc, err := dialVersions(ctx, tr, raddr, hidden, conf)
+	qc, err := dialVersions(ctx, tr, raddr, hidden, conf, early)
 	if err == nil || ctx.Err() != nil {
 		return qc, err
 	}
 	fmt.Printf("dial     %s: ECH did not go through (%v), trying without\n", raddr, err)
-	qc, err = dialVersions(ctx, tr, raddr, tlsConf, conf)
+	qc, err = dialVersions(ctx, tr, raddr, tlsConf, conf, early)
 	if err == nil {
 		noECH.Store(tlsConf.ServerName, echFailure{string(hidden.EncryptedClientHelloConfigList), time.Now()})
 	}
@@ -456,62 +458,57 @@ func withECH(tlsConf *tls.Config) *tls.Config {
 	return hidden
 }
 
-func dialVersions(ctx context.Context, tr *quic.Transport, raddr net.Addr, tlsConf *tls.Config, conf *quic.Config) (*quic.Conn, error) {
+func dialVersions(ctx context.Context, tr *quic.Transport, raddr net.Addr, tlsConf *tls.Config, conf *quic.Config, early bool) (*quic.Conn, error) {
 	if skipV2.Load() {
-		qc, err := dialVersion(ctx, tr, raddr, tlsConf, conf, quic.Version1)
-		if err == nil && tlsConf != nil && tlsConf.EncryptedClientHelloConfigList != nil {
-			go watch(qc, false, tlsConf)
+		qc, err := dialVersion(ctx, tr, raddr, tlsConf, conf, quic.Version1, early)
+		if err == nil && early {
+			go watch(qc)
 		}
 		if timedOut(err) {
 			skipV2.Store(false)
 		}
 		return qc, err
 	}
-	qc, err := dialVersion(ctx, tr, raddr, tlsConf, conf, quic.Version2)
+	qc, err := dialVersion(ctx, tr, raddr, tlsConf, conf, quic.Version2, early)
 	if err == nil {
-		go watch(qc, true, tlsConf)
+		if early {
+			go watch(qc)
+		}
 		return qc, nil
 	}
 	if !timedOut(err) || ctx.Err() != nil {
 		return nil, err
 	}
 	fmt.Printf("dial     %s: no answer to QUIC v2, trying v1\n", raddr)
-	qc, err = dialVersion(ctx, tr, raddr, tlsConf, conf, quic.Version1)
+	qc, err = dialVersion(ctx, tr, raddr, tlsConf, conf, quic.Version1, early)
 	if err == nil {
 		skipV2.Store(true)
 	}
 	return qc, err
 }
 
-func dialVersion(ctx context.Context, tr *quic.Transport, raddr net.Addr, tlsConf *tls.Config, conf *quic.Config, v quic.Version) (*quic.Conn, error) {
+func dialVersion(ctx context.Context, tr *quic.Transport, raddr net.Addr, tlsConf *tls.Config, conf *quic.Config, v quic.Version, early bool) (*quic.Conn, error) {
 	tlsConf = ensureALPN(tlsConf)
 	conf = configOrDefault(conf).Clone()
 	conf.Versions = []quic.Version{v}
 	if v != quic.Version1 {
 		conf.Versions = append(conf.Versions, quic.Version1)
 	}
-	if tlsConf.ClientSessionCache != nil {
+	if early && tlsConf.ClientSessionCache != nil {
 		return tr.DialEarly(ctx, raddr, tlsConf, conf)
 	}
 	return tr.Dial(ctx, raddr, tlsConf, conf)
 }
 
-func watch(qc *quic.Conn, v2 bool, tlsConf *tls.Config) {
+func watch(qc *quic.Conn) {
 	select {
 	case <-qc.HandshakeComplete():
 	case <-qc.Context().Done():
 		cause := context.Cause(qc.Context())
-		if v2 && timedOut(cause) {
-			fmt.Printf("dial     %s: QUIC v2 went unanswered, next dials use v1\n", qc.RemoteAddr())
-			skipV2.Store(true)
-		}
 		var te *quic.TransportError
-		if tlsConf == nil || tlsConf.EncryptedClientHelloConfigList == nil {
-			return
-		}
 		if timedOut(cause) || errors.As(cause, &te) && te.ErrorCode.IsCryptoError() {
-			fmt.Printf("dial     %s: the handshake with ECH failed (%v), next dials go without it\n", qc.RemoteAddr(), cause)
-			noECH.Store(tlsConf.ServerName, echFailure{string(tlsConf.EncryptedClientHelloConfigList), time.Now()})
+			fmt.Printf("dial     %s: the early handshake failed (%v), the next dial goes without 0-RTT to see whether QUIC v2 or ECH is at fault\n", qc.RemoteAddr(), cause)
+			prove.Store(true)
 		}
 	}
 }

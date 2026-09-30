@@ -21,6 +21,14 @@ import (
 
 var wholeInternet = []connectip.IPRoute{
 	{StartIP: netip.MustParseAddr("0.0.0.0"), EndIP: netip.MustParseAddr("255.255.255.255")},
+	{StartIP: netip.IPv6Unspecified(), EndIP: netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")},
+}
+
+func routesFor(addresses []netip.Prefix) []connectip.IPRoute {
+	if len(addresses) > 1 {
+		return wholeInternet
+	}
+	return wholeInternet[:1]
 }
 
 func (n *Node) serveConnectIP(ctx context.Context) http.HandlerFunc {
@@ -83,12 +91,13 @@ func (n *Node) carry(ctx context.Context, conn *connectip.Conn, qc *quic.Conn, g
 		}
 	}
 
-	if err := conn.AssignAddresses(ctx, []netip.Prefix{address}); err != nil {
+	addresses := carried(address)
+	if err := conn.AssignAddresses(ctx, addresses); err != nil {
 		n.pool.give(address)
 		conn.Close()
 		return
 	}
-	if err := conn.AdvertiseRoute(ctx, wholeInternet); err != nil {
+	if err := conn.AdvertiseRoute(ctx, routesFor(addresses)); err != nil {
 		n.pool.give(address)
 		conn.Close()
 		return

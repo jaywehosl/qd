@@ -10,7 +10,12 @@ type onlyV4 struct {
 	packet.Source
 }
 
-func watched(src packet.Source) packet.Source { return onlyV4{Source: src} }
+func watched(src packet.Source, six bool) packet.Source {
+	if six {
+		return src
+	}
+	return onlyV4{Source: src}
+}
 
 func (o onlyV4) Recv(ctx context.Context) ([]packet.Packet, error) {
 	pkts, err := o.Source.Recv(ctx)

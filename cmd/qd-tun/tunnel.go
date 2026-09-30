@@ -174,8 +174,11 @@ func (t *tunnel) Start(servers []string, relays []relay.Link, sessionID uint32) 
 	t.wg.Add(1)
 	go func() {
 		defer t.wg.Done()
-		defer sharp()
+		<-held.Released
+	}()
+	go func() {
 		<-held.Gone
+		sharp()
 	}()
 
 	go flushSystemDNS()

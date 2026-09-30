@@ -118,6 +118,11 @@ func raise(live *qcli.Tunnel, keepOut []netip.Prefix, mtu int, dns bool) (packet
 	if err := ip("addr", "add", assigned[0].String(), "dev", name); err != nil {
 		return fail(err)
 	}
+	for _, p := range assigned[1:] {
+		if err := ip("addr", "add", p.String(), "dev", name); err != nil {
+			fmt.Printf("tun      %s stays off %s: %v\n", p, name, err)
+		}
+	}
 	if nic, err := net.InterfaceByName(name); err == nil {
 		tunIndex.Store(int32(nic.Index))
 	}
@@ -180,7 +185,7 @@ func raise(live *qcli.Tunnel, keepOut []netip.Prefix, mtu int, dns bool) (packet
 	splitUp(assigned[0].Addr())
 	held.undo = append(held.undo, splitDown)
 
-	fmt.Printf("tun      %s up with %s, mtu %d, %d prefixes kept aside\n", name, assigned[0], mtu, len(aside))
+	fmt.Printf("tun      %s up with %v, mtu %d, %d prefixes kept aside\n", name, assigned, mtu, len(aside))
 	return held, nil
 }
 

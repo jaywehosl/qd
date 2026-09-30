@@ -33,6 +33,7 @@ type Carried struct {
 	Ctx      context.Context
 	Halt     chan struct{}
 	Gone     chan struct{}
+	Released chan struct{}
 }
 
 const defaultWait = 20 * time.Second
@@ -95,6 +96,8 @@ func Carry(ctx context.Context, p Plan) (*Carried, error) {
 	}
 	if dns != nil {
 		dns.SetNode(live.Endpoint())
+		_, six := live.Six()
+		dns.CarryV6(six)
 	}
 
 	src, err := p.Source(round, live)
@@ -106,10 +109,16 @@ func Carry(ctx context.Context, p Plan) (*Carried, error) {
 		Live: live, DNS: dns, Source: src,
 		Assigned: assigned[0], Endpoint: live.Endpoint(),
 		Quit: quit, Ctx: round, Halt: make(chan struct{}), Gone: make(chan struct{}),
+		Released: make(chan struct{}),
 	}
 
 	var closing sync.Once
-	shut := func() { closing.Do(func() { src.Close() }) }
+	shut := func() {
+		closing.Do(func() {
+			src.Close()
+			close(out.Released)
+		})
+	}
 	context.AfterFunc(round, shut)
 
 	go func() {
@@ -135,7 +144,7 @@ func Carry(ctx context.Context, p Plan) (*Carried, error) {
 	}
 
 	out.tell(p.Say, "carry: up in %d ms through %s, node gave %s",
-		time.Since(began).Milliseconds(), out.Endpoint, out.Assigned)
+		time.Since(began).Milliseconds(), out.Endpoint, assigned)
 	return out, nil
 }
 

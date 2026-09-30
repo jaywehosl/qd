@@ -39,6 +39,7 @@ type Resolver struct {
 
 	queries, hits, upstream, failed, refused, noV6 atomic.Uint64
 	lastOK                                         atomic.Int64
+	six                                            atomic.Bool
 }
 
 func New(cfg Config) (*Resolver, error) {
@@ -122,7 +123,7 @@ func (r *Resolver) handle(query []byte, from *net.UDPAddr) {
 		return
 	}
 
-	if qtype == 28 {
+	if qtype == 28 && !r.six.Load() {
 		r.noV6.Add(1)
 		r.conn.WriteToUDP(dnsproxy.NoData(query), from)
 		return
@@ -216,3 +217,5 @@ func (r *Resolver) tell(format string, args ...any) {
 		r.say(format, args...)
 	}
 }
+
+func (r *Resolver) CarryV6(on bool) { r.six.Store(on) }

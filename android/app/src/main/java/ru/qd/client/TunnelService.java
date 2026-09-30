@@ -188,9 +188,16 @@ public class TunnelService extends VpnService {
             builder.addDnsServer(p.getString("dns"));
 
             try {
-                builder.addAddress("fd00:7::2", 64);
-                builder.addRoute("::", 0);
-                Core.say(this, "java: v6 held by the tunnel and dropped there");
+                String six = p.optString("localIp6", "");
+                if (six.isEmpty()) {
+                    builder.addAddress("fd00:7::2", 64);
+                    builder.addRoute("::", 0);
+                    Core.say(this, "java: v6 held by the tunnel and dropped there, the node gave no v6");
+                } else {
+                    builder.addAddress(six, p.getInt("prefix6"));
+                    builder.addRoute("::", 0);
+                    Core.say(this, "java: v6 rides the tunnel as " + six);
+                }
             } catch (Exception e) {
                 Log.e(TAG, "v6", e);
                 Core.say(this, "java: v6 could not be held: " + e.getMessage());

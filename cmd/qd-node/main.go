@@ -355,8 +355,8 @@ func printStats(node *qsrv.Node) {
 		if s.PktUp == 0 && s.PktDown == 0 {
 			continue
 		}
-		fmt.Printf("  session %d seat %d  %s  out %d pkt / %s  in %d pkt / %s\n",
-			s.Session, s.Seat, s.Address, s.PktUp, human(s.Up), s.PktDown, human(s.Down))
+		fmt.Printf("  session %d seat %d  %v  %s  out %d pkt / %s  in %d pkt / %s\n",
+			s.Session, s.Seat, s.Addresses, s.Carriage, s.PktUp, human(s.Up), s.PktDown, human(s.Down))
 	}
 }
 
