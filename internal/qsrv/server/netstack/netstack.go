@@ -142,6 +142,10 @@ func (s *Stack) ingress(ctx context.Context, t Tunnel) error {
 			go s.echo(t, append([]byte(nil), buf[:n]...))
 			continue
 		}
+		if s.pinger != nil && isEcho6(buf[:n]) {
+			go s.echo6(t, append([]byte(nil), buf[:n]...))
+			continue
+		}
 		var proto tcpip.NetworkProtocolNumber
 		switch buf[0] >> 4 {
 		case 4:

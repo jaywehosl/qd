@@ -92,3 +92,28 @@ func Checksum(b []byte) uint16 {
 	}
 	return ^uint16(sum)
 }
+
+func Checksum6(pkt []byte) uint16 {
+	msg := pkt[40:]
+	sum := make([]byte, 40, 40+len(msg))
+	copy(sum, pkt[8:40])
+	binary.BigEndian.PutUint32(sum[32:], uint32(len(msg)))
+	sum[39] = pkt[6]
+	return Checksum(append(sum, msg...))
+}
+
+func ICMPv6(from, to netip.Addr, hop uint8, msg []byte) []byte {
+	out := make([]byte, 40+len(msg))
+	out[0], out[6], out[7] = 0x60, 58, hop
+	if out[7] == 0 {
+		out[7] = 64
+	}
+	binary.BigEndian.PutUint16(out[4:], uint16(len(msg)))
+	src, dst := from.As16(), to.As16()
+	copy(out[8:24], src[:])
+	copy(out[24:40], dst[:])
+	copy(out[40:], msg)
+	out[42], out[43] = 0, 0
+	binary.BigEndian.PutUint16(out[42:], Checksum6(out))
+	return out
+}

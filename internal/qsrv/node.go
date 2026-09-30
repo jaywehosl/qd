@@ -569,7 +569,7 @@ func (n *Node) serveSite(ctx context.Context, quicSrv *http3.Server, served http
 }
 
 func (s *live) where() string {
-	if s.conn != nil {
+	if s.conn != nil && !s.transit {
 		if addr := s.conn.RemoteAddr(); addr != nil {
 			return addr.String()
 		}

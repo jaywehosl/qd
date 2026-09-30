@@ -46,6 +46,7 @@ type Options struct {
 	Mark     func(pkt []byte) uint64
 	Loud     bool
 	Gateway  netip.Addr
+	Gateway6 netip.Addr
 }
 
 type Engine struct {
@@ -417,6 +418,10 @@ const resetDrain = 300 * time.Millisecond
 const statsEvery = time.Minute
 
 func (e *Engine) expired(pkt []byte) []byte {
+	if e.Gateway6.Is6() && len(pkt) >= 48 && pkt[0]>>4 == 6 && pkt[7] <= 1 {
+		msg := append([]byte{3, 0, 0, 0, 0, 0, 0, 0}, pkt[:min(len(pkt), 1280-48)]...)
+		return ippkt.ICMPv6(e.Gateway6, netip.AddrFrom16([16]byte(pkt[8:24])), 64, msg)
+	}
 	if !e.Gateway.Is4() || len(pkt) < 28 || pkt[0]>>4 != 4 || pkt[8] > 1 {
 		return nil
 	}

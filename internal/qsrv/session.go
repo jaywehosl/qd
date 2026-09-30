@@ -115,7 +115,7 @@ func (h *held) heading() string {
 	return h.route
 }
 
-func (n *Node) peerSession(grant Grant) *live {
+func (n *Node) peerSession(grant Grant, qc *quic.Conn) *live {
 	uuid := grant.Client
 	if uuid == "" || grant.Seat == 0 {
 		return nil
@@ -132,6 +132,7 @@ func (n *Node) peerSession(grant Grant) *live {
 	s := newLive(Grant{Client: uuid, AllowExit: grant.AllowExit,
 		Session: grant.Session, Seat: id}, netip.Prefix{}, uuid, "")
 	s.transit = true
+	s.conn = qc
 	n.held[id] = s
 	return s
 }
@@ -174,8 +175,8 @@ func (n *Node) counting(grant Grant, r *http.Request, route string) *live {
 	if s != nil {
 		return s
 	}
-	if sessionOf(r.Context()).quic() != nil {
-		return n.peerSession(grant)
+	if qc := sessionOf(r.Context()).quic(); qc != nil {
+		return n.peerSession(grant, qc)
 	}
 	return n.streamSession(grant, r, route)
 }

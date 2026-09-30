@@ -127,6 +127,23 @@ func (n *NAT) applyV6(pkt []byte, outbound bool) {
 	}
 	copy(pkt[24:40], held[:])
 	fixL4(pkt, 6, n.assignedV6[:], held[:])
+	if pkt[6] == 58 {
+		n.fixQuoteV6(pkt, *held)
+	}
+}
+
+func (n *NAT) fixQuoteV6(pkt []byte, real [16]byte) {
+	msg := pkt[40:]
+	if len(msg) < 48 || (msg[0] != 1 && msg[0] != 3) {
+		return
+	}
+	inner := msg[8:]
+	if [16]byte(inner[8:24]) != n.assignedV6 {
+		return
+	}
+	copy(inner[8:24], real[:])
+	msg[2], msg[3] = 0, 0
+	binary.BigEndian.PutUint16(msg[2:], ippkt.Checksum6(pkt))
 }
 
 func fixIPv4Header(pkt []byte) {

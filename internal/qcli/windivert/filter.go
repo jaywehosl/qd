@@ -57,7 +57,7 @@ func notIn(field string, p netip.Prefix) string {
 func protoClause(cfg CaptureConfig) string {
 	switch {
 	case cfg.TCP && cfg.UDP:
-		return "(tcp or udp or (icmp and icmp.Type == 8))"
+		return "(tcp or udp or (icmp and icmp.Type == 8) or (icmpv6 and icmpv6.Type == 128))"
 	case cfg.TCP:
 		return "tcp"
 	case cfg.UDP:
