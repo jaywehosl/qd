@@ -330,6 +330,11 @@ func resolve(ctx context.Context, endpoint string) ([]*net.UDPAddr, error) {
 		return []*net.UDPAddr{{IP: ip.AsSlice(), Port: number}}, nil
 	}
 
+	if held, ok := known.Load(endpoint); ok {
+		go refresh(endpoint, host, number)
+		return held.([]*net.UDPAddr), nil
+	}
+
 	look, stop := context.WithTimeout(ctx, resolveWait)
 	ips, err := net.DefaultResolver.LookupIP(look, "ip", host)
 	stop()
@@ -536,4 +541,14 @@ func Known(endpoint string) []netip.Addr {
 		}
 	}
 	return out
+}
+
+func refresh(endpoint, host string, port int) {
+	look, stop := context.WithTimeout(context.Background(), resolveWait)
+	defer stop()
+	ips, err := net.DefaultResolver.LookupIP(look, "ip", host)
+	if err != nil || len(ips) == 0 {
+		return
+	}
+	known.Store(endpoint, order(ips, port))
 }

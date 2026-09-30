@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"sync"
 	"time"
 
 	"github.com/jaywehosl/qd/internal/clientdns"
@@ -107,9 +108,13 @@ func Carry(ctx context.Context, p Plan) (*Carried, error) {
 		Quit: quit, Ctx: round, Halt: make(chan struct{}), Gone: make(chan struct{}),
 	}
 
+	var closing sync.Once
+	shut := func() { closing.Do(func() { src.Close() }) }
+	context.AfterFunc(round, shut)
+
 	go func() {
 		defer close(out.Gone)
-		defer src.Close()
+		defer shut()
 
 		err := live.Run(round, src)
 		if round.Err() != nil {
