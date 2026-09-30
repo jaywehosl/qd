@@ -64,6 +64,7 @@ func (n *Node) verified(r *http.Request) (Grant, bool) {
 			}
 			grant.Seat = seat
 			grant.Client = r.Header.Get(HeaderNode)
+			grant.Peer = true
 		} else if device := r.Header.Get(HeaderDevice); device != "" {
 			grant.Seat = seatFor(grant.Session, device)
 		}

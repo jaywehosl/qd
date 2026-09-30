@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"net/netip"
 	"os"
 	"os/exec"
@@ -26,6 +27,7 @@ import (
 	"github.com/jaywehosl/qd/internal/qsrv/uplink/quicconn"
 	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
 	"github.com/jaywehosl/qd/internal/store"
+	"github.com/jaywehosl/qd/internal/update"
 )
 
 var version = "dev"
@@ -247,8 +249,15 @@ func main() {
 		Token:     key,
 		Relays:    relays,
 		Verify:    admission.verify,
-		Peers:     peersFrom(db, self.ID),
-		Tune:      func() qsrv.Tunables { return tunablesFrom(mustSettings(db)) },
+		Admit:     admission.admit,
+		Shelf: &update.Shelf{
+			Dir:    filepath.Join(filepath.Dir(*dbPath), "updates"),
+			Client: &http.Client{Timeout: 10 * time.Minute},
+			Target: func() string { return mustSettings(db).ClientVersion },
+			Log:    func(format string, args ...any) { log.Printf(format, args...) },
+		},
+		Peers: peersFrom(db, self.ID),
+		Tune:  func() qsrv.Tunables { return tunablesFrom(mustSettings(db)) },
 		Ask: func(op string, body []byte, auth string) (any, error) {
 			return askNode(state, op, body, auth)
 		},

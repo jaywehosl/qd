@@ -2,12 +2,14 @@ package clientapi
 
 import (
 	"errors"
+	"io"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/jaywehosl/qd/internal/clientstate"
 	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
+	"github.com/jaywehosl/qd/internal/update"
 )
 
 type Entrypoint struct {
@@ -32,6 +34,7 @@ type Standing struct {
 	FixedRate      int          `json:"fixedRate"`
 	Peers          []string     `json:"peers"`
 	ECH            []byte       `json:"ech"`
+	Update         *Offer       `json:"update"`
 }
 
 func (s Standing) Refused() bool { return !s.Carried && s.Why() != "" }
@@ -54,11 +57,13 @@ func claim(me Device, token string) map[string]any {
 	return map[string]any{
 		"token": token, "device": me.ID, "platform": me.Platform,
 		"model": me.Model, "kind": me.Kind, "name": me.Name,
+		"version": update.Version, "build": update.Kind,
 	}
 }
 
 type Asker interface {
 	Ask(endpoint, op, auth string, body any, out any) error
+	Open(endpoint, path string) (io.ReadCloser, error)
 }
 
 func Announce(op string, nodes []clientstate.Node, token string, me Device, wire Asker) int {
@@ -95,6 +100,7 @@ func (a *API) sweep() (int, Standing) {
 
 	type result struct {
 		id       int
+		endpoint string
 		latency  int
 		standing Standing
 	}
@@ -106,16 +112,17 @@ func (a *API) sweep() (int, Standing) {
 			var answer Standing
 			began := time.Now()
 			if err := wire.Ask(n.Endpoint(), "whoami", sub.Key, body, &answer); err != nil {
-				results <- result{id: n.ID, latency: -1}
+				results <- result{id: n.ID, endpoint: n.Endpoint(), latency: -1}
 				return
 			}
 			a.db.PutECH(n.Address, answer.ECH)
-			results <- result{n.ID, int(time.Since(began).Milliseconds()), answer}
+			results <- result{n.ID, n.Endpoint(), int(time.Since(began).Milliseconds()), answer}
 		}(n)
 	}
 
 	reached := 0
 	var best Standing
+	var from string
 	answered := make(map[int]bool, len(nodes))
 	deadline := time.After(sweepWait)
 collect:
@@ -129,6 +136,7 @@ collect:
 			}
 			if reached == 0 || (r.standing.Known && !best.Known) {
 				best = r.standing
+				from = r.endpoint
 			}
 			reached++
 		case <-deadline:
@@ -139,6 +147,9 @@ collect:
 		if !answered[n.ID] {
 			a.db.MarkReach(n.ID, -1, false)
 		}
+	}
+	if reached > 0 {
+		a.keepOffer(best.Update, from)
 	}
 	return reached, best
 }
@@ -157,4 +168,9 @@ func (a *API) take() (int, error) {
 		return reached, errors.New(answer.Why())
 	}
 	return reached, nil
+}
+
+type Offer struct {
+	Version string         `json:"version"`
+	State   update.Verdict `json:"state"`
 }

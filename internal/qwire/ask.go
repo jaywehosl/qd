@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jaywehosl/qd/internal/qsrv"
+	"github.com/jaywehosl/qd/internal/update"
 )
 
 func (d *Dialer) Ask(endpoint, op, auth string, body any, out any) error {
@@ -37,6 +38,7 @@ func (d *Dialer) Ask(endpoint, op, auth string, body any, out any) error {
 		return err
 	}
 	req.Header.Set(qsrv.HeaderToken, token)
+	update.Stamp(req.Header)
 	if auth != "" {
 		req.Header.Set(qsrv.HeaderAuth, auth)
 	}
@@ -108,3 +110,46 @@ const (
 	askWait   = 10 * time.Second
 	heavyWait = 2 * time.Minute
 )
+
+func (d *Dialer) Open(endpoint, path string) (io.ReadCloser, error) {
+	cc, token, err := d.conn(endpoint)
+	if err != nil {
+		return nil, err
+	}
+	ctx, stop := context.WithTimeout(context.Background(), fetchWait)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+endpoint+path, nil)
+	if err != nil {
+		stop()
+		return nil, err
+	}
+	req.Header.Set(qsrv.HeaderToken, token)
+	update.Stamp(req.Header)
+
+	rsp, err := cc.RoundTrip(req)
+	if err != nil {
+		stop()
+		return nil, err
+	}
+	if rsp.StatusCode != http.StatusOK {
+		rsp.Body.Close()
+		stop()
+		return nil, fmt.Errorf("%s: %s", path, rsp.Status)
+	}
+	return stopping{ReadCloser: rsp.Body, stop: stop, size: rsp.ContentLength}, nil
+}
+
+type stopping struct {
+	io.ReadCloser
+	stop context.CancelFunc
+	size int64
+}
+
+func (s stopping) Close() error {
+	err := s.ReadCloser.Close()
+	s.stop()
+	return err
+}
+
+const fetchWait = 15 * time.Minute
+
+func (s stopping) Size() int64 { return s.size }

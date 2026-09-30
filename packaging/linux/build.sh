@@ -10,7 +10,7 @@ cd "$ROOT"
 export GOFLAGS=-buildvcs=false
 mkdir -p "$STAGE/qd-client" "$OUT"
 
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o "$STAGE/qd-client/qd-client" ./cmd/qd-tun
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X github.com/jaywehosl/qd/internal/update.Version=${QD_VERSION:-dev}" -o "$STAGE/qd-client/qd-client" ./cmd/qd-tun
 CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o "$STAGE/qd-client/qd-client-window" ./cmd/qd-window
 cp packaging/linux/install.sh packaging/linux/qd-client.service packaging/linux/qd-client.desktop packaging/linux/qd-client.png "$STAGE/qd-client/"
 chmod 0755 "$STAGE/qd-client/install.sh"

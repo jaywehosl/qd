@@ -21,6 +21,7 @@ import (
 	"github.com/jaywehosl/qd/internal/ippkt"
 	"github.com/jaywehosl/qd/internal/qsrv/server/decoy"
 	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
+	"github.com/jaywehosl/qd/internal/update"
 )
 
 const (
@@ -28,6 +29,7 @@ const (
 	ConnectIPPath = "/qd/ip"
 	IPOverTCPPath = "/qd/ipt"
 	RPCPath       = "/qd/rpc/"
+	UpdatePath    = update.Path
 
 	defaultHops = 2
 )
@@ -38,6 +40,7 @@ type Grant struct {
 	Steer     bool
 	Session   uint32
 	Seat      uint32
+	Peer      bool
 }
 
 type Tunables struct {
@@ -79,6 +82,8 @@ type Config struct {
 	Relays []relay.Config
 
 	Verify func(raw string) (Grant, bool)
+	Admit  func(g Grant, version, build string) bool
+	Shelf  *update.Shelf
 	Peers  func() []Peer
 	Tune   func() Tunables
 
@@ -314,6 +319,7 @@ func (n *Node) Run(ctx context.Context) error {
 	mux.HandleFunc(ConnectIPPath, n.serveConnectIP(ctx))
 	mux.HandleFunc(IPOverTCPPath, n.serveIPOverTCP(ctx))
 	mux.HandleFunc(RPCPath, n.serveRPC)
+	mux.HandleFunc(UpdatePath, n.serveUpdate)
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		plain := r.Method == http.MethodConnect && r.URL != nil && r.URL.Path == "" && r.Host != ""
@@ -405,6 +411,10 @@ func (n *Node) stopRelays() {
 func (n *Node) carrier(r *http.Request) (Grant, bool) {
 	grant, ok := n.verified(r)
 	if !ok || grant.Session == 0 || grant.Seat == 0 {
+		return Grant{}, false
+	}
+	if n.cfg.Admit != nil && !grant.Peer &&
+		!n.cfg.Admit(grant, r.Header.Get(update.HeaderVersion), r.Header.Get(update.HeaderKind)) {
 		return Grant{}, false
 	}
 	return grant, true

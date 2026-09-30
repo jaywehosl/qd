@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"path/filepath"
 	"strings"
 
 	"github.com/jaywehosl/qd/internal/clientapi"
 	"github.com/jaywehosl/qd/internal/clientstate"
 	"github.com/jaywehosl/qd/internal/qdcrypt"
 	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
+	"github.com/jaywehosl/qd/internal/update"
 )
 
 type platform struct {
@@ -178,4 +180,16 @@ func (c *Client) hold(assigned, six netip.Prefix, mtu int) (int, error) {
 		return 0, errors.New("the system refused to establish the tunnel")
 	}
 	return fd, nil
+}
+
+func (p platform) Install(tag string, open update.Opener, tick func(done, total int64)) error {
+	path, err := update.Take(open, "qd-android-arm64.apk", filepath.Join(p.c.dir, "update"), tick)
+	if err != nil {
+		return err
+	}
+	say("update: %s fetched and verified, handing it to the package installer", tag)
+	if !p.c.host.Install(path) {
+		return errors.New("the package installer did not take the update")
+	}
+	return nil
 }

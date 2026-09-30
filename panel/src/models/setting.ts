@@ -29,6 +29,7 @@ export class AllSetting {
   keepAliveSeconds = 15;
   socketBufferKb = 2048;
   echName = '';
+  clientVersion = '';
 
   constructor(data?: unknown) {
     if (data != null) {

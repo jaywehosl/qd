@@ -3,6 +3,8 @@ package ru.qd.client;
 import android.animation.ArgbEvaluator;
 import android.app.Activity;
 import android.content.Intent;
+import android.graphics.Canvas;
+import android.graphics.Path;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.view.Choreographer;
@@ -25,6 +27,8 @@ public class ConnectPage {
     private final Skin skin;
     private final Stage stage = new Stage();
     private final ArgbEvaluator mix = new ArgbEvaluator();
+    private final Upkeep upkeep;
+    private TextView updateLabel;
 
     private TextView title;
     private TextView refreshLine;
@@ -67,6 +71,7 @@ public class ConnectPage {
     public ConnectPage(Activity host, Skin skin) {
         this.host = host;
         this.skin = skin;
+        this.upkeep = new Upkeep(host, skin);
     }
 
     public View build() {
@@ -85,6 +90,7 @@ public class ConnectPage {
         int bleed = skin.dp(12);
         seat.leftMargin = -bleed;
         seat.rightMargin = -bleed;
+        seat.bottomMargin = -skin.dp(86);
         root.addView(controlCard, seat);
 
         return root;
@@ -165,7 +171,14 @@ public class ConnectPage {
         sparkAt.gravity = Gravity.END | Gravity.CENTER_VERTICAL;
         row.addView(spark, sparkAt);
 
-        card.addView(row, new LinearLayout.LayoutParams(
+        FrameLayout stack = new FrameLayout(host);
+        stack.setClipChildren(false);
+        stack.addView(row, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT));
+        upkeep.head(stack, row, card);
+        card.setClipChildren(false);
+        card.setClipToOutline(true);
+        card.addView(stack, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         return card;
     }
@@ -189,8 +202,12 @@ public class ConnectPage {
         card.setOutlineAmbientShadowColor(0x4D000000);
         card.setElevation(skin.dpf(20f));
 
+        FrameLayout live = new FrameLayout(host);
+        card.addView(live, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+
         flow = new Flow(host, skin);
-        card.addView(flow, new FrameLayout.LayoutParams(
+        live.addView(flow, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
         roster = skin.column();
@@ -204,7 +221,7 @@ public class ConnectPage {
         rosterAt.gravity = Gravity.BOTTOM | Gravity.START;
         rosterAt.leftMargin = skin.dp(18);
 
-        card.addView(rosterBox, rosterAt);
+        live.addView(rosterBox, rosterAt);
         card.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
             @Override
             public void onLayoutChange(View v, int l, int t, int r, int b,
@@ -225,7 +242,7 @@ public class ConnectPage {
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT);
         metersAt.gravity = Gravity.BOTTOM;
         metersAt.bottomMargin = skin.dp(16);
-        card.addView(meters, metersAt);
+        live.addView(meters, metersAt);
 
         LinearLayout bothPill = new LinearLayout(host);
         bothPill.setOrientation(LinearLayout.HORIZONTAL);
@@ -266,7 +283,7 @@ public class ConnectPage {
                 FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
         wideAt.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
         wideAt.bottomMargin = skin.dp(16);
-        card.addView(wideBox, wideAt);
+        live.addView(wideBox, wideAt);
 
         trouble = skin.label("", RED, 14);
         trouble.setGravity(Gravity.CENTER);
@@ -274,8 +291,9 @@ public class ConnectPage {
         FrameLayout.LayoutParams troubleAt = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT);
         troubleAt.gravity = Gravity.CENTER;
-        card.addView(trouble, troubleAt);
+        live.addView(trouble, troubleAt);
 
+        upkeep.stage(card, live);
         return card;
     }
 
@@ -354,7 +372,21 @@ public class ConnectPage {
     private View controls() {
         halo = new Halo(host, skin);
 
-        power = new LinearLayout(host);
+        final float girth = skin.dpf(27f);
+        power = new LinearLayout(host) {
+            private final Path edge = new Path();
+
+            @Override
+            protected void dispatchDraw(Canvas canvas) {
+                edge.reset();
+                edge.addRoundRect(0f, 0f, getWidth(), getHeight(), girth, girth, Path.Direction.CW);
+                canvas.save();
+                canvas.clipPath(edge);
+                super.dispatchDraw(canvas);
+                canvas.restore();
+            }
+        };
+        power.setClipChildren(false);
         power.setOrientation(LinearLayout.HORIZONTAL);
         power.setGravity(Gravity.CENTER_VERTICAL);
         power.setPadding(skin.dp(24), skin.dp(14), skin.dp(14), skin.dp(14));
@@ -366,7 +398,12 @@ public class ConnectPage {
         power.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                flip();
+                upkeep.onPower(new Runnable() {
+                    @Override
+                    public void run() {
+                        flip();
+                    }
+                });
             }
         });
 
@@ -374,7 +411,19 @@ public class ConnectPage {
         powerLabel.setGravity(Gravity.CENTER);
         skin.shrink(powerLabel, 17, 27);
         powerLabel.setTypeface(Typeface.DEFAULT_BOLD);
-        power.addView(powerLabel, new LinearLayout.LayoutParams(0,
+
+        updateLabel = skin.label("обновить", skin.bold, 27);
+        updateLabel.setGravity(Gravity.CENTER);
+        skin.shrink(updateLabel, 17, 27);
+        updateLabel.setTypeface(Typeface.DEFAULT_BOLD);
+        updateLabel.setTranslationY(skin.dpf(200f));
+
+        FrameLayout faces = new FrameLayout(host);
+        faces.addView(powerLabel, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
+        faces.addView(updateLabel, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
+        power.addView(faces, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
         mark = new Mark(host, skin);
@@ -393,7 +442,17 @@ public class ConnectPage {
 
         halo.addView(power, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT));
-        return halo;
+
+        LinearLayout slots = new LinearLayout(host);
+        slots.setOrientation(LinearLayout.VERTICAL);
+        slots.setClipChildren(false);
+        slots.setClipToPadding(false);
+        slots.addView(upkeep.later(), new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        slots.addView(halo, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        upkeep.power(powerLabel, updateLabel, egress, halo);
+        return slots;
     }
 
     public void reset() {
@@ -458,6 +517,7 @@ public class ConnectPage {
         float at = stage.at();
 
         paint(at);
+        upkeep.frame(at);
         glint();
 
         float spread = stage.spread();
@@ -482,6 +542,7 @@ public class ConnectPage {
 
     public void render() {
         try {
+            upkeep.poll();
             JSONObject state = Snapshot.state();
 
             name(Core.up() ? carrying() : "");
@@ -609,7 +670,8 @@ public class ConnectPage {
             float toward = span(at, Stage.GATE, Stage.GATE + 0.18f);
             tone = (Integer) mix.evaluate(toward, RED, LIVE);
         }
-        powerFace.setColor(tone);
+        float fix = upkeep.tint(upkeep.paintsPower());
+        powerFace.setColor((Integer) mix.evaluate(fix, tone, LIVE));
         halo.setTone(at > Stage.GATE ? LIVE : RED);
 
         String word = at <= 0.01f ? "подключить"
@@ -618,7 +680,8 @@ public class ConnectPage {
         if (!word.contentEquals(powerLabel.getText())) {
             powerLabel.setText(word);
         }
-        powerLabel.setTextColor(at > 0.12f ? 0xFFFFFFFF : skin.bold);
+        int ink = at > 0.12f ? 0xFFFFFFFF : skin.bold;
+        powerLabel.setTextColor((Integer) mix.evaluate(fix, ink, 0xFFFFFFFF));
     }
 
     private static String shorten(String name) {
@@ -655,7 +718,7 @@ public class ConnectPage {
     }
 
     private void flipExit() {
-        if (flipping) {
+        if (flipping || upkeep.owns()) {
             return;
         }
         flipping = true;

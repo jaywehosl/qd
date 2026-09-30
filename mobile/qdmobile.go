@@ -19,6 +19,7 @@ import (
 	"github.com/jaywehosl/qd/internal/qsrv/uplink/quicconn"
 	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
 	"github.com/jaywehosl/qd/internal/qwire"
+	"github.com/jaywehosl/qd/internal/update"
 )
 
 const (
@@ -40,6 +41,7 @@ type Host interface {
 	Teardown()
 	Note(text string)
 	Owner(proto int, source string, sourcePort int, target string, targetPort int) string
+	Install(path string) bool
 }
 
 type Client struct {
@@ -73,11 +75,13 @@ type Client struct {
 	appSplit string
 	dns      *clientdns.Resolver
 	gone     chan struct{}
+	dir      string
 }
 
 func Open(stateDir string, host Host, protector Protector, deviceID, model, name string) (*Client, error) {
+	update.Kind = "android"
 	markJournal(stateDir)
-	say("open: state=%s", stateDir)
+	say("open: state=%s version=%s", stateDir, update.Version)
 
 	db, err := clientstate.Open(filepath.Join(stateDir, "client.db"))
 	if err != nil {
@@ -94,6 +98,7 @@ func Open(stateDir string, host Host, protector Protector, deviceID, model, name
 
 	c := &Client{
 		db:        db,
+		dir:       stateDir,
 		host:      host,
 		protector: protector,
 		mtu:       safeMTU,

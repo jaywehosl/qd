@@ -71,6 +71,10 @@ func Open(path string) (*DB, error) {
 		`ALTER TABLE network ADD COLUMN route_services TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE network ADD COLUMN ech_name TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE nodes ADD COLUMN nat_slot INTEGER NOT NULL DEFAULT -1`,
+		`ALTER TABLE network ADD COLUMN client_version TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE network ADD COLUMN client_releases TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE groups ADD COLUMN allow_dev INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE groups ADD COLUMN allow_core INTEGER NOT NULL DEFAULT 0`,
 		`UPDATE network SET max_streams = 65536 WHERE max_streams = 4096`,
 	} {
 		if _, err := h.Exec(add); err != nil && !strings.Contains(err.Error(), "duplicate column") {

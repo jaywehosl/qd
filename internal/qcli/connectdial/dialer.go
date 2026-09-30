@@ -16,6 +16,7 @@ import (
 
 	"github.com/jaywehosl/qd/internal/costream"
 	"github.com/jaywehosl/qd/internal/qsrv"
+	"github.com/jaywehosl/qd/internal/update"
 )
 
 type Dialer struct {
@@ -59,6 +60,7 @@ func (d Dialer) open(ctx context.Context, dst netip.AddrPort, udp bool) (io.Read
 	if head == nil {
 		head = http.Header{}
 	}
+	update.Stamp(head)
 	if udp {
 		head.Set(qsrv.HeaderProto, "udp")
 	}

@@ -10,10 +10,12 @@ import { HttpUtil, SizeFormatter } from '@/utils';
 import { useClientState } from '@/hooks/useClientState';
 import { useClientSettings } from '@/layouts/ClientSettingsController';
 import { resetAll } from '@/stores/notificationStore';
+import UpdateButton from './UpdateButton';
 
 const TAB_SLUGS = ['preferences', 'about'];
 
 interface AboutPayload {
+  version?: string;
   tag?: string;
   createdAt?: number;
   up?: number;
@@ -77,6 +79,7 @@ export default function ClientSettingsPage() {
       return (
         <div className="cset-about">
           <div className="cset-grid">
+            <div><span>{t('client.settings.version')}</span><b>{about?.version || '—'}</b></div>
             <div><span>{t('client.settings.tag')}</span><Tag tone="primary">{about?.tag || '—'}</Tag></div>
             <div><span>{t('client.settings.created')}</span><b>{dateLabel(about?.createdAt)}</b></div>
             <div>
@@ -175,6 +178,7 @@ export default function ClientSettingsPage() {
     <section className="feed-section">
       <div className="section-header">
         <h2>{t('client.menu.settings')}</h2>
+        <UpdateButton />
       </div>
       <div className="client-settings">
         <div className="cset-layout">

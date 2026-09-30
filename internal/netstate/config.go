@@ -10,6 +10,8 @@ type CfgClient struct {
 	ExpiryAt  int64
 	AllowExit bool
 	RouteDNS  bool
+	AllowDev  bool
+	AllowCore bool
 }
 
 type CfgPeer struct {

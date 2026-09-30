@@ -58,6 +58,8 @@ export default function GroupEditModal({
   const [deviceLimit, setDeviceLimit] = useState(0);
   const [allowExit, setAllowExit] = useState(false);
   const [routeDns, setRouteDns] = useState(false);
+  const [allowDev, setAllowDev] = useState(false);
+  const [allowCore, setAllowCore] = useState(false);
   const [relayEnable, setRelayEnable] = useState(false);
   const [relays, setRelays] = useState<Record<number, string[]>>({});
   const [saving, setSaving] = useState(false);
@@ -92,6 +94,8 @@ export default function GroupEditModal({
     setDeviceLimit(Number((group as { deviceLimit?: number }).deviceLimit) || 0);
     setAllowExit(!!(group as { allowExit?: boolean }).allowExit);
     setRouteDns(!!(group as { routeDns?: boolean }).routeDns);
+    setAllowDev(!!(group as { allowDev?: boolean }).allowDev);
+    setAllowCore(!!(group as { allowCore?: boolean }).allowCore);
     setRelayEnable(!!(group as { relayEnable?: boolean }).relayEnable);
     const seed: Record<number, string[]> = {};
     (group.relays ?? []).forEach((r) => { (seed[r.nodeId] ??= []).push(r.weblink); });
@@ -173,10 +177,12 @@ export default function GroupEditModal({
           || deviceLimit !== (Number((group as { deviceLimit?: number }).deviceLimit) || 0)
           || allowExit !== !!(group as { allowExit?: boolean }).allowExit
           || routeDns !== !!(group as { routeDns?: boolean }).routeDns
+          || allowDev !== !!(group as { allowDev?: boolean }).allowDev
+          || allowCore !== !!(group as { allowCore?: boolean }).allowCore
           || relayEnable !== !!(group as { relayEnable?: boolean }).relayEnable
           || relaysDiffer) {
         const msg = await clientsApi.groupsEntrypoints(
-          { name: nextName, entrypointIds, deviceLimit, allowExit, routeDns, relayEnable, relays: relayList }, { silent: true });
+          { name: nextName, entrypointIds, deviceLimit, allowExit, routeDns, allowDev, allowCore, relayEnable, relays: relayList }, { silent: true });
         if (!msg?.success) { message.error(msg?.msg || t('somethingWentWrong')); return; }
       }
 
@@ -266,6 +272,14 @@ export default function GroupEditModal({
             onChange={setRelayEnable}
             aria-label={t('pages.groups.relayEnable', { defaultValue: 'Relay fallback' })}
           />
+        </div>
+        <div className="ge-toggle">
+          <span className="ge-toggle__label">{t('pages.groups.allowDev')}</span>
+          <Switch checked={allowDev} onChange={setAllowDev} aria-label={t('pages.groups.allowDev')} />
+        </div>
+        <div className="ge-toggle">
+          <span className="ge-toggle__label">{t('pages.groups.allowCore')}</span>
+          <Switch checked={allowCore} onChange={setAllowCore} aria-label={t('pages.groups.allowCore')} />
         </div>
       </div>
 

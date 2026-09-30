@@ -7,11 +7,14 @@ import (
 	"fmt"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"unsafe"
 
 	webview2 "github.com/jchv/go-webview2"
 	"golang.org/x/sys/windows"
+
+	"github.com/jaywehosl/qd/internal/update"
 )
 
 type shell struct {
@@ -119,6 +122,11 @@ func (s *shell) carry(url string) {
 	view.Bind("qdWindowGrab", func(edge string) {
 		view.Dispatch(func() { grab(handle, edge) })
 	})
+	view.Bind("qdOpenURL", func(target string) {
+		if strings.HasPrefix(target, "https://github.com/"+update.Repo+"/") {
+			openBrowser(target)
+		}
+	})
 
 	if paneDev != "" {
 		seed, err := json.Marshal(paneToken)
@@ -127,7 +135,7 @@ func (s *shell) carry(url string) {
 				"try{sessionStorage.setItem('qd.token',%s)}catch(e){}", seed, seed))
 		}
 		url = paneDev
-		fmt.Printf("window   dev page %s\n", url)
+		fmt.Printf("window   dev page %s, api token %s\n", url, paneToken)
 	}
 
 	view.Navigate(url)

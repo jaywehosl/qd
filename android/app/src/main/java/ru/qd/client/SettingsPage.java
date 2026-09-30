@@ -1,5 +1,6 @@
 package ru.qd.client;
 
+import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.res.ColorStateList;
@@ -14,6 +15,7 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -41,6 +43,20 @@ public class SettingsPage {
     private boolean touched;
     private volatile boolean writing;
 
+    private static final String CHECK = "Проверить обновления";
+    private Halo updHalo;
+    private View updChip;
+    private TextView updNote;
+    private boolean updBusy;
+    private ValueAnimator updSpin;
+
+    private final Runnable updPoll = new Runnable() {
+        @Override
+        public void run() {
+            pollUpdate();
+        }
+    };
+
     private final Runnable settle = new Runnable() {
         @Override
         public void run() {
@@ -65,6 +81,31 @@ public class SettingsPage {
         subLine = skin.note("");
         sub.addView(subLine);
         page.addView(sub, skin.gap(14));
+
+        LinearLayout upd = skin.card();
+        upd.addView(skin.title("Обновление"));
+        updNote = skin.note("");
+        upd.addView(updNote);
+        updHalo = new Halo(host, skin);
+        updHalo.setElevation(0f);
+        updHalo.setInset(skin.dp(6));
+        updHalo.setGirth(skin.dpf(14f));
+        updHalo.setWeight(skin.dpf(4f), skin.dpf(5f));
+        updChip = chip(CHECK, skin.good, 0xFFFFFFFF, R.drawable.ic_update, corners(true, true));
+        updChip.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                checkUpdate();
+            }
+        });
+        updHalo.addView(updChip, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT));
+        LinearLayout.LayoutParams haloSeat = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        haloSeat.topMargin = skin.dp(6);
+        upd.addView(updHalo, haloSeat);
+        page.addView(upd, skin.gap(14));
+        pollUpdate();
 
         LinearLayout local = skin.card();
         local.addView(skin.title("На этом устройстве"));
@@ -455,6 +496,110 @@ public class SettingsPage {
 
             guardSaid[i].setText(Guard.said(guardWhat[i], state));
         }
+    }
+
+    private void caption(String text) {
+        ((TextView) ((LinearLayout) updChip).getChildAt(1)).setText(text);
+    }
+
+    private void checkUpdate() {
+        if (updBusy) {
+            return;
+        }
+        updBusy = true;
+        caption("Проверка…");
+        spin(true);
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                String said;
+                try {
+                    said = Core.client(host).checkUpdate();
+                } catch (Exception e) {
+                    said = String.valueOf(e.getMessage());
+                }
+                final String news = said == null ? "" : said;
+                host.runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        spin(false);
+                        if (news.isEmpty()) {
+                            pollUpdate();
+                            return;
+                        }
+                        updBusy = false;
+                        updHalo.setStrength(0f);
+                        caption(CHECK);
+                        boast(updChip, news.equals("latest") ? "Установлена последняя версия" : news);
+                    }
+                });
+            }
+        }).start();
+    }
+
+    private void spin(boolean on) {
+        if (updSpin != null) {
+            updSpin.cancel();
+            updSpin = null;
+        }
+        if (!on) {
+            return;
+        }
+        updHalo.setStrength(1f);
+        updSpin = ValueAnimator.ofFloat(0f, 1f);
+        updSpin.setDuration(1200);
+        updSpin.setRepeatCount(ValueAnimator.INFINITE);
+        updSpin.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+            @Override
+            public void onAnimationUpdate(ValueAnimator animation) {
+                updHalo.setSweep((Float) animation.getAnimatedValue());
+            }
+        });
+        updSpin.start();
+    }
+
+    private void pollUpdate() {
+        JSONObject info;
+        try {
+            info = new JSONObject(Core.client(host).updateJSON());
+        } catch (Exception e) {
+            return;
+        }
+        String own = info.optString("version");
+        JSONObject offer = info.optJSONObject("offer");
+        updNote.setText(offer == null
+                ? "Установлена " + own
+                : "Установлена " + own + ", доступна " + offer.optString("version"));
+
+        String status = info.optString("status");
+        if (status.isEmpty()) {
+            if (updBusy && updSpin == null) {
+                updBusy = false;
+                updHalo.setStrength(0f);
+                caption(CHECK);
+                String err = info.optString("error");
+                if (!err.isEmpty()) {
+                    boast(updChip, err);
+                }
+            }
+            return;
+        }
+
+        updBusy = true;
+        updHalo.setStrength(1f);
+        long done = info.optLong("done");
+        long total = info.optLong("total");
+        if (status.equals("installing")) {
+            caption("Установка — подтвердите, если система спросит");
+            updHalo.setSweep(1f);
+        } else if (total > 0) {
+            float part = done / (float) total;
+            caption("Скачивание " + Math.round(part * 100) + "%");
+            updHalo.setSweep(part);
+        } else {
+            caption("Скачивание…");
+        }
+        updChip.postDelayed(updPoll, 400);
     }
 
     private void boast(final View button, String news) {

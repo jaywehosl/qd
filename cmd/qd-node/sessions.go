@@ -5,6 +5,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jaywehosl/qd/internal/netstate"
@@ -12,6 +13,7 @@ import (
 )
 
 func (state *controlState) syncSessions() {
+	state.followUpdates()
 	network, err := state.db.LoadState()
 	if err != nil {
 		return
@@ -19,6 +21,7 @@ func (state *controlState) syncSessions() {
 	now := time.Now().UnixMilli()
 	want := map[uint32]bool{}
 	routed := map[uint32]bool{}
+	builds := map[uint32][2]bool{}
 	peers, exits, byDNS := 0, 0, 0
 
 	mine, err := netstate.Project(state.id, network)
@@ -33,6 +36,7 @@ func (state *controlState) syncSessions() {
 			}
 			want[qdcrypt.SessionID(c.UUID)] = c.AllowExit
 			routed[qdcrypt.SessionID(c.UUID)] = c.RouteDNS
+			builds[qdcrypt.SessionID(c.UUID)] = [2]bool{c.AllowDev, c.AllowCore}
 			if c.AllowExit {
 				exits++
 			}
@@ -57,6 +61,7 @@ func (state *controlState) syncSessions() {
 		}
 		state.gate.exit(id, allowExit)
 		state.gate.route(id, routed[id])
+		state.gate.builds(id, builds[id][0], builds[id][1])
 	}
 	for id := range live {
 		if _, carried := want[id]; carried {
@@ -102,4 +107,23 @@ type sessionStat struct {
 	PktUp    uint64    `json:"pktUp"`
 	PktDown  uint64    `json:"pktDown"`
 	Seen     []address `json:"seen"`
+}
+
+func (state *controlState) followUpdates() {
+	settings, err := state.db.NetworkSettings()
+	if err != nil {
+		return
+	}
+	var releases []string
+	if settings.ClientReleases != "" {
+		releases = strings.Split(settings.ClientReleases, "\n")
+	}
+	if !state.gate.policy(settings.ClientVersion, releases) {
+		return
+	}
+	if settings.ClientVersion == "" {
+		fmt.Printf("update     clients are held to no version\n")
+		return
+	}
+	fmt.Printf("update     clients are held to %s, %d releases known\n", settings.ClientVersion, len(releases))
 }

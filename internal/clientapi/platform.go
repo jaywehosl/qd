@@ -3,6 +3,7 @@ package clientapi
 import (
 	"github.com/jaywehosl/qd/internal/qdcrypt"
 	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
+	"github.com/jaywehosl/qd/internal/update"
 )
 
 type Device struct {
@@ -35,4 +36,5 @@ type Platform interface {
 	Processes() []Process
 	RulesChanged()
 	HoldAutostart(on bool) error
+	Install(tag string, open update.Opener, tick func(done, total int64)) error
 }

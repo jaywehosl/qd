@@ -18,6 +18,7 @@ public final class Core {
     static final boolean ONLY_TCP = false;
 
     private static Client client;
+    private static volatile Context app;
     private static volatile boolean up;
     private static volatile String where = "";
     private static volatile long since;
@@ -62,6 +63,12 @@ public final class Core {
             }
             return live.owner((int) proto, source, (int) sourcePort, target, (int) targetPort);
         }
+
+        @Override
+        public boolean install(String path) {
+            Context context = app;
+            return context != null && Updater.install(context, path);
+        }
     };
 
     private static final Protector PROTECTOR = new Protector() {
@@ -91,6 +98,7 @@ public final class Core {
     @SuppressLint("HardwareIds")
     public static synchronized Client client(Context context) throws Exception {
         if (client == null) {
+            app = context.getApplicationContext();
             String id = Settings.Secure.getString(
                     context.getContentResolver(), Settings.Secure.ANDROID_ID);
             client = Qdmobile.open(

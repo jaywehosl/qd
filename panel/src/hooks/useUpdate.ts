@@ -1,0 +1,66 @@
+import { useCallback } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+
+import { HttpUtil } from '@/utils';
+
+export interface UpdateOffer {
+  version: string;
+  state: 'current' | 'behind' | 'required';
+}
+
+export interface UpdateInfo {
+  version: string;
+  build: string;
+  status: '' | 'fetching' | 'installing';
+  error: string;
+  done: number;
+  total: number;
+  offer?: UpdateOffer;
+  postponedUntil?: number;
+  failed?: string;
+  release?: string;
+  updatedFrom?: string;
+}
+
+const KEY = ['client', 'update'];
+
+export function progressOf(info: UpdateInfo | null): number | null {
+  if (!info?.status) return null;
+  if (info.status === 'installing') return 1;
+  return info.total > 0 ? Math.min(1, info.done / info.total) : 0;
+}
+
+export function useUpdate() {
+  const queryClient = useQueryClient();
+
+  const { data } = useQuery<UpdateInfo | null>({
+    queryKey: KEY,
+    queryFn: async () => {
+      const msg = await HttpUtil.get<UpdateInfo>('/client/api/update', undefined, { silent: true });
+      return msg?.success ? (msg.obj ?? null) : null;
+    },
+    refetchInterval: (query) => {
+      const held = query.state.data;
+      if (held?.status) return 400;
+      const left = held?.postponedUntil && held.postponedUntil > 0 ? held.postponedUntil - Date.now() + 250 : Infinity;
+      return Math.max(400, Math.min(30000, left));
+    },
+  });
+
+  const run = useCallback(async () => {
+    const msg = await HttpUtil.post<UpdateInfo>('/client/api/update', undefined, { silent: true });
+    if (msg?.success && msg.obj) queryClient.setQueryData(KEY, msg.obj);
+    return msg;
+  }, [queryClient]);
+
+  const postpone = useCallback(async (minutes: number) => {
+    const msg = await HttpUtil.post<UpdateInfo>('/client/api/update/postpone', { minutes }, {
+      headers: { 'Content-Type': 'application/json' },
+      silent: true,
+    });
+    if (msg?.success && msg.obj) queryClient.setQueryData(KEY, msg.obj);
+    return msg;
+  }, [queryClient]);
+
+  return { info: data ?? null, run, postpone };
+}

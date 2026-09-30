@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"runtime"
 	"sync"
 	"time"
 
@@ -160,3 +161,5 @@ func (a *adminUI) peers() []string {
 	}
 	return out
 }
+
+const buildKind = runtime.GOOS

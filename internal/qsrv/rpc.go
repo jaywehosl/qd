@@ -55,3 +55,21 @@ func (n *Node) serveRPC(w http.ResponseWriter, r *http.Request) {
 	}
 	json.NewEncoder(w).Encode(answer)
 }
+
+func (n *Node) serveUpdate(w http.ResponseWriter, r *http.Request) {
+	if _, ok := n.verified(r); !ok || n.cfg.Shelf == nil {
+		n.refused.Add(1)
+		n.site.ServeHTTP(w, r)
+		return
+	}
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	tag, name, ok := strings.Cut(strings.TrimPrefix(r.URL.Path, UpdatePath), "/")
+	if !ok || strings.Contains(name, "/") {
+		http.NotFound(w, r)
+		return
+	}
+	n.cfg.Shelf.Serve(w, r, tag, name)
+}

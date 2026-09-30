@@ -15,6 +15,7 @@ import (
 	"github.com/jaywehosl/qd/internal/clientstate"
 	"github.com/jaywehosl/qd/internal/qdcrypt"
 	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
+	"github.com/jaywehosl/qd/internal/update"
 )
 
 type API struct {
@@ -28,10 +29,25 @@ type API struct {
 	netKey *qdcrypt.Key
 	peers  []string
 	relays []relay.Link
+
+	upMu     sync.Mutex
+	offer    *offerAt
+	upStatus string
+	upErr    string
+	upDone   int64
+	upTotal  int64
+	fake     update.Verdict
+
+	fakeCorrupt bool
+	upFailed    string
+	updatedFrom string
+	updatedAt   time.Time
 }
 
 func New(db *clientstate.DB, platform Platform, seen *Visits, key *qdcrypt.Key) *API {
-	return &API{db: db, platform: platform, seen: seen, netKey: key}
+	a := &API{db: db, platform: platform, seen: seen, netKey: key}
+	a.noteVersion()
+	return a
 }
 
 func (a *API) Routes() http.Handler {
@@ -59,6 +75,8 @@ func (a *API) Routes() http.Handler {
 
 	mux.HandleFunc("/client/api/settings", a.settings)
 	mux.HandleFunc("/client/api/about", a.about)
+	mux.HandleFunc("/client/api/update", a.updateState)
+	mux.HandleFunc("/client/api/update/postpone", a.postponeUpdate)
 	mux.HandleFunc("/client/api/reset", a.reset)
 
 	return mux
@@ -800,6 +818,7 @@ func (a *API) AboutJSON() (string, error) {
 	up, down, _ := a.db.Traffic()
 
 	return marshal(map[string]any{
+		"version":   update.Version,
 		"tag":       sub.Tag,
 		"label":     sub.Label,
 		"createdAt": sub.CreatedAt,
@@ -994,6 +1013,7 @@ func (a *API) about(w http.ResponseWriter, r *http.Request) {
 	sites, _ := a.db.TopSites(10)
 
 	ok(w, map[string]any{
+		"version":   update.Version,
 		"tag":       sub.Tag,
 		"createdAt": sub.CreatedAt,
 		"up":        up,

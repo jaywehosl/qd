@@ -157,6 +157,24 @@ public class MainActivity extends Activity {
             pages.show(SETTINGS);
         }
 
+        float pace = intent == null ? -1f : intent.getFloatExtra("pace", -1f);
+        if (pace > 0f) {
+            Upkeep.pace = pace;
+        }
+        final String fake = intent == null ? null : intent.getStringExtra("fakeUpdate");
+        if (fake != null) {
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        Core.client(MainActivity.this).fakeUpdate(fake);
+                    } catch (Exception e) {
+                        Log.e(TunnelService.TAG, "fake update", e);
+                    }
+                }
+            }).start();
+        }
+
         Uri data = intent == null ? null : intent.getData();
         if (data != null && "qd".equals(data.getScheme())) {
             importPage.build();

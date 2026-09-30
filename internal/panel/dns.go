@@ -31,6 +31,8 @@ var networkKeys = []string{
 	"keepAliveSeconds",
 	"socketBufferKb",
 	"echName",
+	"clientVersion",
+	"clientReleases",
 }
 
 func (a *API) dnsRoutes(mux *http.ServeMux) {

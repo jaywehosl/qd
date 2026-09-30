@@ -10,6 +10,7 @@ import (
 
 	"github.com/jaywehosl/qd/internal/localapi"
 	"github.com/jaywehosl/qd/internal/qdcrypt"
+	"github.com/jaywehosl/qd/internal/update"
 )
 
 type runOptions struct {
@@ -23,7 +24,8 @@ type runOptions struct {
 	Autostart bool
 	Duration  time.Duration
 
-	DNS bool
+	DNS        bool
+	FakeUpdate string
 
 	key *qdcrypt.Key
 }
@@ -35,6 +37,7 @@ var (
 )
 
 func main() {
+	update.Kind = buildKind
 	var opts runOptions
 
 	flag.StringVar(&opts.StatePath, "state", defaultStatePath(), "where the client keeps its subscription and settings")
@@ -48,6 +51,7 @@ func main() {
 
 	flag.BoolVar(&opts.DNS, "dns", true, "answer names on the tun adapter through the node's resolver")
 	flag.BoolVar(&inBrowser, "browser", false, "open the page in the default browser instead of the app window")
+	flag.StringVar(&opts.FakeUpdate, "fake-update", "", "test builds only: pretend the network offers a newer version, behind or required")
 	flag.IntVar(&opts.UIPort, "ui-port", localapi.DefaultPort, "port the local page listens on, 0 takes any free one")
 	flag.StringVar(&paneDev, "dev", "", "point the window at a vite dev server instead of the built page")
 	flag.BoolVar(&embedded, "embedded", false, "run inside another app: no window or tray, log to stdout, print the api address and token, stop when stdin closes")

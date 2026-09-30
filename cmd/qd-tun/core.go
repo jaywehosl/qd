@@ -23,3 +23,5 @@ func (*adminUI) peers() []string { return nil }
 func (*adminUI) live() []localapi.Push { return nil }
 
 func (*adminUI) ServeHTTP(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) }
+
+const buildKind = "core"

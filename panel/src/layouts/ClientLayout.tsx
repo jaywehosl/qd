@@ -21,6 +21,7 @@ import { useMetricsPanel } from '@/layouts/MetricsPanelContext';
 import { prefetchRoute } from '@/routes';
 const ClientHistoryPanel = lazy(() => import('@/pages/client/ClientHistoryPanel'));
 import ClientNotificationsBar from '@/layouts/ClientNotificationsBar';
+import FpsMeter from '@/components/ui/FpsMeter';
 const NAV = [
   { key: '/client', icon: ApiOutlined, label: 'client.menu.connect' },
   { key: '/client/routing', icon: ControlOutlined, label: 'client.menu.routing' },
@@ -66,6 +67,7 @@ function ClientShell() {
 
   return (
     <div className={shellClass}>
+      {import.meta.env.DEV && <FpsMeter />}
 
       <div className="topbar-shell">
         <header className="antigravity-header client-header">

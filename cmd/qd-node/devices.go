@@ -3,10 +3,12 @@
 package main
 
 import (
+	"strings"
 	"time"
 
 	"github.com/jaywehosl/qd/internal/netstate"
 	"github.com/jaywehosl/qd/internal/store"
+	"github.com/jaywehosl/qd/internal/update"
 )
 
 type deviceClaim struct {
@@ -15,6 +17,8 @@ type deviceClaim struct {
 	Model       string `json:"model"`
 	Kind        string `json:"kind"`
 	Name        string `json:"name"`
+	Version     string `json:"version"`
+	Build       string `json:"build"`
 }
 
 func (claim deviceClaim) device() store.Device {
@@ -68,4 +72,13 @@ func (state *controlState) seeAgain(client netstate.Client, claim deviceClaim) {
 		return
 	}
 	state.db.RecordDevice(client.ID, state.id, claim.device(), time.Now().UnixMilli())
+}
+
+func judged(settings store.NetworkSettings, group *netstate.Group, claim deviceClaim) update.Verdict {
+	dev, core := false, false
+	if group != nil {
+		dev, core = group.AllowDev, group.AllowCore
+	}
+	return update.Judge(claim.Version, claim.Build, settings.ClientVersion,
+		strings.Split(settings.ClientReleases, "\n"), dev, core)
 }

@@ -31,6 +31,7 @@ func (a *API) extraRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/panel/setting/defaultSettings", a.settings)
 	mux.HandleFunc("/panel/setting/update", a.settings)
 
+	mux.HandleFunc("/panel/api/releases", a.releases)
 	a.dnsRoutes(mux)
 	a.themeRoutes(mux)
 }
@@ -182,6 +183,17 @@ func (a *API) settings(w http.ResponseWriter, r *http.Request) {
 		if err := bindBody(r, &patch); err != nil {
 			sendFail(w, err)
 			return
+		}
+		delete(patch, "clientReleases")
+		if want, ok := patch["clientVersion"].(string); ok {
+			if held, _ := current["clientVersion"].(string); want != held {
+				releases, err := releasesFor(r.Context(), want)
+				if err != nil {
+					sendFail(w, err)
+					return
+				}
+				patch["clientReleases"] = releases
+			}
 		}
 		network := map[string]any{}
 		for _, key := range networkKeys {

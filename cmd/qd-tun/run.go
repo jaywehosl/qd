@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -19,6 +20,12 @@ import (
 	"github.com/jaywehosl/qd/internal/clientstate"
 	"github.com/jaywehosl/qd/internal/qdcrypt"
 	"github.com/jaywehosl/qd/internal/qsrv/uplink/quicconn"
+	"github.com/jaywehosl/qd/internal/update"
+)
+
+var (
+	updated  = make(chan struct{}, 1)
+	stateDir string
 )
 
 func runClient(opts runOptions) error {
@@ -55,6 +62,8 @@ func runClient(opts runOptions) error {
 	defer db.Close()
 	quicconn.Tokens = db.Tokens()
 	quicconn.ECH = db.ECH
+	stateDir = filepath.Dir(opts.StatePath)
+	settleUpdate(db)
 
 	reloadProcessRules(db)
 	setFixedRate(settingsFixedRate(db))
@@ -160,6 +169,7 @@ func runClient(opts runOptions) error {
 	})
 
 	api = clientapi.New(db, hostPlatform{tun: tun, db: db}, seen, opts.key)
+	api.Fake(opts.FakeUpdate)
 
 	if !embedded {
 		admin = newAdminUI(key, db)
@@ -193,6 +203,7 @@ func runClient(opts runOptions) error {
 			ui.Allow(u.Scheme + "://" + u.Host)
 		}
 	}
+	fmt.Printf("version  %s %s\n", update.Version, update.Kind)
 	fmt.Printf("state    %s\n", opts.StatePath)
 	fmt.Printf("page     %s\n", pageURL)
 
@@ -255,6 +266,7 @@ func runClient(opts runOptions) error {
 	select {
 	case <-sig:
 	case <-quit:
+	case <-updated:
 	case <-deadline:
 	}
 

@@ -19,6 +19,7 @@ import (
 	"github.com/jaywehosl/qd/internal/qdcrypt"
 	"github.com/jaywehosl/qd/internal/qsrv"
 	"github.com/jaywehosl/qd/internal/store"
+	"github.com/jaywehosl/qd/internal/update"
 )
 
 type nodeInfo struct {
@@ -575,6 +576,14 @@ func (state *controlState) whoami(token string, claim deviceClaim) map[string]an
 		}
 		if _, list := state.ech.current(); len(list) > 0 {
 			answer["ech"] = list
+		}
+		if settings.ClientVersion != "" {
+			verdict := judged(settings, group, claim)
+			answer["update"] = map[string]any{"version": settings.ClientVersion, "state": verdict}
+			if verdict == update.Required && answer["carried"] == true {
+				answer["carried"] = false
+				answer["refused"] = fmt.Sprintf("This client is too old for the network: update qd to %s.", settings.ClientVersion)
+			}
 		}
 		if answer["carried"] == true {
 			if refused := state.admit(c, group, claim); refused != "" {

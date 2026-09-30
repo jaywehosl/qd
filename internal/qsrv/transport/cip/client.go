@@ -17,6 +17,7 @@ import (
 
 	"github.com/jaywehosl/qd/internal/qsrv"
 	"github.com/jaywehosl/qd/internal/qsrv/uplink/quicconn"
+	"github.com/jaywehosl/qd/internal/update"
 )
 
 type Client struct {
@@ -120,6 +121,7 @@ func sign(req *http.Request, token, device, route string) {
 		route = qsrv.HereExit
 	}
 	req.Header.Set(qsrv.HeaderRoute, route)
+	update.Stamp(req.Header)
 }
 
 func greet(ctx context.Context, rt roundTripper, method, token, device, route, url string) (http.Header, error) {

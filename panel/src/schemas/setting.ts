@@ -31,6 +31,7 @@ export const AllSettingSchema = z.object({
   keepAliveSeconds: nonNegativeInt.optional(),
   socketBufferKb: nonNegativeInt.optional(),
   echName: z.string().optional(),
+  clientVersion: z.string().optional(),
 }).loose();
 
 export type AllSettingInput = z.infer<typeof AllSettingSchema>;
