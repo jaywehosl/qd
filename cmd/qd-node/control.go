@@ -325,6 +325,7 @@ func handleControl(state *controlState, req request) response {
 			return response{OK: false, Error: err.Error()}
 		}
 		state.node.Retune(tunablesFrom(settings))
+		state.followUpdates()
 
 		said := map[string]any{"settings": settings, "restarting": false}
 		if moved := movedWhat(was, settings); moved != "" {
