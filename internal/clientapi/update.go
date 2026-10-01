@@ -237,7 +237,7 @@ func (a *API) noteVersion() {
 		return
 	}
 	a.db.SetValue(lastVersionKey, update.Version)
-	if prev != "" {
+	if prev != "" && update.Older(prev, update.Version) {
 		a.updatedFrom, a.updatedAt = prev, time.Now()
 	}
 }

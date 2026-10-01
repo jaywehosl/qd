@@ -54,6 +54,9 @@ func (c chained) DialUDP(ctx context.Context, dst netip.AddrPort) (net.Conn, err
 	stop := context.AfterFunc(open, abort)
 	rsp, err := rs.ReadResponse()
 	if !stop() {
+		if errors.Is(open.Err(), context.DeadlineExceeded) {
+			c.ls.drop(c.at(), c.cc)
+		}
 		return nil, fmt.Errorf("%s did not take the flow: %w", c.endpoint, open.Err())
 	}
 	if err != nil {

@@ -401,9 +401,11 @@ public class TunnelService extends VpnService {
                     startWatch();
                 } catch (Exception e) {
                     Log.e(TAG, "bring up", e);
-                    Core.gaveUp(String.valueOf(e.getMessage()));
+                    String plain = Core.plain(e.getMessage());
+                    Core.say(TunnelService.this, "java: connect failed: " + e.getMessage());
+                    Core.gaveUp(plain);
                     Core.mark(TunnelService.this, false, "");
-                    update("Не удалось: " + e.getMessage());
+                    update(plain.isEmpty() ? "Отключён" : plain);
                     showNote();
                 } finally {
                     Core.turning(TunnelService.this, false);

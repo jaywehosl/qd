@@ -271,6 +271,10 @@ func (s *Session) connect(attempt int) {
 			return
 		}
 
+		if !s.running.Load() {
+			conn.Close()
+			return
+		}
 		s.mu.Lock()
 		s.conn = conn
 		s.mu.Unlock()
@@ -310,6 +314,7 @@ func (s *Session) connect(attempt int) {
 			}
 			s.handle(conn, msg)
 		}
+		conn.Close()
 	}()
 }
 

@@ -70,7 +70,7 @@ func (s *shell) carry(url string) {
 	}()
 
 	view := webview2.NewWithOptions(webview2.WebViewOptions{
-		Debug:     true,
+		Debug:     paneDev != "",
 		AutoFocus: true,
 		DataPath:  paneData,
 		WindowOptions: webview2.WindowOptions{

@@ -3,6 +3,7 @@ package qsrv
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -17,7 +18,10 @@ import (
 	"github.com/jaywehosl/qd/internal/roots"
 )
 
-const peerDialTimeout = 8 * time.Second
+const (
+	peerDialTimeout = 8 * time.Second
+	peerRetry       = 2 * time.Second
+)
 
 type link struct {
 	flows atomic.Int64
@@ -34,6 +38,8 @@ type link struct {
 	tr       *http3.Transport
 	conn     *quicconn.Conn
 	dialing  chan struct{}
+	failed   time.Time
+	why      error
 }
 
 func (l *link) connect(ctx context.Context) (*http3.ClientConn, error) {
@@ -48,6 +54,11 @@ func (l *link) connect(ctx context.Context) (*http3.ClientConn, error) {
 				l.mu.Unlock()
 				return cc, nil
 			}
+		}
+		if l.why != nil && time.Since(l.failed) < peerRetry {
+			err := l.why
+			l.mu.Unlock()
+			return nil, err
 		}
 		if wait := l.dialing; wait != nil {
 			l.mu.Unlock()
@@ -66,6 +77,12 @@ func (l *link) connect(ctx context.Context) (*http3.ClientConn, error) {
 
 		l.mu.Lock()
 		l.dialing = nil
+		switch {
+		case err == nil:
+			l.why = nil
+		case !errors.Is(ctx.Err(), context.Canceled):
+			l.failed, l.why = time.Now(), err
+		}
 		if err == nil {
 			l.cc, l.tr, l.conn = cc, tr, conn
 		}
@@ -340,3 +357,19 @@ const (
 	linkSweep = 5 * time.Second
 	linkQuiet = 15 * time.Second
 )
+
+func (ls *links) drop(at where, cc *http3.ClientConn) {
+	l := ls.find(at)
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	gone := l.cc == cc && cc != nil
+	if gone {
+		l.dropLocked()
+	}
+	l.mu.Unlock()
+	if gone && ls.say != nil {
+		ls.say("quic      the link to %s did not take a flow, it is dialed anew", at.endpoint)
+	}
+}

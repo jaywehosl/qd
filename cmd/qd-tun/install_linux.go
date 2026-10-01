@@ -31,6 +31,10 @@ func (p hostPlatform) Install(tag string, open update.Opener, tick func(done, to
 		return fmt.Errorf("unpack %s: %v: %s", tag, err, out)
 	}
 
+	if p.tun.Running() {
+		p.db.SetValue(resumeKey, "1")
+	}
+
 	unit := "qd-client-update-" + strconv.FormatInt(time.Now().Unix(), 10)
 	script := filepath.Join(stage, "qd-client", "install.sh")
 	if out, err := exec.Command("systemd-run", "--no-block", "--collect", "--unit="+unit, "/bin/bash", script).CombinedOutput(); err != nil {
@@ -41,3 +45,7 @@ func (p hostPlatform) Install(tag string, open update.Opener, tick func(done, to
 }
 
 func settleUpdate(*clientstate.DB) {}
+
+func startGuard(*tunnel, <-chan struct{}) {}
+
+func tellUp() {}

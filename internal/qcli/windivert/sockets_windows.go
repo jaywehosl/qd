@@ -26,6 +26,8 @@ func WatchSockets(dllPath string) (*Sockets, error) {
 }
 
 func (s *Sockets) Watch(ctx context.Context, took func(event uint8, data SocketData)) error {
+	wake := context.AfterFunc(ctx, func() { _ = shutdown(s.h, ShutdownBoth) })
+	defer wake()
 	addrs := make([]Address, BatchMax)
 	var none [1]byte
 

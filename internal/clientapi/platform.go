@@ -1,6 +1,8 @@
 package clientapi
 
 import (
+	"errors"
+
 	"github.com/jaywehosl/qd/internal/qdcrypt"
 	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
 	"github.com/jaywehosl/qd/internal/update"
@@ -38,3 +40,5 @@ type Platform interface {
 	HoldAutostart(on bool) error
 	Install(tag string, open update.Opener, tick func(done, total int64)) error
 }
+
+var ErrStopped = errors.New("stopped before the tunnel came up")

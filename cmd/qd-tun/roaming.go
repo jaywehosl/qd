@@ -59,6 +59,14 @@ func roamWatch(ctx context.Context, stop <-chan struct{}, live *qcli.Tunnel, los
 			}
 
 		case <-tick.C:
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if ctx.Err() != nil {
+				return
+			}
 			stood := time.Since(last)
 			last = time.Now()
 

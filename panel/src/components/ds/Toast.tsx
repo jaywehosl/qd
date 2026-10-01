@@ -1,92 +1,57 @@
-import { useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
-import { createPortal } from 'react-dom';
-import {
-  CheckCircleFilled,
-  CloseCircleFilled,
-  ExclamationCircleFilled,
-  InfoCircleFilled,
-} from '@ant-design/icons';
-import { recordToast, type Severity } from '@/stores/notificationStore';
+
+import { readLocalToken } from '@/api/localToken';
+import { pushEvent, type Severity } from '@/stores/notificationStore';
 
 export type ToastType = 'success' | 'error' | 'warning' | 'info';
 
-const TOAST_SEVERITY: Record<ToastType, Severity> = {
+const PANEL_SEVERITY: Record<ToastType, Severity> = {
   success: 'info',
   info: 'info',
   warning: 'warning',
   error: 'danger',
 };
 
-interface ToastItem {
-  id: number;
-  type: ToastType;
-  content: ReactNode;
-}
+const CLIENT_SEVERITY: Record<ToastType, string> = {
+  success: 'info',
+  info: 'info',
+  warning: 'warning',
+  error: 'error',
+};
 
-let items: ToastItem[] = [];
-const listeners = new Set<() => void>();
+export const NOTIFIED = 'qd:notified';
+
 let seq = 0;
 
-function emit() {
-  listeners.forEach((l) => l());
-}
-function subscribe(l: () => void) {
-  listeners.add(l);
-  return () => { listeners.delete(l); };
-}
-function getSnapshot() {
-  return items;
-}
-
-function dismiss(id: number) {
-  items = items.filter((i) => i.id !== id);
-  emit();
+function toClient(type: ToastType, text: string) {
+  void fetch('/client/api/notifications/add', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-QD-Token': readLocalToken() || '' },
+    body: JSON.stringify({ severity: CLIENT_SEVERITY[type], text }),
+  })
+    .catch(() => undefined)
+    .finally(() => window.dispatchEvent(new Event(NOTIFIED)));
 }
 
-function push(type: ToastType, content: ReactNode, duration = 3000) {
+function push(type: ToastType, content: ReactNode) {
   const id = ++seq;
-  items = [...items, { id, type, content }];
-  emit();
-  if (typeof content === 'string') {
-    recordToast(TOAST_SEVERITY[type], content);
-  }
-  if (duration > 0) {
-    window.setTimeout(() => dismiss(id), duration);
-  }
+  if (typeof content !== 'string' || !content || typeof window === 'undefined') return id;
+  if (window.location.pathname.startsWith('/client')) toClient(type, content);
+  else pushEvent(PANEL_SEVERITY[type], content);
   return id;
 }
 
 export const toast = {
-  success: (content: ReactNode, duration?: number) => push('success', content, duration),
-  error: (content: ReactNode, duration?: number) => push('error', content, duration),
-  warning: (content: ReactNode, duration?: number) => push('warning', content, duration),
-  info: (content: ReactNode, duration?: number) => push('info', content, duration),
+  success: (content: ReactNode, _duration?: number) => push('success', content),
+  error: (content: ReactNode, _duration?: number) => push('error', content),
+  warning: (content: ReactNode, _duration?: number) => push('warning', content),
+  info: (content: ReactNode, _duration?: number) => push('info', content),
   useMessage: () => [toast, null] as const,
   config: (_opts?: unknown) => { void _opts; },
 };
 
 export type ToastApi = typeof toast;
 
-const ICONS: Record<ToastType, ReactNode> = {
-  success: <CheckCircleFilled />,
-  error: <CloseCircleFilled />,
-  warning: <ExclamationCircleFilled />,
-  info: <InfoCircleFilled />,
-};
-
 export function ToastViewport() {
-  const list = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-  if (typeof document === 'undefined') return null;
-  return createPortal(
-    <div className="ds-toast-viewport" role="region" aria-live="polite">
-      {list.map((it) => (
-        <div key={it.id} className={`ds-toast ds-toast--${it.type}`} onClick={() => dismiss(it.id)}>
-          <span className="ds-toast__icon">{ICONS[it.type]}</span>
-          <span className="ds-toast__text">{it.content}</span>
-        </div>
-      ))}
-    </div>,
-    document.body,
-  );
+  return null;
 }

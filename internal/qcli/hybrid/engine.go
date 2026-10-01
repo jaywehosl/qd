@@ -3,6 +3,7 @@ package hybrid
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"log"
 	"net/netip"
 	"runtime"
@@ -70,13 +71,15 @@ func New(opts Options) *Engine {
 }
 
 func (e *Engine) Run(ctx context.Context, src packet.Source, tun Tunnel) error {
-	errc := make(chan error, e.Workers+2)
+	errc := make(chan error, e.Workers+4)
 
 	tt := &tcpTunnel{
 		ch:    make(chan []byte, 8192),
 		out:   make(chan []byte, 16384),
 		pool:  &e.tcpPool,
 		meter: e.Meter,
+		beat:  startPulse(ctx, errc),
+		done:  ctx.Done(),
 	}
 
 	ms, multi := src.(packet.MultiSource)
@@ -162,6 +165,7 @@ func (e *Engine) logStats(ctx context.Context, tt *tcpTunnel, src packet.Source)
 }
 
 func (e *Engine) pumpOutbound(ctx context.Context, rd packet.Reader, src packet.Source, tun Tunnel, tt *tcpTunnel, errc chan<- error) {
+	beat := startPulse(ctx, errc)
 	var reinject []packet.Packet
 	for {
 		pkts, err := rd.Recv(ctx)
@@ -208,7 +212,10 @@ func (e *Engine) pumpOutbound(ctx context.Context, rd packet.Reader, src packet.
 			}
 		}
 		if len(reinject) > 0 {
-			if err := src.Send(reinject); err != nil {
+			beat.begin()
+			err := src.Send(reinject)
+			beat.end()
+			if err != nil {
 				e.cInErr.Add(1)
 			}
 		}
@@ -216,6 +223,7 @@ func (e *Engine) pumpOutbound(ctx context.Context, rd packet.Reader, src packet.
 }
 
 func (e *Engine) pumpInbound(ctx context.Context, src packet.Source, tun Tunnel, errc chan<- error) {
+	beat := startPulse(ctx, errc)
 	ch := make(chan []byte, 2048)
 	go func() {
 		defer close(ch)
@@ -268,7 +276,10 @@ func (e *Engine) pumpInbound(ctx context.Context, src packet.Source, tun Tunnel,
 				break drain
 			}
 		}
-		if err := src.Send(batch); err != nil {
+		beat.begin()
+		err := src.Send(batch)
+		beat.end()
+		if err != nil {
 			e.cInErr.Add(1)
 		} else {
 			e.cInject.Add(uint64(len(batch)))
@@ -294,9 +305,14 @@ type tcpTunnel struct {
 	cPush, cDrop, cRead, cWrite, cWriteErr, cOutDrop, cBatches atomic.Uint64
 
 	meter *Meter
+	beat  *pulse
+	done  <-chan struct{}
 }
 
 func (t *tcpTunnel) take(pkt []byte, into chan []byte) bool {
+	if len(pkt) > tcpSlot {
+		return false
+	}
 	slot := t.pool.Get().(*[tcpSlot]byte)
 	n := copy(slot[:], pkt)
 	select {
@@ -319,8 +335,10 @@ func (t *tcpTunnel) push(pkt []byte) {
 }
 
 func (t *tcpTunnel) ReadPacket(b []byte) (int, error) {
-	data, ok := <-t.ch
-	if !ok {
+	var data []byte
+	select {
+	case data = <-t.ch:
+	case <-t.done:
 		return 0, context.Canceled
 	}
 	n := copy(b, data)
@@ -379,7 +397,10 @@ func (t *tcpTunnel) injector(ctx context.Context, w packet.Writer) {
 			}
 		}
 
-		if err := w.Send(batch); err != nil {
+		t.beat.begin()
+		err := w.Send(batch)
+		t.beat.end()
+		if err != nil {
 			t.cWriteErr.Add(1)
 		} else {
 			t.cWrite.Add(uint64(len(batch)))
@@ -412,6 +433,43 @@ func (e *Engine) hurry() func() {
 	e.Fast()
 	return runtime.UnlockOSThread
 }
+
+type pulse struct {
+	held atomic.Int64
+}
+
+func startPulse(ctx context.Context, errc chan<- error) *pulse {
+	p := &pulse{}
+	go p.watch(ctx, errc)
+	return p
+}
+
+func (p *pulse) begin() { p.held.Store(time.Now().UnixNano()) }
+
+func (p *pulse) end() { p.held.Store(0) }
+
+var errStalled = errors.New("the capture stopped taking packets, it is closed so the machine keeps its network")
+
+func (p *pulse) watch(ctx context.Context, errc chan<- error) {
+	tick := time.NewTicker(time.Second)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+		if since := p.held.Load(); since != 0 && time.Since(time.Unix(0, since)) > stallLimit {
+			select {
+			case errc <- errStalled:
+			default:
+			}
+			return
+		}
+	}
+}
+
+const stallLimit = 5 * time.Second
 
 const resetDrain = 300 * time.Millisecond
 

@@ -5,6 +5,7 @@ package windivert
 import (
 	"crypto/sha256"
 	"embed"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,11 +15,22 @@ import (
 var assets embed.FS
 
 func DefaultDir() (string, error) {
+	base := os.Getenv("ProgramW6432")
+	if base == "" {
+		base = os.Getenv("ProgramFiles")
+	}
+	if base == "" {
+		return "", errors.New("windows names no Program Files folder")
+	}
+	return filepath.Join(base, "qd", "driver"), nil
+}
+
+func LegacyDir() string {
 	appData, err := os.UserConfigDir()
 	if err != nil {
-		return "", err
+		return ""
 	}
-	return filepath.Join(appData, "qd"), nil
+	return filepath.Join(appData, "qd")
 }
 
 func Extract(dir string) (string, error) {

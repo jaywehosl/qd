@@ -29,6 +29,7 @@ type gate struct {
 	dev     map[uint32]bool
 	core    map[uint32]bool
 	told    map[uint32]string
+	peer    map[uint32]bool
 	seats   map[uint32]seated
 	target  string
 	listed  []string
@@ -120,7 +121,7 @@ func (g *gate) verify(raw string) (qsrv.Grant, bool) {
 	if !held {
 		return qsrv.Grant{}, false
 	}
-	return qsrv.Grant{Client: raw, AllowExit: allowExit, Steer: g.routed[id], Session: id}, true
+	return qsrv.Grant{Client: raw, AllowExit: allowExit, Steer: g.routed[id], Session: id, Peer: g.peer[id]}, true
 }
 
 func tunablesFrom(s store.NetworkSettings) qsrv.Tunables {
@@ -187,6 +188,12 @@ func runNode(ctx context.Context, node *qsrv.Node) {
 	if err := node.Run(ctx); err != nil && ctx.Err() == nil {
 		fmt.Printf("quic       stopped listening: %v\n", err)
 	}
+}
+
+func (g *gate) nodes(linked map[uint32]bool) {
+	g.mu.Lock()
+	g.peer = linked
+	g.mu.Unlock()
 }
 
 func (g *gate) builds(id uint32, dev, core bool) {

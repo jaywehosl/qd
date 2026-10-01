@@ -83,6 +83,7 @@ type Config struct {
 
 	Verify func(raw string) (Grant, bool)
 	Admit  func(g Grant, version, build string) bool
+	Reset  *quic.StatelessResetKey
 	Shelf  *update.Shelf
 	Peers  func() []Peer
 	Tune   func() Tunables
@@ -117,6 +118,9 @@ type live struct {
 	since   int64
 	transit bool
 	stream  bool
+	end     func()
+	over    atomic.Bool
+	under   *live
 
 	route  atomic.Pointer[string]
 	marks  sync.Map
@@ -265,8 +269,20 @@ func (n *Node) seatsOf(id uint32, drop bool) []*live {
 
 func (n *Node) Forget(id uint32) {
 	for _, s := range n.seatsOf(id, true) {
-		n.pool.give(s.address)
 		n.links.forget(s.grant.Seat)
+		if s.end == nil {
+			n.pool.give(s.address)
+			continue
+		}
+		n.mu.Lock()
+		ends := []func(){}
+		for at := s; at != nil && at.end != nil; at = at.under {
+			ends = append(ends, at.end)
+		}
+		n.mu.Unlock()
+		for _, end := range ends {
+			end()
+		}
 	}
 }
 
@@ -355,7 +371,14 @@ func (n *Node) Run(ctx context.Context) error {
 	defer n.stopRelays()
 
 	n.cfg.Log("quic      listening on %s, authority %s", n.cfg.Listen, n.cfg.Authority)
-	return srv.Serve(udp)
+	tr := &quic.Transport{Conn: udp, StatelessResetKey: n.cfg.Reset}
+	defer tr.Close()
+	ln, err := tr.ListenEarly(http3.ConfigureTLSConfig(n.cfg.TLS), n.quicConfig())
+	if err != nil {
+		return fmt.Errorf("listen %s: %w", n.cfg.Listen, err)
+	}
+	defer ln.Close()
+	return srv.ServeListener(ln)
 }
 
 func (n *Node) SetRelays(cfgs []relay.Config) {

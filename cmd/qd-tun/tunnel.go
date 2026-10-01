@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jaywehosl/qd/internal/clientapi"
 	"github.com/jaywehosl/qd/internal/clientdns"
 	"github.com/jaywehosl/qd/internal/clientrun"
 	"github.com/jaywehosl/qd/internal/peers"
@@ -45,11 +46,13 @@ type tunnelConfig struct {
 type tunnel struct {
 	cfg tunnelConfig
 
-	mu      sync.Mutex
-	running bool
-	wanted  atomic.Bool
-	stop    chan struct{}
-	wg      sync.WaitGroup
+	mu       sync.Mutex
+	running  bool
+	starting bool
+	abort    context.CancelFunc
+	wanted   atomic.Bool
+	stop     chan struct{}
+	wg       sync.WaitGroup
 
 	live     *qcli.Tunnel
 	liveStop context.CancelFunc
@@ -107,20 +110,82 @@ func (t *tunnel) token() string {
 
 func (t *tunnel) Start(servers []string, relays []relay.Link, sessionID uint32) error {
 	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	if t.running {
+	switch {
+	case t.running, t.starting:
+		t.mu.Unlock()
 		return errAlreadyUp
-	}
-	if t.cfg.Key == nil {
+	case t.cfg.Key == nil:
+		t.mu.Unlock()
 		return fmt.Errorf("no network key yet")
 	}
+	ctx, abort := context.WithCancel(context.Background())
+	t.starting, t.abort = true, abort
+	t.mu.Unlock()
 
+	held, sharp, lost, keepOut, err := t.bring(ctx, servers, relays)
+
+	t.mu.Lock()
+	t.starting, t.abort = false, nil
+	if err == nil && ctx.Err() != nil {
+		t.mu.Unlock()
+		close(held.Halt)
+		held.Quit()
+		if held.DNS != nil {
+			held.DNS.Interrupt()
+			held.DNS.Close()
+		}
+		go held.Live.Close()
+		sharp()
+		return clientapi.ErrStopped
+	}
+	if err != nil {
+		t.mu.Unlock()
+		stopped := ctx.Err() != nil
+		abort()
+		if stopped {
+			return clientapi.ErrStopped
+		}
+		return err
+	}
+
+	t.wg.Add(1)
+	go func() {
+		defer t.wg.Done()
+		<-held.Released
+	}()
+	go func() {
+		<-held.Gone
+		sharp()
+	}()
+
+	go flushSystemDNS()
+	t.running = true
+	t.stop = held.Halt
+	t.live = held.Live
+	t.liveStop = held.Quit
+	t.endpoint = held.Endpoint
+	t.since = time.Now()
+	t.lastErr = nil
+	t.dns = held.DNS
+	t.wanted.Store(true)
+	liveTunnel.Store(&held.Live)
+	t.mu.Unlock()
+
+	go roamWatch(held.Ctx, held.Halt, held.Live, lost)
+	go t.followPeers(held.Ctx, keepOut)
+
+	if t.cfg.Announce != nil {
+		go t.cfg.Announce("join")
+	}
+	return nil
+}
+
+func (t *tunnel) bring(ctx context.Context, servers []string, relays []relay.Link) (*clientrun.Carried, func(), func(error), []netip.Prefix, error) {
 	nodeTalk.SetRelays(relays)
 
 	open, err := t.opener()
 	if err != nil {
-		return err
+		return nil, nil, nil, nil, err
 	}
 
 	sharp := sharpTimers()
@@ -165,41 +230,12 @@ func (t *tunnel) Start(servers []string, relays []relay.Link, sessionID uint32) 
 		return open(ctx, live, keepOut)
 	}
 
-	held, err := clientrun.Carry(context.Background(), plan)
+	held, err := clientrun.Carry(ctx, plan)
 	if err != nil {
 		sharp()
-		return err
+		return nil, nil, nil, nil, err
 	}
-
-	t.wg.Add(1)
-	go func() {
-		defer t.wg.Done()
-		<-held.Released
-	}()
-	go func() {
-		<-held.Gone
-		sharp()
-	}()
-
-	go flushSystemDNS()
-	t.running = true
-	t.stop = held.Halt
-	t.live = held.Live
-	t.liveStop = held.Quit
-	t.endpoint = held.Endpoint
-	t.since = time.Now()
-	t.lastErr = nil
-	t.dns = held.DNS
-	t.wanted.Store(true)
-	liveTunnel.Store(&held.Live)
-
-	go roamWatch(held.Ctx, held.Halt, held.Live, plan.Lost)
-	go t.followPeers(held.Ctx, keepOut)
-
-	if t.cfg.Announce != nil {
-		go t.cfg.Announce("join")
-	}
-	return nil
+	return held, sharp, plan.Lost, keepOut, nil
 }
 
 const dialWait = 20 * time.Second
@@ -253,6 +289,11 @@ func (t *tunnel) Wanted() bool { return t.wanted.Load() }
 
 func (t *tunnel) Stop() error {
 	t.wanted.Store(false)
+	t.mu.Lock()
+	if t.abort != nil {
+		t.abort()
+	}
+	t.mu.Unlock()
 	return t.halt()
 }
 
@@ -281,6 +322,7 @@ func (t *tunnel) halt() error {
 	}
 	if dns != nil {
 		dns.Interrupt()
+		dns.Close()
 	}
 	if live != nil {
 		go live.Close()

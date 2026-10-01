@@ -22,7 +22,9 @@ import (
 const (
 	updateAsset = "qd-client-windows-amd64.exe"
 	handOver    = "-update-after"
-	trialRun    = 20 * time.Second
+	upEvent     = `Global\qdClientUp`
+	upWait      = 30000
+	leaveWait   = 20000
 )
 
 func init() {
@@ -51,6 +53,7 @@ func (p hostPlatform) Install(tag string, open update.Opener, tick func(done, to
 		os.Rename(old, exe)
 		return fmt.Errorf("could not put %s in place: %w", tag, err)
 	}
+	os.Remove(filepath.Dir(fresh))
 
 	args := os.Args[1:]
 	if p.tun.Running() && !slices.Contains(args, "-connect") {
@@ -59,7 +62,7 @@ func (p hostPlatform) Install(tag string, open update.Opener, tick func(done, to
 	watcher := exec.Command(old, append([]string{handOver, strconv.Itoa(os.Getpid())}, args...)...)
 	watcher.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.DETACHED_PROCESS | windows.CREATE_NEW_PROCESS_GROUP}
 	if err := watcher.Start(); err != nil {
-		os.Rename(exe, fresh)
+		os.Remove(exe)
 		os.Rename(old, exe)
 		return fmt.Errorf("could not hand over to %s: %w", tag, err)
 	}
@@ -82,12 +85,19 @@ func watchUpdate(args []string) {
 	exe := strings.TrimSuffix(self, ".old")
 	rest := args[1:]
 
-	if h, err := windows.OpenProcess(windows.SYNCHRONIZE, false, uint32(pid)); err == nil {
-		windows.WaitForSingleObject(h, 60000)
+	if h, err := windows.OpenProcess(windows.SYNCHRONIZE|windows.PROCESS_TERMINATE, false, uint32(pid)); err == nil {
+		if state, _ := windows.WaitForSingleObject(h, leaveWait); state != uint32(windows.WAIT_OBJECT_0) {
+			windows.TerminateProcess(h, 0)
+			windows.WaitForSingleObject(h, 5000)
+		}
 		windows.CloseHandle(h)
 	}
 
-	if start(exe, rest, trialRun) {
+	up := namedEvent(upEvent, true)
+	if up != 0 {
+		windows.ResetEvent(up)
+	}
+	if start(exe, rest, up) {
 		return
 	}
 	os.Remove(exe + ".bad")
@@ -97,27 +107,48 @@ func watchUpdate(args []string) {
 	start(exe, rest, 0)
 }
 
-func start(exe string, args []string, trial time.Duration) bool {
+func start(exe string, args []string, up windows.Handle) bool {
 	cmd := exec.Command(exe, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.DETACHED_PROCESS | windows.CREATE_NEW_PROCESS_GROUP}
 	if err := cmd.Start(); err != nil {
 		return false
 	}
-	if trial == 0 {
-		cmd.Process.Release()
+	pid := uint32(cmd.Process.Pid)
+	cmd.Process.Release()
+	if up == 0 {
 		return true
 	}
-	gone := make(chan struct{})
-	go func() {
-		cmd.Wait()
-		close(gone)
-	}()
-	select {
-	case <-gone:
-		return false
-	case <-time.After(trial):
+	fresh, err := windows.OpenProcess(windows.SYNCHRONIZE|windows.PROCESS_TERMINATE|windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	if err != nil {
 		return true
 	}
+	defer windows.CloseHandle(fresh)
+
+	which, _ := windows.WaitForMultipleObjects([]windows.Handle{up, fresh}, false, upWait)
+	switch which {
+	case windows.WAIT_OBJECT_0:
+		return true
+	case windows.WAIT_OBJECT_0 + 1:
+		var code uint32
+		windows.GetExitCodeProcess(fresh, &code)
+		return code == 0
+	}
+	windows.TerminateProcess(fresh, 1)
+	windows.WaitForSingleObject(fresh, 5000)
+	return false
+}
+
+func tellUp() {
+	name, err := windows.UTF16PtrFromString(upEvent)
+	if err != nil {
+		return
+	}
+	handle, err := windows.OpenEvent(windows.EVENT_MODIFY_STATE, false, name)
+	if err != nil {
+		return
+	}
+	windows.SetEvent(handle)
+	windows.CloseHandle(handle)
 }
 
 func settleUpdate(db *clientstate.DB) {

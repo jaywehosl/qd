@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const journalCap = 512 << 10
+const journalCap = 96 << 10
 
 type journal struct {
 	mu   sync.Mutex
@@ -116,7 +116,7 @@ func say(format string, args ...any) {
 	}
 
 	written, _ := fmt.Fprintf(kept.file, "%s %s\n",
-		time.Now().Format("15:04:05.000"), fmt.Sprintf(format, args...))
+		time.Now().Format("02.01 15:04:05.000"), fmt.Sprintf(format, args...))
 	kept.size += int64(written)
 }
 

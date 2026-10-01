@@ -3,6 +3,7 @@ package clientapi
 import (
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -10,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jaywehosl/qd/internal/clientstate"
@@ -42,6 +44,8 @@ type API struct {
 	upFailed    string
 	updatedFrom string
 	updatedAt   time.Time
+
+	failed atomic.Value
 }
 
 func New(db *clientstate.DB, platform Platform, seen *Visits, key *qdcrypt.Key) *API {
@@ -65,6 +69,7 @@ func (a *API) Routes() http.Handler {
 	mux.HandleFunc("/client/api/notifications/read", a.markRead)
 	mux.HandleFunc("/client/api/notifications/dismiss", a.dismissNotification)
 	mux.HandleFunc("/client/api/notifications/clear", a.clearNotifications)
+	mux.HandleFunc("/client/api/notifications/add", a.addNotification)
 
 	mux.HandleFunc("/client/api/history/", a.history)
 
@@ -597,10 +602,13 @@ func (a *API) Connect() error {
 	}
 
 	if err := a.platform.Start(lane, a.Relays(), qdcrypt.SessionID(sub.Key)); err != nil {
-		a.db.Notify("warning", "Could not bring the tunnel up: "+err.Error(), time.Now().UnixMilli())
+		if prev, _ := a.failed.Swap(err.Error()).(string); prev != err.Error() && !errors.Is(err, ErrStopped) {
+			a.db.Notify("warning", "Could not bring the tunnel up: "+err.Error(), time.Now().UnixMilli())
+		}
 		return err
 	}
 
+	a.failed.Store("")
 	a.db.ClearSelection()
 	won := a.platform.ServerName()
 	for _, n := range nodes {
@@ -888,6 +896,49 @@ func (a *API) withID(w http.ResponseWriter, r *http.Request, do func(id int) err
 	}
 	ok(w, nil)
 }
+
+func (a *API) addNotification(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Severity string `json:"severity"`
+		Text     string `json:"text"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	text := strings.TrimSpace(body.Text)
+	if len(text) > noteLimit {
+		text = text[:noteLimit]
+	}
+	if text == "" {
+		ok(w, nil)
+		return
+	}
+	if body.Severity != "warning" && body.Severity != "error" {
+		body.Severity = "info"
+	}
+	now := time.Now().UnixMilli()
+	if held, _, err := a.db.Notifications(); err == nil {
+		for _, one := range held {
+			if now-one.TS > noteEcho {
+				break
+			}
+			if strings.Contains(one.Text, text) {
+				ok(w, nil)
+				return
+			}
+		}
+	}
+	if err := a.db.Notify(body.Severity, text, now); err != nil {
+		fail(w, err)
+		return
+	}
+	ok(w, nil)
+}
+
+const (
+	noteLimit = 600
+	noteEcho  = 5000
+)
 
 func (a *API) clearNotifications(w http.ResponseWriter, r *http.Request) {
 	if err := a.db.ClearNotifications(); err != nil {

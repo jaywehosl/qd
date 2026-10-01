@@ -86,4 +86,4 @@ func (a *API) revisionOf(id int) (int, error) {
 	return said.Revision, nil
 }
 
-const convergeEvery = 30 * time.Second
+const convergeEvery = 5 * time.Second

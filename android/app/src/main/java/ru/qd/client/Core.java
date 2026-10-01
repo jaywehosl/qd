@@ -149,6 +149,43 @@ public final class Core {
         return since;
     }
 
+    public static String plain(String raw) {
+        String why = raw == null ? "" : raw.toLowerCase(java.util.Locale.ROOT);
+        if (why.contains("stopped before the tunnel came up")) {
+            return "";
+        }
+        if (why.contains("too old") || why.contains("update qd")) {
+            return "Эта версия устарела. Обновите приложение, чтобы подключиться.";
+        }
+        if (why.contains("refused this subscription") || why.contains("disabled by the administrator")
+                || why.contains("no longer valid")) {
+            return "Сервер отклонил подписку. Обратитесь к администратору.";
+        }
+        if (why.contains("expired")) {
+            return "Срок подписки истёк.";
+        }
+        if (why.contains("blocked by the administrator")) {
+            return "Это устройство заблокировано администратором.";
+        }
+        if (why.contains("allowance of devices")) {
+            return "Достигнут предел устройств для этой подписки.";
+        }
+        if (why.contains("nothing imported") || why.contains("no network key")) {
+            return "Подписка не добавлена.";
+        }
+        if (why.contains("no entrypoint to dial")) {
+            return "В подписке нет серверов для подключения.";
+        }
+        if (why.contains("refused to establish the tunnel") || why.contains("establish")) {
+            return "Android не дал создать VPN. Проверьте, не включён ли другой VPN.";
+        }
+        if (why.contains("no entrypoint answered") || why.contains("deadline exceeded")
+                || why.contains("timeout") || why.contains("no relay answered")) {
+            return "Сервер не отвечает. Проверьте интернет и попробуйте ещё раз.";
+        }
+        return "Не удалось подключиться. Подробности в журнале.";
+    }
+
     public static void gaveUp(String why) {
         woe = why == null ? "" : why;
     }

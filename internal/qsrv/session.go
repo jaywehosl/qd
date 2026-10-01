@@ -57,15 +57,14 @@ func (n *Node) verified(r *http.Request) (Grant, bool) {
 			return Grant{}, false
 		}
 		grant.Seat = grant.Session
-		if seat := numberIn(r, HeaderSeat); seat != 0 {
+		if seat := numberIn(r, HeaderSeat); seat != 0 && grant.Peer {
 			grant.Session = seat
 			if client := numberIn(r, HeaderSession); client != 0 {
 				grant.Session = client
 			}
 			grant.Seat = seat
 			grant.Client = r.Header.Get(HeaderNode)
-			grant.Peer = true
-		} else if device := r.Header.Get(HeaderDevice); device != "" {
+		} else if device := r.Header.Get(HeaderDevice); device != "" && !grant.Peer {
 			grant.Seat = seatFor(grant.Session, device)
 		}
 		sessionOf(r.Context()).remember(grant)

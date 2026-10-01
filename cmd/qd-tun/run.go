@@ -50,8 +50,10 @@ func runClient(opts runOptions) error {
 			fmt.Printf("single   already running, brought its page up\n")
 			return nil
 		}
-		fmt.Printf("single   already running, but it did not answer\n")
-		return nil
+		if first, release = claimInstance(); !first {
+			fmt.Printf("single   already running, but it did not answer\n")
+			return nil
+		}
 	}
 	defer release()
 
@@ -221,6 +223,9 @@ func runClient(opts runOptions) error {
 	go collectSamples(db, tun, stop)
 	go api.KeepFresh(stop)
 	go api.KeepProbing(stop, 60*time.Second)
+	if !embedded {
+		startGuard(tun, stop)
+	}
 
 	quit := make(chan struct{})
 	trayed, untray := true, func() {}
@@ -236,6 +241,8 @@ func runClient(opts runOptions) error {
 	}
 	defer untray()
 
+	tellUp()
+
 	behaviour := settings.ManualBehaviour
 	if opts.Autostart {
 		behaviour = settings.AutostartBehaviour
@@ -244,7 +251,11 @@ func runClient(opts runOptions) error {
 		behaviour = ""
 	}
 
-	if (opts.Connect || behaviour == "connect" || behaviour == "openConnect") && sub.Imported {
+	resume, _ := db.Value(resumeKey)
+	if resume != "" {
+		db.SetValue(resumeKey, "")
+	}
+	if (opts.Connect || resume != "" || behaviour == "connect" || behaviour == "openConnect") && sub.Imported {
 		if err := api.Connect(); err != nil {
 			fmt.Printf("connect  %v\n", err)
 		}
@@ -270,10 +281,21 @@ func runClient(opts runOptions) error {
 	case <-deadline:
 	}
 
+	go func() {
+		time.Sleep(exitWait)
+		fmt.Printf("exit     the shutdown did not finish in %s, leaving anyway\n", exitWait)
+		flushLog()
+		os.Exit(0)
+	}()
 	close(stop)
 	tun.Stop()
+	releaseDriver()
 	return nil
 }
+
+const exitWait = 8 * time.Second
+
+const resumeKey = "resumeTunnel"
 
 func shorten(key string) string {
 	if len(key) <= 12 {

@@ -1,6 +1,7 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
+import { NOTIFIED } from '@/components/ds/Toast';
 import { HttpUtil } from '@/utils';
 
 export interface ClientNotif {
@@ -42,6 +43,12 @@ export function useClientNotifications() {
   const markRead = useMutation({ mutationFn: () => post('/client/api/notifications/read', { id: 0 }) });
   const dismiss = useMutation({ mutationFn: (id: number) => post('/client/api/notifications/dismiss', { id }) });
   const clear = useMutation({ mutationFn: () => post('/client/api/notifications/clear') });
+
+  useEffect(() => {
+    const refresh = () => { void queryClient.invalidateQueries({ queryKey: KEY }); };
+    window.addEventListener(NOTIFIED, refresh);
+    return () => window.removeEventListener(NOTIFIED, refresh);
+  }, [queryClient]);
 
   const items = useMemo(() => data?.items ?? [], [data]);
 

@@ -3,6 +3,8 @@
 package main
 
 import (
+	"errors"
+
 	"github.com/jaywehosl/qd/internal/clientapi"
 	"github.com/jaywehosl/qd/internal/clientstate"
 	"github.com/jaywehosl/qd/internal/qdcrypt"
@@ -19,7 +21,10 @@ func (p hostPlatform) Running() bool { return p.tun.Running() }
 func (p hostPlatform) Failed() bool { return p.tun.Failed() }
 
 func (p hostPlatform) Start(servers []string, relays []relay.Link, session uint32) error {
-	return p.tun.Start(servers, relays, session)
+	if err := p.tun.Start(servers, relays, session); !errors.Is(err, errAlreadyUp) {
+		return err
+	}
+	return nil
 }
 
 func (p hostPlatform) Stop() error { return p.tun.Stop() }

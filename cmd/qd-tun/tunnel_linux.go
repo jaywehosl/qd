@@ -51,6 +51,8 @@ func keepAsideReset() {}
 
 func flushSystemDNS() { run("resolvectl", "flush-caches") }
 
+func releaseDriver() {}
+
 func keepAside(fresh []netip.Prefix) {
 	for _, p := range fresh {
 		family := "-4"

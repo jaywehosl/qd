@@ -12,6 +12,8 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
+
+	quic "github.com/quic-go/quic-go"
 	"time"
 )
 
@@ -97,4 +99,16 @@ func ticketSecret(path string) ([]byte, error) {
 		return nil, err
 	}
 	return fresh, nil
+}
+
+func resetKey(dir string) *quic.StatelessResetKey {
+	secret, err := ticketSecret(filepath.Join(dir, "ticket.secret"))
+	if err != nil {
+		return nil
+	}
+	mac := hmac.New(sha256.New, secret)
+	mac.Write([]byte("qd stateless reset"))
+	var key quic.StatelessResetKey
+	copy(key[:], mac.Sum(nil))
+	return &key
 }

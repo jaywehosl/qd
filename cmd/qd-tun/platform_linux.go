@@ -94,6 +94,8 @@ func answerKnocks(show func(), stop <-chan struct{}) {}
 
 func redirectOutput(statePath string) {}
 
+func flushLog() {}
+
 func standFull() {}
 
 func moveLegacyState() {}

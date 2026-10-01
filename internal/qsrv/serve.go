@@ -110,27 +110,37 @@ func (n *Node) carry(ctx context.Context, conn *connectip.Conn, qc *quic.Conn, g
 
 	s := newLive(grant, address, "", route)
 	s.conn = qc
+	s.end = func() { conn.Close() }
 	defer conn.Close()
 
 	n.runStack(ctx, s, counted{conn: conn, s: s})
 }
 
 func (n *Node) runStack(ctx context.Context, s *live, tun netstack.Tunnel) {
+	seat := s.grant.Seat
 	n.mu.Lock()
-	if was := n.held[s.grant.Seat]; was != nil {
-		n.pool.give(was.address)
-	}
-	n.held[s.grant.Seat] = s
+	was := n.held[seat]
+	s.under = was
+	n.held[seat] = s
 	n.mu.Unlock()
 
 	defer func() {
+		s.over.Store(true)
 		n.mu.Lock()
-		if n.held[s.grant.Seat] == s {
-			delete(n.held, s.grant.Seat)
+		current := n.held[seat] == s
+		s.under = nil
+		back := current && was != nil && was.end != nil && !was.over.Load()
+		switch {
+		case back:
+			n.held[seat] = was
+		case current:
+			delete(n.held, seat)
 		}
 		n.mu.Unlock()
 		n.pool.give(s.address)
-		n.links.forget(s.grant.Seat)
+		if current && !back {
+			n.links.forget(seat)
+		}
 	}()
 
 	stack, err := netstack.New(steered{node: n, grant: s.grant, s: s, hops: defaultHops}, n.Tunables().MTU)
@@ -214,11 +224,11 @@ func (n *Node) serveIPOverTCP(ctx context.Context) http.HandlerFunc {
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()
 		}
-		n.carryStream(ctx, &streamTun{r: r.Body, w: flushWriter{w}}, grant, r.RemoteAddr, n.routeFor(r))
+		n.carryStream(ctx, &streamTun{r: r.Body, w: flushWriter{w}}, func() { r.Body.Close() }, grant, r.RemoteAddr, n.routeFor(r))
 	}
 }
 
-func (n *Node) carryStream(ctx context.Context, tun netstack.Tunnel, grant Grant, peer, route string) {
+func (n *Node) carryStream(ctx context.Context, tun netstack.Tunnel, end func(), grant Grant, peer, route string) {
 	address, err := n.pool.take(grant.Seat)
 	if err != nil {
 		return
@@ -226,6 +236,7 @@ func (n *Node) carryStream(ctx context.Context, tun netstack.Tunnel, grant Grant
 
 	s := newLive(grant, address, peer, route)
 	s.stream = true
+	s.end = end
 
 	n.runStack(ctx, s, countedTun{tun: tun, s: s})
 }

@@ -84,18 +84,25 @@ export default function ConnectScreen({
   }, [release]);
 
   const [cheer, setCheer] = useState(false);
+  const [spent, setSpent] = useState(false);
   const [cheerKind, setCheerKind] = useState<'updated' | 'delayed'>('updated');
   const [delayed, setDelayed] = useState<number | null>(null);
   const [delayFor, setDelayFor] = useState(0);
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (!upd?.updatedFrom) return;
+    if (!upd?.updatedFrom) {
+      setSpent(false);
+      return;
+    }
     setCheerKind('updated');
     setCheer(true);
   }, [upd?.updatedFrom]);
   useEffect(() => {
     if (!cheer) return;
-    const id = window.setTimeout(() => setCheer(false), 10000);
+    const id = window.setTimeout(() => {
+      setCheer(false);
+      setSpent(true);
+    }, 10000);
     return () => window.clearTimeout(id);
   }, [cheer]);
   useEffect(() => {
@@ -109,7 +116,8 @@ export default function ConnectScreen({
     return () => window.clearTimeout(id);
   }, [delayed]);
 
-  const headState = cheer || upd?.updatedFrom ? 'cheer' : failed ? 'manual' : noticed || delayed !== null ? 'service' : 'normal';
+  const justUpdated = !!upd?.updatedFrom && !spent;
+  const headState = cheer || justUpdated ? 'cheer' : failed ? 'manual' : noticed || delayed !== null ? 'service' : 'normal';
   const headTrack = useRef({ now: headState, was: headState });
   if (headTrack.current.now !== headState) headTrack.current = { now: headState, was: headTrack.current.now };
   const headWas = headTrack.current.was;
@@ -232,9 +240,8 @@ export default function ConnectScreen({
   }, [postpone, period, t]);
 
   const refresh = useCallback(async () => {
-    const result = await onRefresh();
-    if (result) toast.success(t('client.connect.refreshed'));
-  }, [onRefresh, t]);
+    await onRefresh();
+  }, [onRefresh]);
 
   const lift = span(at, 0, GATE);
   const rosterAlpha = span(at, 0.58, 0.86) * dip(spread, 0.3, 0.8);
@@ -288,7 +295,7 @@ export default function ConnectScreen({
           {t('client.update.manualHead')}
         </div>
         <div className={`cx-head__say${slide('cheer')}`} aria-hidden={headState !== 'cheer'}>
-          {cheerKind === 'delayed' && !upd?.updatedFrom
+          {cheerKind === 'delayed' && !justUpdated
             ? (state.connected ? t('client.update.delayedOnline') : t('client.update.delayedHead'))
             : (state.connected ? t('client.update.doneConnected') : t('client.update.done'))}
         </div>

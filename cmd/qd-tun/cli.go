@@ -57,7 +57,9 @@ func main() {
 	flag.BoolVar(&embedded, "embedded", false, "run inside another app: no window or tray, log to stdout, print the api address and token, stop when stdin closes")
 	flag.Parse()
 
-	if err := runClient(opts); err != nil {
+	err := runClient(opts)
+	flushLog()
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}

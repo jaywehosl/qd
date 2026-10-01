@@ -71,6 +71,9 @@ type procRouter struct {
 	tbl     atomic.Pointer[map[portKey]uint32]
 	refresh chan struct{}
 
+	readMu sync.Mutex
+	readAt time.Time
+
 	pidMu sync.Mutex
 	pids  map[uint32]procIdent
 }
@@ -145,6 +148,9 @@ func (r *procRouter) RoleFor(pkt []byte) string {
 	}
 
 	pid, known := r.pidFor(portKey{proto: key.proto, port: key.port})
+	if !known {
+		pid, known = r.lookNow(portKey{proto: key.proto, port: key.port})
+	}
 	role, _ := r.roleOfPid(pid, known)
 	r.keep(&r.aside, &r.keptAside, key, role)
 	return role
@@ -281,6 +287,27 @@ func (r *procRouter) pidFor(key portKey) (uint32, bool) {
 	}
 	return pid, ok
 }
+
+func (r *procRouter) lookNow(key portKey) (uint32, bool) {
+	r.readMu.Lock()
+	if time.Since(r.readAt) > lookEvery {
+		r.readTable()
+		r.readAt = time.Now()
+	}
+	r.readMu.Unlock()
+
+	if pid, ok := r.watched.Load(key); ok {
+		return pid.(uint32), true
+	}
+	held := r.tbl.Load()
+	if held == nil {
+		return 0, false
+	}
+	pid, ok := (*held)[key]
+	return pid, ok
+}
+
+const lookEvery = 10 * time.Millisecond
 
 func (r *procRouter) wake() {
 	select {

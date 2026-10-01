@@ -154,6 +154,13 @@ func Dial(ctx context.Context, opts Options) (*Tunnel, error) {
 	for i := 0; i < paths; i++ {
 		select {
 		case <-ctx.Done():
+			go func(left int) {
+				for ; left > 0; left-- {
+					if late := <-line; late.tunnel != nil {
+						late.tunnel.Close()
+					}
+				}
+			}(paths - i)
 			return nil, ctx.Err()
 		case got := <-line:
 			if got.err != nil {

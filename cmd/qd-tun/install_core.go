@@ -14,3 +14,7 @@ func (p hostPlatform) Install(string, update.Opener, func(done, total int64)) er
 }
 
 func settleUpdate(*clientstate.DB) {}
+
+func startGuard(*tunnel, <-chan struct{}) {}
+
+func tellUp() {}

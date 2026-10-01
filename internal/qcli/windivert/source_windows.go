@@ -22,6 +22,7 @@ const (
 var (
 	errShortIP   = errors.New("windivert: IP packet shorter than its header")
 	errIPVersion = errors.New("windivert: unknown IP version")
+	errShut      = errors.New("windivert: the capture is closed")
 )
 
 type Source struct {
@@ -30,6 +31,9 @@ type Source struct {
 	rd        packet.Reader
 	wr        packet.Writer
 	sending   sync.Mutex
+	gate      sync.RWMutex
+	shut      bool
+	closing   atomic.Bool
 }
 
 func Open(dllPath, filter string, flags uint64) (*Source, error) {
@@ -74,7 +78,13 @@ func (s *Source) Send(pkts []packet.Packet) error {
 }
 
 func (s *Source) Close() error {
+	if !s.closing.CompareAndSwap(false, true) {
+		return nil
+	}
 	_ = shutdown(s.h, ShutdownBoth)
+	s.gate.Lock()
+	defer s.gate.Unlock()
+	s.shut = true
 	return closeHandle(s.h)
 }
 
@@ -89,7 +99,13 @@ func (r *reader) Recv(ctx context.Context) ([]packet.Packet, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	r.s.gate.RLock()
+	if r.s.shut {
+		r.s.gate.RUnlock()
+		return nil, errShut
+	}
 	packetLen, addrCount, err := recvEx(r.s.h, r.buf, r.addrs)
+	r.s.gate.RUnlock()
 	if err != nil {
 		return nil, err
 	}
@@ -139,6 +155,11 @@ func (w *writer) sendChunk(pkts []packet.Packet) error {
 		}
 		a.SetIfIdx(idx)
 		w.addrs = append(w.addrs, a)
+	}
+	w.s.gate.RLock()
+	defer w.s.gate.RUnlock()
+	if w.s.shut {
+		return errShut
 	}
 	_, err := sendEx(w.s.h, w.buf, w.addrs)
 	return err

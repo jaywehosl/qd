@@ -263,6 +263,7 @@ func main() {
 		Relays:    relays,
 		Verify:    admission.verify,
 		Admit:     admission.admit,
+		Reset:     resetKey(filepath.Dir(*dbPath)),
 		Shelf:     shelf,
 		Peers:     peersFrom(held, self.ID),
 		Tune:      func() qsrv.Tunables { return tunablesFrom(mustSettings(held())) },

@@ -74,6 +74,7 @@ func (c *Conn) Migrate(ctx context.Context, laddr *net.UDPAddr) error {
 	path, err := c.qc.AddPath(newTr)
 	if err != nil {
 		newTr.Close()
+		pc.Close()
 		return err
 	}
 	if err := path.Probe(ctx); err != nil {
@@ -99,11 +100,15 @@ func (c *Conn) Close() error {
 	err := c.qc.CloseWithError(0, "")
 	c.mu.Lock()
 	tr := c.tr
+	pc := c.pc
 	prev := c.prev
 	c.prev = nil
 	c.mu.Unlock()
 	if tr != nil {
 		tr.Close()
+	}
+	if pc != nil {
+		pc.Close()
 	}
 	for _, ts := range prev {
 		if ts.tr != nil {
@@ -165,9 +170,16 @@ func (d Dialer) Dial(ctx context.Context, endpoint string) (*Conn, error) {
 	}
 
 	tried := make([]string, 0, len(addrs))
-	for range addrs {
+	for i := range addrs {
 		got := <-line
 		if got.err == nil {
+			go func(left int) {
+				for ; left > 0; left-- {
+					if late := <-line; late.conn != nil {
+						late.conn.Close()
+					}
+				}
+			}(len(addrs) - i - 1)
 			return got.conn, nil
 		}
 		tried = append(tried, got.err.Error())
@@ -191,6 +203,7 @@ func (d Dialer) reach(ctx context.Context, raddr *net.UDPAddr) (*Conn, error) {
 	if err != nil {
 		fmt.Printf("dial     %s gave up after %d ms: %v\n", raddr, time.Since(began).Milliseconds(), err)
 		tr.Close()
+		pc.Close()
 		return nil, err
 	}
 	fmt.Printf("dial     %s answered in %d ms\n", raddr, time.Since(began).Milliseconds())

@@ -146,6 +146,10 @@ func (s *Server) rememberOrigin(addr net.Addr) {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if !s.addressed(r) {
+		http.Error(w, "", http.StatusMisdirectedRequest)
+		return
+	}
 	if r.URL.Path == "/ws" {
 		s.websocket(w, r)
 		return
@@ -186,6 +190,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.page.ServeHTTP(w, r)
+}
+
+func (s *Server) addressed(r *http.Request) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.origins["http://"+r.Host]
 }
 
 func isNavigation(r *http.Request) bool {

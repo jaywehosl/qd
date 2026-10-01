@@ -22,6 +22,7 @@ func (state *controlState) syncSessions() {
 	want := map[uint32]bool{}
 	routed := map[uint32]bool{}
 	builds := map[uint32][2]bool{}
+	linked := map[uint32]bool{}
 	peers, exits, byDNS := 0, 0, 0
 
 	mine, err := netstate.Project(state.id, network)
@@ -47,11 +48,13 @@ func (state *controlState) syncSessions() {
 		for _, p := range mine.Peers {
 			if p.Role == netstate.RoleIngress && p.Session != 0 {
 				want[p.Session] = false
+				linked[p.Session] = true
 				peers++
 			}
 		}
 	}
 
+	state.gate.nodes(linked)
 	live := state.gate.list()
 	added, removed := 0, 0
 	for id, allowExit := range want {
