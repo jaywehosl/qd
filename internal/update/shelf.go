@@ -135,7 +135,59 @@ func (s *Shelf) lockFor(key string) *sync.Mutex {
 	return s.pending[key]
 }
 
+func (s *Shelf) Stock(tag string) {
+	if s == nil || tag == "" {
+		return
+	}
+	ctx := context.Background()
+	path, err := s.hold(ctx, tag, Checksums)
+	if err != nil {
+		s.say("update     %s could not be stocked: %v", tag, err)
+		return
+	}
+	sums, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	for name := range Assets {
+		if _, listed := SumOf(sums, name); !listed && name != Signature {
+			continue
+		}
+		if _, err := s.hold(ctx, tag, name); err != nil {
+			s.say("update     %s/%s could not be stocked: %v", tag, name, err)
+		}
+	}
+	old, _ := os.ReadDir(s.Dir)
+	for _, e := range old {
+		if e.IsDir() && e.Name() != filepath.Base(tag) {
+			os.RemoveAll(filepath.Join(s.Dir, e.Name()))
+		}
+	}
+}
+
+func (s *Shelf) say(format string, args ...any) {
+	if s.Log != nil {
+		s.Log(format, args...)
+	}
+}
+
 func (s *Shelf) fetch(ctx context.Context, url string, limit int64) ([]byte, error) {
+	var err error
+	for try := 0; try < 3; try++ {
+		var body []byte
+		if body, err = s.fetchOnce(ctx, url, limit); err == nil {
+			return body, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, err
+		case <-time.After(3 * time.Second):
+		}
+	}
+	return nil, err
+}
+
+func (s *Shelf) fetchOnce(ctx context.Context, url string, limit int64) ([]byte, error) {
 	hc := s.Client
 	if hc == nil {
 		hc = http.DefaultClient

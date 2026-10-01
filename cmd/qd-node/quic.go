@@ -29,13 +29,19 @@ type gate struct {
 	dev     map[uint32]bool
 	core    map[uint32]bool
 	told    map[uint32]string
+	seats   map[uint32]seated
 	target  string
 	listed  []string
 	network string
 }
 
+type seated struct {
+	session        uint32
+	version, build string
+}
+
 func newGate() *gate {
-	return &gate{allowed: map[uint32]bool{}, routed: map[uint32]bool{}, dev: map[uint32]bool{}, core: map[uint32]bool{}, told: map[uint32]string{}}
+	return &gate{allowed: map[uint32]bool{}, routed: map[uint32]bool{}, dev: map[uint32]bool{}, core: map[uint32]bool{}, told: map[uint32]string{}, seats: map[uint32]seated{}}
 }
 
 func (g *gate) list() map[uint32]struct{} {
@@ -131,9 +137,9 @@ func tunablesFrom(s store.NetworkSettings) qsrv.Tunables {
 	}
 }
 
-func peersFrom(db *store.DB, selfID int) func() []qsrv.Peer {
+func peersFrom(db func() *store.DB, selfID int) func() []qsrv.Peer {
 	return func() []qsrv.Peer {
-		nodes, err := db.Nodes()
+		nodes, err := db().Nodes()
 		if err != nil {
 			log.Printf("peers      the network database will not read: %v", err)
 			return nil
@@ -203,11 +209,18 @@ func (g *gate) policy(target string, releases []string) bool {
 }
 
 func (g *gate) admit(grant qsrv.Grant, version, build string) bool {
+	now := seated{grant.Session, version, build}
 	g.mu.RLock()
 	target := g.target
 	verdict := update.Judge(version, build, target, g.listed, g.dev[grant.Session], g.core[grant.Session])
+	held := g.seats[grant.Seat]
 	g.mu.RUnlock()
 	if verdict != update.Required {
+		if held != now {
+			g.mu.Lock()
+			g.seats[grant.Seat] = now
+			g.mu.Unlock()
+		}
 		return true
 	}
 
@@ -221,4 +234,20 @@ func (g *gate) admit(grant qsrv.Grant, version, build string) bool {
 			grant.Session, version, build, target)
 	}
 	return false
+}
+
+func (g *gate) outdated(alive map[uint32]bool) []uint32 {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	var late []uint32
+	for seat, s := range g.seats {
+		switch {
+		case !alive[seat]:
+			delete(g.seats, seat)
+		case update.Judge(s.version, s.build, g.target, g.listed, g.dev[s.session], g.core[s.session]) == update.Required:
+			late = append(late, seat)
+			delete(g.seats, seat)
+		}
+	}
+	return late
 }

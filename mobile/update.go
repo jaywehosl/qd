@@ -31,3 +31,5 @@ func (c *Client) PostponeUpdate(minutes int) string {
 }
 
 func (c *Client) FakeUpdate(state string) { c.api.Fake(state) }
+
+func (c *Client) UpdateRefused(why string) { c.api.InstallRefused(why) }

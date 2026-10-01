@@ -17,7 +17,7 @@ import (
 const echRecheck = 5 * time.Second
 
 type echHolder struct {
-	db      *store.DB
+	db      func() *store.DB
 	secret  string
 	renamed func(name string)
 
@@ -28,7 +28,7 @@ type echHolder struct {
 	list    []byte
 }
 
-func newECH(db *store.DB, secret, name string, renamed func(string)) *echHolder {
+func newECH(db func() *store.DB, secret, name string, renamed func(string)) *echHolder {
 	h := &echHolder{db: db, secret: secret, renamed: renamed, checked: time.Now()}
 	h.apply(name)
 	go func() {
@@ -47,7 +47,7 @@ func (h *echHolder) current() ([]tls.EncryptedClientHelloKey, []byte) {
 	defer h.mu.Unlock()
 	if time.Since(h.checked) > echRecheck {
 		h.checked = time.Now()
-		if settings, err := h.db.NetworkSettings(); err == nil && settings.ECHName != h.name {
+		if settings, err := h.db().NetworkSettings(); err == nil && settings.ECHName != h.name {
 			h.apply(settings.ECHName)
 		}
 	}

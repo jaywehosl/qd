@@ -28,6 +28,10 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
+		if tag, _ := update.SumOf(body, update.Label); !strings.HasPrefix(tag, "v") {
+			fmt.Fprintf(os.Stderr, "%s names no release: add the line \"vX.Y.Z-alpha *%s\"\n", path, update.Label)
+			os.Exit(1)
+		}
 		sig := []byte(base64.StdEncoding.EncodeToString(ed25519.Sign(key, body)) + "\n")
 		if !update.Signed(body, sig) {
 			fmt.Fprintln(os.Stderr, "this key is not the one the clients trust")

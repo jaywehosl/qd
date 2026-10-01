@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -183,10 +184,11 @@ func (c *Client) hold(assigned, six netip.Prefix, mtu int) (int, error) {
 }
 
 func (p platform) Install(tag string, open update.Opener, tick func(done, total int64)) error {
-	path, err := update.Take(open, "qd-android-arm64.apk", filepath.Join(p.c.dir, "update"), tick)
+	path, err := update.Take(open, tag, "qd-android-arm64.apk", filepath.Join(p.c.dir, "update"), tick)
 	if err != nil {
 		return err
 	}
+	defer os.Remove(path)
 	say("update: %s fetched and verified, handing it to the package installer", tag)
 	if !p.c.host.Install(path) {
 		return errors.New("the package installer did not take the update")

@@ -561,7 +561,7 @@ public class SettingsPage {
     private void pollUpdate() {
         JSONObject info;
         try {
-            info = new JSONObject(Core.client(host).updateJSON());
+            info = Upkeep.read(host);
         } catch (Exception e) {
             return;
         }

@@ -16,7 +16,9 @@ var ErrCorrupt = errors.New("the downloaded package is corrupted")
 
 func ReleaseURL(tag string) string { return "https://github.com/" + Repo + "/releases/tag/" + tag }
 
-func Take(open Opener, name, dir string, tick func(done, total int64)) (string, error) {
+const Label = "version"
+
+func Take(open Opener, tag, name, dir string, tick func(done, total int64)) (string, error) {
 	sums, err := readAll(open, Checksums, 1<<20)
 	if err != nil {
 		return "", err
@@ -27,6 +29,9 @@ func Take(open Opener, name, dir string, tick func(done, total int64)) (string, 
 	}
 	if !Signed(sums, sig) {
 		return "", fmt.Errorf("%w: the release is not signed with the update key", ErrCorrupt)
+	}
+	if held, _ := SumOf(sums, Label); held != tag {
+		return "", fmt.Errorf("%w: the release is signed as %q, not as %s", ErrCorrupt, held, tag)
 	}
 	want, ok := SumOf(sums, name)
 	if !ok {

@@ -30,6 +30,15 @@ import org.json.JSONObject;
 public class Upkeep {
 
     static volatile float pace = 1f;
+    private static volatile boolean updated;
+
+    static JSONObject read(android.content.Context context) throws Exception {
+        JSONObject got = new JSONObject(Core.client(context).updateJSON());
+        if (got.has("updatedFrom")) {
+            updated = true;
+        }
+        return got;
+    }
 
     private static final int RED = 0xFFE03A2F;
     private static final int LIVE = 0xFF71D888;
@@ -289,7 +298,7 @@ public class Upkeep {
             public void run() {
                 JSONObject got = null;
                 try {
-                    got = new JSONObject(Core.client(host).updateJSON());
+                    got = read(host);
                 } catch (Exception ignored) {
                 }
                 asking = false;
@@ -431,8 +440,8 @@ public class Upkeep {
         JSONObject offer = offer();
         release = info.optString("release", release);
 
-        if (info.has("updatedFrom")) {
-            info.remove("updatedFrom");
+        if (updated) {
+            updated = false;
             cheer = true;
             cheerDelayed = false;
             cheerUntil = now + 10000L;

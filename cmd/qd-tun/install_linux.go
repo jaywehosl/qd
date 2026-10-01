@@ -18,7 +18,7 @@ const updateAsset = "qd-client-linux-amd64.tar.gz"
 
 func (p hostPlatform) Install(tag string, open update.Opener, tick func(done, total int64)) error {
 	dir := filepath.Join(stateDir, "update")
-	pack, err := update.Take(open, updateAsset, dir, tick)
+	pack, err := update.Take(open, tag, updateAsset, dir, tick)
 	if err != nil {
 		return err
 	}

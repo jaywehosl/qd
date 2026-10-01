@@ -71,6 +71,14 @@ public final class Updater {
                 if (manager != null) {
                     manager.cancel(NOTE);
                 }
+                if (status != PackageInstaller.STATUS_SUCCESS) {
+                    context.getSharedPreferences(Boot.SHELF, Context.MODE_PRIVATE)
+                            .edit().remove(Boot.RESUME).apply();
+                    try {
+                        Core.client(context).updateRefused("the package installer did not install the update: " + message);
+                    } catch (Exception ignored) {
+                    }
+                }
                 return;
             }
             Intent confirm = intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent.class);

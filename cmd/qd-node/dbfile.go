@@ -146,7 +146,11 @@ func (state *controlState) dbWrite(req request) response {
 
 	state.applySelf()
 	state.syncSessions()
+	state.applyRelays()
 	state.reloadResolver()
+	if settings, err := db.NetworkSettings(); err == nil {
+		state.node.Retune(tunablesFrom(settings))
+	}
 
 	revision, _ := db.Version()
 	return reply(req, map[string]any{"restored": true, "revision": revision})

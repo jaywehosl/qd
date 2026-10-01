@@ -550,14 +550,14 @@ func orNone(text string) string {
 	return text
 }
 
-func reportSelf(ctx context.Context, db *store.DB, nodeID int) {
+func reportSelf(ctx context.Context, db func() *store.DB, nodeID int) {
 	tick := time.NewTicker(time.Minute)
 	defer tick.Stop()
 
 	for {
-		version, err := db.Version()
+		version, err := db().Version()
 		if err == nil {
-			db.RecordNodeProgress(nodeID, version, version, "online", time.Now().UnixMilli())
+			db().RecordNodeProgress(nodeID, version, version, "online", time.Now().UnixMilli())
 		}
 		select {
 		case <-ctx.Done():

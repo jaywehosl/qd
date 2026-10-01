@@ -221,7 +221,15 @@ func main() {
 	} else {
 		fmt.Printf("tls        %s, %d certificates served\n", certPath, len(tlsConf.Certificates[0].Certificate))
 	}
-	ech := newECH(db, key, settings.ECHName, func(name string) { keepECH(*confFlag, name) })
+	var state *controlState
+	held := func() *store.DB {
+		if state != nil {
+			return state.db
+		}
+		return db
+	}
+
+	ech := newECH(held, key, settings.ECHName, func(name string) { keepECH(*confFlag, name) })
 	ech.serve(tlsConf)
 	quicconn.ECH = ech.publicList
 	keepPort(*confFlag, self.Port)
@@ -236,7 +244,12 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	var state *controlState
+	shelf := &update.Shelf{
+		Dir:    filepath.Join(filepath.Dir(*dbPath), "updates"),
+		Client: &http.Client{Timeout: 10 * time.Minute},
+		Target: func() string { return mustSettings(held()).ClientVersion },
+		Log:    func(format string, args ...any) { log.Printf(format, args...) },
+	}
 
 	node := qsrv.New(qsrv.Config{
 		Listen:    fmt.Sprintf(":%d", self.Port),
@@ -250,14 +263,9 @@ func main() {
 		Relays:    relays,
 		Verify:    admission.verify,
 		Admit:     admission.admit,
-		Shelf: &update.Shelf{
-			Dir:    filepath.Join(filepath.Dir(*dbPath), "updates"),
-			Client: &http.Client{Timeout: 10 * time.Minute},
-			Target: func() string { return mustSettings(db).ClientVersion },
-			Log:    func(format string, args ...any) { log.Printf(format, args...) },
-		},
-		Peers: peersFrom(db, self.ID),
-		Tune:  func() qsrv.Tunables { return tunablesFrom(mustSettings(db)) },
+		Shelf:     shelf,
+		Peers:     peersFrom(held, self.ID),
+		Tune:      func() qsrv.Tunables { return tunablesFrom(mustSettings(held())) },
 		Ask: func(op string, body []byte, auth string) (any, error) {
 			return askNode(state, op, body, auth)
 		},
@@ -269,7 +277,7 @@ func main() {
 	state = &controlState{
 		tag: self.Tag, role: string(self.Role), address: self.Address, uuid: self.UUID,
 		enable: self.Enable, key: key, id: self.ID, port: self.Port,
-		db: db, dbPath: *dbPath, started: time.Now(),
+		db: db, dbPath: *dbPath, started: time.Now(), shelf: shelf,
 		netKey:   &netKey,
 		metrics:  startMetrics(dev, watch.Live),
 		logs:     logs,
@@ -321,7 +329,7 @@ func main() {
 	}
 
 	go node.Remember(ctx, *dbPath+".nat46")
-	go reportSelf(ctx, db, self.ID)
+	go reportSelf(ctx, held, self.ID)
 	go runNode(ctx, node)
 
 	<-ctx.Done()

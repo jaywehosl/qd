@@ -37,7 +37,7 @@ func (p hostPlatform) Install(tag string, open update.Opener, tick func(done, to
 	if err != nil {
 		return err
 	}
-	fresh, err := update.Take(open, updateAsset, filepath.Join(filepath.Dir(exe), "qd-update"), tick)
+	fresh, err := update.Take(open, tag, updateAsset, filepath.Join(filepath.Dir(exe), "qd-update"), tick)
 	if err != nil {
 		return err
 	}

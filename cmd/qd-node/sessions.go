@@ -78,6 +78,18 @@ func (state *controlState) syncSessions() {
 	}
 	state.exits = exits
 	state.byDNS = byDNS
+
+	alive := map[uint32]bool{}
+	for _, s := range state.node.Sessions() {
+		alive[s.Seat] = true
+	}
+	late := state.gate.outdated(alive)
+	for _, seat := range late {
+		state.node.Forget(seat)
+	}
+	if len(late) > 0 {
+		fmt.Printf("update     %d tunnels of outdated clients closed\n", len(late))
+	}
 }
 
 func (state *controlState) sessionStats() []sessionStat {
@@ -126,4 +138,5 @@ func (state *controlState) followUpdates() {
 		return
 	}
 	fmt.Printf("update     clients are held to %s, %d releases known\n", settings.ClientVersion, len(releases))
+	go state.shelf.Stock(settings.ClientVersion)
 }

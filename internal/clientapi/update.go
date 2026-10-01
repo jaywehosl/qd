@@ -241,3 +241,11 @@ func (a *API) noteVersion() {
 		a.updatedFrom, a.updatedAt = prev, time.Now()
 	}
 }
+
+func (a *API) InstallRefused(why string) {
+	a.upMu.Lock()
+	if a.upStatus == "installing" {
+		a.upStatus, a.upErr = "", why
+	}
+	a.upMu.Unlock()
+}

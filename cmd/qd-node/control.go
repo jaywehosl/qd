@@ -61,6 +61,7 @@ type controlState struct {
 
 	node  *qsrv.Node
 	gate  *gate
+	shelf *update.Shelf
 	exits int
 	byDNS int
 	watch *presence
@@ -325,7 +326,7 @@ func handleControl(state *controlState, req request) response {
 			return response{OK: false, Error: err.Error()}
 		}
 		state.node.Retune(tunablesFrom(settings))
-		state.followUpdates()
+		state.syncSessions()
 
 		said := map[string]any{"settings": settings, "restarting": false}
 		if moved := movedWhat(was, settings); moved != "" {
