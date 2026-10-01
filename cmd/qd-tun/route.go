@@ -3,6 +3,7 @@
 package main
 
 import (
+	"cmp"
 	"fmt"
 	"net/netip"
 	"sync/atomic"
@@ -60,7 +61,7 @@ func exitFor(src, dst netip.AddrPort, udp bool) string {
 	if udp {
 		proto = protoUDP
 	}
-	switch r.RoleForFlow(proto, src.Port(), dst.Addr()) {
+	switch r.RoleForFlow(proto, src) {
 	case clientstate.RoleEgress:
 		return anyExit
 	case clientstate.RoleNoEgress:
@@ -69,16 +70,36 @@ func exitFor(src, dst netip.AddrPort, udp bool) string {
 	return routeTag()
 }
 
-var fixedRate atomic.Int64
+var (
+	fixedRate  atomic.Int64
+	bbrProfile atomic.Pointer[string]
+)
 
-func setFixedRate(mbit int) { fixedRate.Store(int64(mbit)) }
+func setCarriage(mbit int, profile string) {
+	fixedRate.Store(int64(mbit))
+	bbrProfile.Store(&profile)
+}
 
 func rateNow() int { return int(fixedRate.Load()) }
 
-func settingsFixedRate(db *clientstate.DB) int {
+func profileNow() string {
+	if held := bbrProfile.Load(); held != nil {
+		return *held
+	}
+	return ""
+}
+
+func carriageNow() string {
+	if rate := rateNow(); rate > 0 {
+		return fmt.Sprintf("brutal %d", rate)
+	}
+	return "bbr " + cmp.Or(profileNow(), "standard")
+}
+
+func settingsCarriage(db *clientstate.DB) (int, string) {
 	settings, err := db.Settings()
 	if err != nil {
-		return 0
+		return 0, ""
 	}
-	return settings.FixedRate
+	return settings.FixedRate, settings.BBRProfile
 }

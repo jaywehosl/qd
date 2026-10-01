@@ -68,7 +68,7 @@ func runClient(opts runOptions) error {
 	settleUpdate(db)
 
 	reloadProcessRules(db)
-	setFixedRate(settingsFixedRate(db))
+	setCarriage(settingsCarriage(db))
 
 	settings, err := db.Settings()
 	if err != nil {
@@ -138,7 +138,9 @@ func runClient(opts runOptions) error {
 		},
 		Lost: func() {
 			for pause := comeBack(0); ; pause = comeBack(pause) {
-				time.Sleep(pause)
+				if !tun.swift.Swap(false) {
+					time.Sleep(pause)
+				}
 				if !tun.Wanted() || tun.Running() {
 					return
 				}

@@ -28,6 +28,7 @@ type Over struct {
 	token  string
 	device string
 	given  atomic.Pointer[[]netip.Prefix]
+	marks  int
 
 	dgramMu sync.Mutex
 	dgramW  *io.PipeWriter
@@ -95,6 +96,7 @@ func (o *Over) openDatagram(endpoint, route string) error {
 		return err
 	}
 	sign(req, o.token, o.device, route)
+	req.Header.Set(qsrv.HeaderMarks, "1")
 
 	resp, err := o.cc.RoundTrip(req)
 	if err != nil {
@@ -105,6 +107,9 @@ func (o *Over) openDatagram(endpoint, route string) error {
 		resp.Body.Close()
 		pw.Close()
 		return fmt.Errorf("datagram channel refused: %d", resp.StatusCode)
+	}
+	if resp.Header.Get(qsrv.HeaderMarks) == "1" {
+		o.marks = 1
 	}
 	o.dgramW = pw
 	o.dgramR = resp.Body
@@ -171,7 +176,11 @@ func (o *Over) ReadPacket(b []byte) (int, error) {
 	return n, nil
 }
 
-func (o *Over) WritePacket(b []byte) ([]byte, error) {
+func (o *Over) WritePacket(b []byte) ([]byte, error) { return o.WritePacketMarked(b, 0) }
+
+func (o *Over) Marked() bool { return o.marks > 0 }
+
+func (o *Over) WritePacketMarked(b []byte, mark uint64) ([]byte, error) {
 	switch {
 	case len(b) >= 20 && b[0]>>4 == 4:
 		if b[8] <= 1 {
@@ -186,9 +195,13 @@ func (o *Over) WritePacket(b []byte) ([]byte, error) {
 		}
 		b[7]--
 	}
-	frame := make([]byte, 2+len(b))
-	binary.BigEndian.PutUint16(frame, uint16(len(b)))
-	copy(frame[2:], b)
+	head := 2 + o.marks
+	frame := make([]byte, head+len(b))
+	binary.BigEndian.PutUint16(frame, uint16(o.marks+len(b)))
+	if o.marks > 0 {
+		frame[2] = byte(mark)
+	}
+	copy(frame[head:], b)
 	o.dgramMu.Lock()
 	_, err := o.dgramW.Write(frame)
 	o.dgramMu.Unlock()

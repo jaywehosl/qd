@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -271,7 +272,11 @@ func dialControl(endpoint string, keep func(fd uintptr), relays []relay.Link) (*
 			refused = append(refused, got.err.Error())
 			continue
 		}
-		roads.Remember(endpoint, got.link.cc == nil)
+		if got.link.cc != nil {
+			roads.Remember(endpoint, false)
+		} else if slices.ContainsFunc(refused, func(why string) bool { return strings.HasPrefix(why, "quic:") }) {
+			roads.Remember(endpoint, true)
+		}
 
 		left := paths - i - 1
 		go func() {

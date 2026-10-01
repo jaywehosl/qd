@@ -243,6 +243,9 @@ export default function ClientInfoModal({
                     <Tag className="ci-row__mono">{(d.fingerprint || '').slice(0, 12)}</Tag>
                     <Tag>{(d as { model?: string }).model || '—'}</Tag>
                     <Tag>{d.platform || '—'}</Tag>
+                    <Tag className="ci-row__mono" tone={d.version ? undefined : 'danger'}>
+                      {d.version || t('pages.clients.noVersion', { defaultValue: 'no version' })}
+                    </Tag>
                     <Tag>{t('pages.clients.firstSeen')}: {dateLabel(d.firstSeen)}</Tag>
                     <Tag>{t('pages.clients.lastSeen')}: {dateLabel(d.lastSeen)}</Tag>
                     </span>

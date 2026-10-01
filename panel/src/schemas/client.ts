@@ -15,6 +15,7 @@ export const ClientTrafficSchema = z.object({
 export const ClientDeviceSchema = z.object({
   fingerprint: z.string(),
   platform: z.string().optional(),
+  version: z.string().optional(),
   firstSeen: z.number().optional(),
   lastSeen: z.number().optional(),
   up: z.number().optional(),

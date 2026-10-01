@@ -20,6 +20,7 @@ export class AllSetting {
   statsSeconds = 5;
   pool = '10.7.0.0/16';
   brutalMbit = 0;
+  bbrProfile = 'standard';
   maxStreams = 65536;
   streamWindowKb = 2048;
   maxStreamWindowKb = 6144;

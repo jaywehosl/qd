@@ -16,6 +16,9 @@ type NAT struct {
 
 	realV4 atomic.Pointer[[4]byte]
 	realV6 atomic.Pointer[[16]byte]
+
+	portV4 [1 << 16]atomic.Uint32
+	portV6 [1 << 16]atomic.Pointer[[16]byte]
 }
 
 func New(assigned []netip.Addr) *NAT {
@@ -64,6 +67,11 @@ func (n *NAT) applyV4(pkt []byte, outbound bool) {
 
 	if outbound {
 		src := [4]byte(pkt[12:16])
+		if port, ok := udpPort(pkt, 4, 0); ok {
+			if from := binary.BigEndian.Uint32(src[:]); n.portV4[port].Load() != from {
+				n.portV4[port].Store(from)
+			}
+		}
 		if src == n.assignedV4 {
 			return
 		}
@@ -76,16 +84,58 @@ func (n *NAT) applyV4(pkt []byte, outbound bool) {
 		return
 	}
 
-	held := n.realV4.Load()
-	if held == nil || [4]byte(pkt[16:20]) != n.assignedV4 {
+	if [4]byte(pkt[16:20]) != n.assignedV4 {
 		return
 	}
-	copy(pkt[16:20], held[:])
-	fixIPv4Header(pkt)
-	fixL4(pkt, 4, n.assignedV4[:], held[:])
-	if pkt[9] == 1 {
-		n.fixQuoteV4(pkt, *held)
+	var real [4]byte
+	from := uint32(0)
+	if port, ok := n.portOfV4(pkt); ok {
+		from = n.portV4[port].Load()
 	}
+	if from != 0 {
+		binary.BigEndian.PutUint32(real[:], from)
+	} else if held := n.realV4.Load(); held != nil {
+		real = *held
+	} else {
+		return
+	}
+	if real == n.assignedV4 {
+		return
+	}
+	copy(pkt[16:20], real[:])
+	fixIPv4Header(pkt)
+	fixL4(pkt, 4, n.assignedV4[:], real[:])
+	if pkt[9] == 1 {
+		n.fixQuoteV4(pkt, real)
+	}
+}
+
+func (n *NAT) portOfV4(pkt []byte) (uint16, bool) {
+	if pkt[9] != 1 {
+		return udpPort(pkt, 4, 2)
+	}
+	msg := pkt[int(pkt[0]&0x0F)*4:]
+	if len(msg) < 28+8 || (msg[0] != 3 && msg[0] != 11 && msg[0] != 12) {
+		return 0, false
+	}
+	return udpPort(msg[8:], 4, 0)
+}
+
+func udpPort(pkt []byte, ver int, at int) (uint16, bool) {
+	head := 40
+	proto := byte(0)
+	if ver == 4 {
+		if len(pkt) < 20 || binary.BigEndian.Uint16(pkt[6:8])&0x1FFF != 0 {
+			return 0, false
+		}
+		head, proto = int(pkt[0]&0x0F)*4, pkt[9]
+	} else if len(pkt) >= 40 {
+		proto = pkt[6]
+	}
+	if proto != 17 || head < 20 || len(pkt) < head+4 {
+		return 0, false
+	}
+	return binary.BigEndian.Uint16(pkt[head+at:]), true
 }
 
 func (n *NAT) fixQuoteV4(pkt []byte, real [4]byte) {
@@ -110,6 +160,11 @@ func (n *NAT) applyV6(pkt []byte, outbound bool) {
 
 	if outbound {
 		src := [16]byte(pkt[8:24])
+		if port, ok := udpPort(pkt, 6, 0); ok {
+			if held := n.portV6[port].Load(); held == nil || *held != src {
+				n.portV6[port].Store(&src)
+			}
+		}
 		if src == n.assignedV6 {
 			return
 		}
@@ -121,8 +176,16 @@ func (n *NAT) applyV6(pkt []byte, outbound bool) {
 		return
 	}
 
+	if [16]byte(pkt[24:40]) != n.assignedV6 {
+		return
+	}
 	held := n.realV6.Load()
-	if held == nil || [16]byte(pkt[24:40]) != n.assignedV6 {
+	if port, ok := udpPort(pkt, 6, 2); ok {
+		if from := n.portV6[port].Load(); from != nil {
+			held = from
+		}
+	}
+	if held == nil || *held == n.assignedV6 {
 		return
 	}
 	copy(pkt[24:40], held[:])
@@ -166,6 +229,9 @@ func fixL4(pkt []byte, ver int, old, new []byte) {
 	var l4off int
 	var proto byte
 	if ver == 4 {
+		if binary.BigEndian.Uint16(pkt[6:8])&0x1FFF != 0 {
+			return
+		}
 		l4off = int(pkt[0]&0x0F) * 4
 		proto = pkt[9]
 	} else {

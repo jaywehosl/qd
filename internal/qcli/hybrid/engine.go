@@ -80,6 +80,8 @@ func (e *Engine) Run(ctx context.Context, src packet.Source, tun Tunnel) error {
 		meter: e.Meter,
 		beat:  startPulse(ctx, errc),
 		done:  ctx.Done(),
+		quit:  make(chan struct{}),
+		sent:  make(chan struct{}),
 	}
 
 	ms, multi := src.(packet.MultiSource)
@@ -89,10 +91,18 @@ func (e *Engine) Run(ctx context.Context, src packet.Source, tun Tunnel) error {
 	}
 	go func() {
 		defer e.hurry()()
-		tt.injector(ctx, writer)
+		defer close(tt.sent)
+		tt.injector(writer)
 	}()
 
-	defer e.Stack.Reset(tt, resetDrain)
+	defer func() {
+		e.Stack.Reset(tt, resetDrain)
+		close(tt.quit)
+		select {
+		case <-tt.sent:
+		case <-time.After(resetDrain):
+		}
+	}()
 	go func() { errc <- e.Stack.Run(ctx, tt) }()
 
 	if multi && e.Workers > 1 {
@@ -160,6 +170,8 @@ func (e *Engine) logStats(ctx context.Context, tt *tcpTunnel, src packet.Source)
 				tt.cWrite.Load(), tt.cBatches.Load(), avgBatch,
 				tt.cOutDrop.Load(), tt.cWriteErr.Load(), sunk, pct)
 			log.Printf("  stack: %s", e.Stack.DebugStats())
+			bbr, brutal := quic.CongestionSenders()
+			log.Printf("  senders: bbr=%d brutal=%d since the client started", bbr, brutal)
 		}
 	}
 }
@@ -203,6 +215,9 @@ func (e *Engine) pumpOutbound(ctx context.Context, rd packet.Reader, src packet.
 			icmp, err := e.carry(tun, p.Data)
 			if err != nil {
 				e.cWriteErr.Add(1)
+				continue
+			}
+			if len(icmp) > 0 && e.inPieces(tun, p.Data) {
 				continue
 			}
 			if len(icmp) > 0 {
@@ -307,6 +322,8 @@ type tcpTunnel struct {
 	meter *Meter
 	beat  *pulse
 	done  <-chan struct{}
+	quit  chan struct{}
+	sent  chan struct{}
 }
 
 func (t *tcpTunnel) take(pkt []byte, into chan []byte) bool {
@@ -356,7 +373,7 @@ func (t *tcpTunnel) WritePacket(b []byte) ([]byte, error) {
 
 const injectGather = 300 * time.Microsecond
 
-func (t *tcpTunnel) injector(ctx context.Context, w packet.Writer) {
+func (t *tcpTunnel) injector(w packet.Writer) {
 	batch := make([]packet.Packet, 0, maxInboundBatch)
 	timer := time.NewTimer(time.Hour)
 	defer timer.Stop()
@@ -364,16 +381,23 @@ func (t *tcpTunnel) injector(ctx context.Context, w packet.Writer) {
 		<-timer.C
 	}
 
+	last := false
 	for {
 		var first []byte
 		select {
-		case <-ctx.Done():
-			return
-		case d, ok := <-t.out:
-			if !ok {
+		case d := <-t.out:
+			first = d
+		default:
+			if last {
 				return
 			}
-			first = d
+			select {
+			case <-t.quit:
+				last = true
+				continue
+			case d := <-t.out:
+				first = d
+			}
 		}
 		batch = append(batch[:0], packet.Packet{Data: first, Dir: packet.Inbound})
 
@@ -424,6 +448,18 @@ func (e *Engine) carry(tun Tunnel, pkt []byte) ([]byte, error) {
 	}
 	return marked.WritePacketMarked(pkt, e.Mark(pkt))
 }
+
+func (e *Engine) inPieces(tun Tunnel, pkt []byte) bool {
+	pieces := ippkt.Fragments4(pkt, pieceSize)
+	for _, piece := range pieces {
+		if icmp, err := e.carry(tun, piece); err != nil || len(icmp) > 0 {
+			return false
+		}
+	}
+	return len(pieces) > 0
+}
+
+const pieceSize = 1200
 
 func (e *Engine) hurry() func() {
 	if e.Fast == nil {

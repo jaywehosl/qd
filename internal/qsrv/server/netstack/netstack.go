@@ -42,7 +42,7 @@ type Dialer interface {
 }
 
 type Stack struct {
-	opened func(port uint16, shut io.Closer) func()
+	opened func(src netip.AddrPort, shut io.Closer) func()
 
 	stack    *stack.Stack
 	ep       *channel.Endpoint
@@ -225,33 +225,71 @@ func (s *Stack) handleUDP(r *udp.ForwarderRequest) {
 
 	src := netip.AddrPortFrom(toNetip(id.RemoteAddress), id.RemotePort)
 
-	outbound, err := s.dialer.DialUDP(fromFlow(context.Background(), src, dst, true), dst)
-	if err != nil {
-		log.Printf("netstack: udp dial %s: %v (packet dropped)", dst, err)
-		return
-	}
 	var wq waiter.Queue
 	ep, tcperr := r.CreateEndpoint(&wq)
 	if tcperr != nil {
-		outbound.Close()
 		return
 	}
 	inbound := gonet.NewUDPConn(s.stack, &wq, ep)
-	shut := &shutBoth{inbound, outbound}
+	flow := &udpFlow{in: inbound}
 	release := func() {}
 	if s.opened != nil {
-		release = s.opened(id.RemotePort, shut)
+		release = s.opened(src, flow)
 	}
-	held := s.keepFlow(Flow{Src: src, Dst: dst, UDP: true}, shut)
-	idle := udpIdle
-	if dst.Port() == 53 {
-		idle = dnsIdle
-	}
+	held := s.keepFlow(Flow{Src: src, Dst: dst, UDP: true}, flow)
+
 	go func() {
+		defer release()
+		defer s.dropFlow(held)
+
+		ctx, cancel := context.WithTimeout(fromFlow(context.Background(), src, dst, true), dialTimeout)
+		outbound, err := s.dialer.DialUDP(ctx, dst)
+		cancel()
+		if err != nil {
+			log.Printf("netstack: udp dial %s: %v (flow dropped)", dst, err)
+			flow.Close()
+			return
+		}
+		if !flow.attach(outbound) {
+			return
+		}
+		idle := udpIdle
+		if dst.Port() == 53 {
+			idle = dnsIdle
+		}
 		pipeIdle(inbound, outbound, idle)
-		s.dropFlow(held)
-		release()
 	}()
+}
+
+type udpFlow struct {
+	mu   sync.Mutex
+	in   net.Conn
+	out  net.Conn
+	shut bool
+}
+
+func (f *udpFlow) attach(out net.Conn) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.shut {
+		out.Close()
+		return false
+	}
+	f.out = out
+	return true
+}
+
+func (f *udpFlow) Close() error {
+	f.mu.Lock()
+	f.shut = true
+	out := f.out
+	f.mu.Unlock()
+
+	f.in.Close()
+	if out != nil {
+		out.Close()
+	}
+	return nil
 }
 
 const (
@@ -301,7 +339,7 @@ func pipeIdle(a, b net.Conn, idle time.Duration) {
 	}
 }
 
-func (s *Stack) OnFlow(fn func(port uint16, shut io.Closer) func()) { s.opened = fn }
+func (s *Stack) OnFlow(fn func(src netip.AddrPort, shut io.Closer) func()) { s.opened = fn }
 
 func (s *Stack) keepFlow(f Flow, shut io.Closer) uint64 {
 	id := s.nextFlow.Add(1)

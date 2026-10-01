@@ -60,10 +60,12 @@ type Client struct {
 	session   uint32
 	mtu       int
 	rate      atomic.Int64
+	profile   atomic.Pointer[string]
 	netTag    string
 	quit      chan struct{}
 
 	running  bool
+	carried  string
 	wanted   atomic.Bool
 	stop     chan struct{}
 	live     *qcli.Tunnel
@@ -108,6 +110,7 @@ func Open(stateDir string, host Host, protector Protector, deviceID, model, name
 		},
 	}
 	c.rate.Store(int64(settings.FixedRate))
+	c.profile.Store(&settings.BBRProfile)
 	c.seen = clientapi.NewVisits(db, adblock.Default(), settings.Adblock)
 	c.marks = newMarks(host)
 	c.marks.reload(db)

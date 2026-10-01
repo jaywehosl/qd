@@ -22,6 +22,7 @@ export const AllSettingSchema = z.object({
   statsSeconds: nonNegativeInt.optional(),
   pool: z.string().optional(),
   brutalMbit: nonNegativeInt.optional(),
+  bbrProfile: z.string().optional(),
   maxStreams: nonNegativeInt.optional(),
   streamWindowKb: nonNegativeInt.optional(),
   maxStreamWindowKb: nonNegativeInt.optional(),

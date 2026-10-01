@@ -28,6 +28,7 @@ func (claim deviceClaim) device() store.Device {
 		Model:       claim.Model,
 		Kind:        claim.Kind,
 		Name:        claim.Name,
+		Version:     claim.built(),
 	}
 }
 
@@ -72,6 +73,13 @@ func (state *controlState) seeAgain(client netstate.Client, claim deviceClaim) {
 		return
 	}
 	state.db.RecordDevice(client.ID, state.id, claim.device(), time.Now().UnixMilli())
+}
+
+func (claim deviceClaim) built() string {
+	if claim.Build == "core" && claim.Version != "" {
+		return claim.Version + " core"
+	}
+	return claim.Version
 }
 
 func judged(settings store.NetworkSettings, group *netstate.Group, claim deviceClaim) update.Verdict {

@@ -38,6 +38,8 @@ type Carried struct {
 
 const defaultWait = 20 * time.Second
 
+const shutGrace = time.Second
+
 func Carry(ctx context.Context, p Plan) (*Carried, error) {
 	if len(p.Dial.Endpoints) == 0 {
 		return nil, errors.New("no entrypoint to dial")
@@ -119,7 +121,7 @@ func Carry(ctx context.Context, p Plan) (*Carried, error) {
 			close(out.Released)
 		})
 	}
-	context.AfterFunc(round, shut)
+	context.AfterFunc(round, func() { time.AfterFunc(shutGrace, shut) })
 
 	go func() {
 		defer close(out.Gone)

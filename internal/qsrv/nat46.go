@@ -251,7 +251,7 @@ const keepEvery = 20 * time.Second
 
 func endsHere(d netstack.Dialer, dst netip.Addr) bool {
 	switch d := d.(type) {
-	case netstack.NetDialer:
+	case here:
 		return true
 	case steering:
 		return !d.node.steer.has(dst)

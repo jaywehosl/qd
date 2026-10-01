@@ -130,6 +130,7 @@ func (state *controlState) dbWrite(req request) response {
 		return response{OK: false, Error: err.Error()}
 	}
 
+	was, _ := state.db.NetworkSettings()
 	state.db.Close()
 	for _, suffix := range []string{"-wal", "-shm"} {
 		os.Remove(state.dbPath + suffix)
@@ -150,6 +151,10 @@ func (state *controlState) dbWrite(req request) response {
 	state.reloadResolver()
 	if settings, err := db.NetworkSettings(); err == nil {
 		state.node.Retune(tunablesFrom(settings))
+		if moved := movedWhat(was, settings); moved != "" {
+			fmt.Printf("datapath   %s changed with the copied database, restarting\n", moved)
+			state.restartSoon()
+		}
 	}
 
 	revision, _ := db.Version()

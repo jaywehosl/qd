@@ -5,27 +5,92 @@ package main
 import (
 	"bufio"
 	"encoding/binary"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
+	"time"
 
 	"golang.org/x/sys/unix"
 
 	"github.com/jaywehosl/qd/internal/clientstate"
 )
 
+const (
+	tableTTL      = 5 * time.Second
+	missCooldown  = 40 * time.Millisecond
+	ownerStep     = 2 * time.Millisecond
+	ownerPatience = 60 * time.Millisecond
+)
+
+type platformRouter struct {
+	tbl     atomic.Pointer[map[portKey]uint32]
+	refresh chan struct{}
+}
+
+func (r *procRouter) start() {
+	r.plat.refresh = make(chan struct{}, 1)
+	go r.keepTable()
+}
+
+func (r *procRouter) flush() {}
+
+func (r *procRouter) pidOf(key portKey, _ netip.Addr) (pid uint32, found, read bool) {
+	other := key
+	other.v6 = !key.v6
+	for waited := time.Duration(0); ; waited += ownerStep {
+		if held := r.plat.tbl.Load(); held != nil {
+			if pid, ok := (*held)[key]; ok {
+				return pid, true, true
+			}
+			if pid, ok := (*held)[other]; ok {
+				return pid, true, true
+			}
+		}
+		if waited >= ownerPatience {
+			return 0, false, true
+		}
+		select {
+		case r.plat.refresh <- struct{}{}:
+		default:
+		}
+		time.Sleep(ownerStep)
+	}
+}
+
+func (r *procRouter) keepTable() {
+	tick := time.NewTicker(tableTTL)
+	defer tick.Stop()
+	for {
+		if r.fixed.Load() == nil {
+			next := make(map[portKey]uint32, 512)
+			readSockets(next)
+			if len(next) > 0 {
+				r.plat.tbl.Store(&next)
+			}
+		}
+		select {
+		case <-tick.C:
+		case <-r.plat.refresh:
+			time.Sleep(missCooldown)
+		}
+	}
+}
+
 func readSockets(into map[portKey]uint32) {
 	inodes := map[uint64]portKey{}
 	for _, t := range []struct {
 		file  string
 		proto uint8
+		v6    bool
 	}{
-		{"/proc/net/tcp", protoTCP}, {"/proc/net/tcp6", protoTCP},
-		{"/proc/net/udp", protoUDP}, {"/proc/net/udp6", protoUDP},
+		{"/proc/net/tcp", protoTCP, false}, {"/proc/net/tcp6", protoTCP, true},
+		{"/proc/net/udp", protoUDP, false}, {"/proc/net/udp6", protoUDP, true},
 	} {
-		readNetTable(t.file, t.proto, inodes)
+		readNetTable(t.file, t.proto, t.v6, inodes)
 	}
 	if len(inodes) == 0 {
 		return
@@ -37,7 +102,7 @@ func readSockets(into map[portKey]uint32) {
 	})
 }
 
-func readNetTable(file string, proto uint8, into map[uint64]portKey) {
+func readNetTable(file string, proto uint8, v6 bool, into map[uint64]portKey) {
 	f, err := os.Open(file)
 	if err != nil {
 		return
@@ -63,7 +128,7 @@ func readNetTable(file string, proto uint8, into map[uint64]portKey) {
 		if err != nil || inode == 0 {
 			continue
 		}
-		into[inode] = portKey{proto: proto, port: uint16(port)}
+		into[inode] = portKey{proto: proto, v6: v6, port: uint16(port)}
 	}
 }
 
@@ -114,9 +179,10 @@ func (r *procRouter) dropRerouted() int {
 	if oldPath == nil && oldName == nil {
 		return 0
 	}
+	identFor := identMemo()
 	return dropTunnelled(func(pid uint32) bool {
-		ident, ok := r.identFor(pid)
-		return ok && r.roleOf(ident, oldPath, oldName, oldDef) != r.roleOf(ident, newPath, newName, newDef)
+		ident, ok := identFor(pid)
+		return ok && roleIn(ident, oldPath, oldName, oldDef) != roleIn(ident, newPath, newName, newDef)
 	})
 }
 
@@ -127,12 +193,11 @@ func (r *procRouter) dropInherited() int {
 		byPath, byName, def = r.byPath, r.byName, r.def
 		r.mu.RUnlock()
 	}
+	identFor := identMemo()
 	return dropTunnelled(func(pid uint32) bool {
 		role := def
-		if r != nil {
-			if ident, ok := r.identFor(pid); ok {
-				role = r.roleOf(ident, byPath, byName, def)
-			}
+		if ident, ok := identFor(pid); ok {
+			role = roleIn(ident, byPath, byName, def)
 		}
 		return role == clientstate.RoleTunnel
 	})

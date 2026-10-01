@@ -21,6 +21,8 @@ import (
 	"syscall"
 	"time"
 
+	quic "github.com/quic-go/quic-go"
+
 	"github.com/jaywehosl/qd/internal/netstate"
 	"github.com/jaywehosl/qd/internal/qdcrypt"
 	"github.com/jaywehosl/qd/internal/qsrv"
@@ -293,6 +295,8 @@ func main() {
 			if err != nil {
 				binary = os.Args[0]
 			}
+			os.Unsetenv("QD_BRUTAL_MBPS")
+			os.Unsetenv("QD_BBR_PROFILE")
 			fatal("restart: %v", syscall.Exec(binary, os.Args, os.Environ()))
 		},
 	}
@@ -309,13 +313,15 @@ func main() {
 	go state.recordTelemetry()
 
 	fmt.Printf("quic       udp/%d, authority %s, pool %s\n", self.Port, authority, settings.Pool)
+	os.Unsetenv("QD_BRUTAL_MBPS")
+	os.Setenv("QD_BBR_PROFILE", settings.BBRProfile)
 	if settings.BrutalMbit > 0 {
 		os.Setenv("QD_BRUTAL_MBPS", fmt.Sprint(settings.BrutalMbit))
 		fmt.Printf("congestion brutal, %d Mbit/s regardless of loss\n", settings.BrutalMbit)
 	} else if os.Getenv("QD_CC") == "cubic" {
 		fmt.Printf("congestion cubic\n")
 	} else {
-		fmt.Printf("congestion bbr\n")
+		fmt.Printf("congestion bbr, %s profile\n", settings.BBRProfile)
 	}
 	fmt.Println()
 
@@ -366,8 +372,9 @@ func printStats(node *qsrv.Node) {
 	sessions, transits, refused := node.Live()
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)
-	fmt.Printf("sessions=%d transits=%d refused=%d goroutines=%d heap=%dMB sys=%dMB\n",
-		sessions, transits, refused, runtime.NumGoroutine(), mem.HeapAlloc>>20, mem.Sys>>20)
+	bbr, brutal := quic.CongestionSenders()
+	fmt.Printf("sessions=%d transits=%d refused=%d goroutines=%d heap=%dMB sys=%dMB senders bbr=%d brutal=%d\n",
+		sessions, transits, refused, runtime.NumGoroutine(), mem.HeapAlloc>>20, mem.Sys>>20, bbr, brutal)
 
 	for _, s := range node.Sessions() {
 		if s.PktUp == 0 && s.PktDown == 0 {

@@ -32,6 +32,7 @@ type Standing struct {
 	Relays         []relay.Link `json:"relays"`
 	Admin          bool         `json:"admin"`
 	FixedRate      int          `json:"fixedRate"`
+	BBRProfile     string       `json:"bbrProfile"`
 	Peers          []string     `json:"peers"`
 	ECH            []byte       `json:"ech"`
 	Update         *Offer       `json:"update"`

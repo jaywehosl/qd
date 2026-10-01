@@ -4,6 +4,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/jaywehosl/qd/internal/clientapi"
 	"github.com/jaywehosl/qd/internal/clientstate"
@@ -41,7 +42,13 @@ func (p hostPlatform) SetExit(egress bool) {
 	go flushSystemDNS()
 }
 
-func (p hostPlatform) SetFixedRate(mbit int) { setFixedRate(mbit) }
+func (p hostPlatform) SetCarriage(mbit int, profile string) {
+	setCarriage(mbit, profile)
+	if held := p.tun.Carried(); held != "" && held != carriageNow() {
+		fmt.Println("carriage the congestion control changed, the tunnel comes back with it")
+		p.tun.Redial()
+	}
+}
 
 func (p hostPlatform) SyncControlRelays(relays []relay.Link) { nodeTalk.SetRelays(relays) }
 

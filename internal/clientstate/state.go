@@ -204,8 +204,9 @@ type Settings struct {
 	Egress  bool `json:"-"`
 	Adblock bool `json:"-"`
 
-	FixedRate  int  `json:"fixedRate"`
-	RatePinned bool `json:"ratePinned"`
+	FixedRate  int    `json:"fixedRate"`
+	RatePinned bool   `json:"ratePinned"`
+	BBRProfile string `json:"-"`
 }
 
 func defaultSettings() Settings {
@@ -251,6 +252,8 @@ func (d *DB) Settings() (Settings, error) {
 			s.FixedRate = atoiOr(v, 0)
 		case "ratePinned":
 			s.RatePinned = v == "1"
+		case "bbrProfile":
+			s.BBRProfile = v
 		}
 	}
 	return s, rows.Err()
@@ -274,6 +277,7 @@ func (d *DB) SaveSettings(s Settings) error {
 		"adblock":            boolText(s.Adblock),
 		"fixedRate":          strconv.Itoa(s.FixedRate),
 		"ratePinned":         boolText(s.RatePinned),
+		"bbrProfile":         s.BBRProfile,
 	} {
 		if _, err := tx.Exec(
 			`INSERT INTO settings (key, value) VALUES (?, ?)

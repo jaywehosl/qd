@@ -1,5 +1,5 @@
---- a/connection.go	2026-09-29 23:22:11.735176600 +0300
-+++ b/connection.go	2026-09-29 23:22:11.988418400 +0300
+--- a/connection.go	2026-10-02 02:05:30.378748700 +0300
++++ b/connection.go	2026-10-02 02:05:30.966305900 +0300
 @@ -8,6 +8,7 @@
  	"fmt"
  	"io"
@@ -108,14 +108,15 @@
 +	})
 +	c.qdFreqSeq++
 +}
---- a/datagram_queue.go	2026-09-29 23:22:11.690467000 +0300
-+++ b/datagram_queue.go	2026-09-29 23:22:11.988418400 +0300
-@@ -3,15 +3,35 @@
+--- a/datagram_queue.go	2026-10-02 02:05:30.258888300 +0300
++++ b/datagram_queue.go	2026-10-02 02:05:30.966305900 +0300
+@@ -3,15 +3,38 @@
  import (
  	"context"
  	"sync"
 +	"sync/atomic"
  
++	"github.com/quic-go/quic-go/internal/ackhandler"
  	"github.com/quic-go/quic-go/internal/utils"
  	"github.com/quic-go/quic-go/internal/utils/ringbuffer"
  	"github.com/quic-go/quic-go/internal/wire"
@@ -135,6 +136,8 @@
 +	return datagramsRcvd.Load(), datagramsDropped.Load()
 +}
 +
++func CongestionSenders() (bbr, brutal uint64) { return ackhandler.QDSenders() }
++
  const (
 -	maxDatagramSendQueueLen = 32
 -	maxDatagramRcvQueueLen  = 128
@@ -148,7 +151,7 @@
  )
  
  type datagramQueue struct {
-@@ -104,8 +124,13 @@
+@@ -104,8 +127,13 @@
  		}
  	}
  	h.rcvMx.Unlock()
@@ -164,8 +167,8 @@
  	}
  }
  
---- a/interface.go	2026-09-29 23:22:11.726750200 +0300
-+++ b/interface.go	2026-09-29 23:22:11.868643200 +0300
+--- a/interface.go	2026-10-02 02:05:30.359201500 +0300
++++ b/interface.go	2026-10-02 02:05:30.699105600 +0300
 @@ -39,6 +39,14 @@
  	rtt  time.Duration
  }
@@ -181,8 +184,8 @@
  type TokenStore interface {
  	// Pop searches for a ClientToken associated with the given key.
  	// Since tokens are not supposed to be reused, it must remove the token from the cache.
---- a/internal/ackhandler/received_packet_handler.go	2026-09-29 23:22:11.745989500 +0300
-+++ b/internal/ackhandler/received_packet_handler.go	2026-09-29 23:22:11.972369400 +0300
+--- a/internal/ackhandler/received_packet_handler.go	2026-10-02 02:05:30.406270900 +0300
++++ b/internal/ackhandler/received_packet_handler.go	2026-10-02 02:05:30.929583300 +0300
 @@ -77,6 +77,14 @@
  	}
  }
@@ -198,8 +201,8 @@
  func (h *ReceivedPacketHandler) GetAlarmTimeout() monotime.Time {
  	return h.appDataPackets.GetAlarmTimeout()
  }
---- a/internal/ackhandler/received_packet_tracker.go	2026-09-29 23:22:11.743979500 +0300
-+++ b/internal/ackhandler/received_packet_tracker.go	2026-09-29 23:22:11.971851800 +0300
+--- a/internal/ackhandler/received_packet_tracker.go	2026-10-02 02:05:30.399250900 +0300
++++ b/internal/ackhandler/received_packet_tracker.go	2026-10-02 02:05:30.928032300 +0300
 @@ -91,6 +91,10 @@
  	maxAckDelay time.Duration
  	ackQueued   bool // true if we need send a new ACK
@@ -246,14 +249,15 @@
 +	h.ackQueued = true
 +	h.ackAlarm = 0
 +}
---- a/internal/ackhandler/sent_packet_handler.go	2026-09-29 23:22:11.744982500 +0300
-+++ b/internal/ackhandler/sent_packet_handler.go	2026-09-29 23:22:11.976301200 +0300
-@@ -3,9 +3,12 @@
+--- a/internal/ackhandler/sent_packet_handler.go	2026-10-02 02:05:30.401755500 +0300
++++ b/internal/ackhandler/sent_packet_handler.go	2026-10-02 02:05:30.934789900 +0300
+@@ -3,9 +3,13 @@
  import (
  	"errors"
  	"fmt"
 +	"os"
 +	"strconv"
++	"sync/atomic"
  	"time"
  
  	"github.com/quic-go/quic-go/internal/congestion"
@@ -261,7 +265,7 @@
  	"github.com/quic-go/quic-go/internal/monotime"
  	"github.com/quic-go/quic-go/internal/protocol"
  	"github.com/quic-go/quic-go/internal/qerr"
-@@ -90,6 +93,9 @@
+@@ -90,6 +94,9 @@
  	bytesInFlight protocol.ByteCount
  
  	congestion congestion.SendAlgorithmWithDebugInfos
@@ -271,7 +275,7 @@
  	rttStats   *utils.RTTStats
  	connStats  *utils.ConnectionStats
  
-@@ -129,16 +135,10 @@
+@@ -129,16 +136,10 @@
  	qlogger qlogwriter.Recorder,
  	logger utils.Logger,
  ) SentPacketHandler {
@@ -290,7 +294,7 @@
  		peerCompletedAddressValidation: pers == protocol.PerspectiveServer,
  		peerAddressValidated:           pers == protocol.PerspectiveClient || clientAddressValidated,
  		initialPackets:                 newPacketNumberSpace(initialPN, false),
-@@ -197,6 +197,9 @@
+@@ -197,6 +198,9 @@
  		// see section 4.9.2 of RFC 9001.
  		h.handshakeConfirmed = true
  		h.handshakePackets = nil
@@ -300,7 +304,7 @@
  	case protocol.Encryption0RTT:
  		// This function is only called when 0-RTT is rejected,
  		// and not when the client drops 0-RTT keys when the handshake completes.
-@@ -435,10 +438,12 @@
+@@ -435,10 +439,12 @@
  	if encLevel == protocol.Encryption1RTT {
  		h.detectLostPathProbes(rcvTime)
  	}
@@ -313,7 +317,7 @@
  		}
  		if p.EncryptionLevel == protocol.Encryption1RTT {
  			acked1RTTPacket = true
-@@ -448,6 +453,9 @@
+@@ -448,6 +454,9 @@
  			putPacket(p.packet)
  		}
  	}
@@ -323,7 +327,7 @@
  
  	// detect spurious losses for application data packets, if the ACK was not reordered
  	if encLevel == protocol.Encryption1RTT && largestAcked == pnSpace.largestAcked {
-@@ -785,6 +793,7 @@
+@@ -785,6 +794,7 @@
  }
  
  func (h *sentPacketHandler) detectLostPackets(now monotime.Time, encLevel protocol.EncryptionLevel) {
@@ -331,7 +335,7 @@
  	pnSpace := h.getPacketNumberSpace(encLevel)
  	pnSpace.lossTime = 0
  
-@@ -856,6 +865,7 @@
+@@ -856,6 +866,7 @@
  				if !p.IsPathMTUProbePacket {
  					h.congestion.OnCongestionEvent(pn, p.Length, priorInFlight)
  				}
@@ -339,7 +343,7 @@
  				if encLevel == protocol.Encryption1RTT && h.ecnTracker != nil {
  					h.ecnTracker.LostPacket(pn)
  				}
-@@ -884,7 +894,11 @@
+@@ -884,7 +895,11 @@
  			})
  		}
  		// Early retransmit or time loss detection
@@ -351,7 +355,7 @@
  		return nil
  	}
  
-@@ -1028,6 +1042,7 @@
+@@ -1028,6 +1043,7 @@
  }
  
  func (h *sentPacketHandler) SetMaxDatagramSize(s protocol.ByteCount) {
@@ -359,7 +363,7 @@
  	h.congestion.SetMaxDatagramSize(s)
  }
  
-@@ -1131,13 +1146,60 @@
+@@ -1131,13 +1147,70 @@
  	for pn := range h.appDataPackets.history.PathProbes() {
  		h.appDataPackets.history.RemovePathProbe(pn)
  	}
@@ -387,6 +391,7 @@
 +	confirmed bool,
 +) congestion.SendAlgorithmWithDebugInfos {
 +	if mbps := qdBrutalMbps(); mbps > 0 {
++		qdBrutalMade.Add(1)
 +		return congestion.NewBrutalSender(
 +			congestion.DefaultClock{},
 +			rttStats,
@@ -412,6 +417,10 @@
 -	h.setLossDetectionTimer(now)
 +}
 +
++var qdBBRMade, qdBrutalMade atomic.Uint64
++
++func QDSenders() (bbr, brutal uint64) { return qdBBRMade.Load(), qdBrutalMade.Load() }
++
 +func qdBrutalMbps() int {
 +	mbps, _ := strconv.Atoi(os.Getenv("QD_BRUTAL_MBPS"))
 +	return mbps
@@ -422,12 +431,17 @@
 +}
 +
 +func qdNewBBR(rttStats *utils.RTTStats, maxDatagramSize protocol.ByteCount) congestion.SendAlgorithmWithDebugInfos {
-+	s := bbr.NewBbrSender(bbr.DefaultClock{}, maxDatagramSize, bbr.ProfileStandard)
++	qdBBRMade.Add(1)
++	profile, err := bbr.ParseProfile(os.Getenv("QD_BBR_PROFILE"))
++	if err != nil {
++		profile = bbr.ProfileStandard
++	}
++	s := bbr.NewBbrSender(bbr.DefaultClock{}, maxDatagramSize, profile)
 +	s.SetRTTStatsProvider(rttStats)
 +	return s
  }
 --- a/internal/congestion/bbr/LICENSE.md	1970-01-01 03:00:00.000000000 +0300
-+++ b/internal/congestion/bbr/LICENSE.md	2026-09-29 23:22:11.984281300 +0300
++++ b/internal/congestion/bbr/LICENSE.md	2026-10-02 02:05:30.949115800 +0300
 @@ -0,0 +1,7 @@
 +Copyright 2023 Toby
 +
@@ -437,7 +451,7 @@
 +
 +THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 --- a/internal/congestion/bbr/bandwidth.go	1970-01-01 03:00:00.000000000 +0300
-+++ b/internal/congestion/bbr/bandwidth.go	2026-09-29 23:22:11.983755400 +0300
++++ b/internal/congestion/bbr/bandwidth.go	2026-10-02 02:05:30.948598300 +0300
 @@ -0,0 +1,27 @@
 +package bbr
 +
@@ -467,7 +481,7 @@
 +	return Bandwidth(bytes) * Bandwidth(time.Second) / Bandwidth(delta) * BytesPerSecond
 +}
 --- a/internal/congestion/bbr/bandwidth_sampler.go	1970-01-01 03:00:00.000000000 +0300
-+++ b/internal/congestion/bbr/bandwidth_sampler.go	2026-09-29 23:22:11.983625900 +0300
++++ b/internal/congestion/bbr/bandwidth_sampler.go	2026-10-02 02:05:30.948598300 +0300
 @@ -0,0 +1,878 @@
 +package bbr
 +
@@ -1348,7 +1362,7 @@
 +	return time.Duration(bytes*8) * time.Second / time.Duration(bandwidth)
 +}
 --- a/internal/congestion/bbr/bbr_sender.go	1970-01-01 03:00:00.000000000 +0300
-+++ b/internal/congestion/bbr/bbr_sender.go	2026-09-29 23:22:11.982603000 +0300
++++ b/internal/congestion/bbr/bbr_sender.go	2026-10-02 02:05:30.947045300 +0300
 @@ -0,0 +1,1088 @@
 +package bbr
 +
@@ -2439,7 +2453,7 @@
 +	return fmt.Sprintf("%.2f %s", bwf, units[unitIndex])
 +}
 --- a/internal/congestion/bbr/clock.go	1970-01-01 03:00:00.000000000 +0300
-+++ b/internal/congestion/bbr/clock.go	2026-09-29 23:22:11.982603000 +0300
++++ b/internal/congestion/bbr/clock.go	2026-10-02 02:05:30.947560800 +0300
 @@ -0,0 +1,18 @@
 +package bbr
 +
@@ -2460,7 +2474,7 @@
 +	return monotime.Now()
 +}
 --- a/internal/congestion/bbr/pacer.go	1970-01-01 03:00:00.000000000 +0300
-+++ b/internal/congestion/bbr/pacer.go	2026-09-29 23:22:11.984281300 +0300
++++ b/internal/congestion/bbr/pacer.go	2026-10-02 02:05:30.949637700 +0300
 @@ -0,0 +1,80 @@
 +package bbr
 +
@@ -2543,7 +2557,7 @@
 +	p.maxDatagramSize = s
 +}
 --- a/internal/congestion/bbr/packet_number_indexed_queue.go	1970-01-01 03:00:00.000000000 +0300
-+++ b/internal/congestion/bbr/packet_number_indexed_queue.go	2026-09-29 23:22:11.982603000 +0300
++++ b/internal/congestion/bbr/packet_number_indexed_queue.go	2026-10-02 02:05:30.947560800 +0300
 @@ -0,0 +1,199 @@
 +package bbr
 +
@@ -2745,7 +2759,7 @@
 +	return ew
 +}
 --- a/internal/congestion/bbr/ringbuffer.go	1970-01-01 03:00:00.000000000 +0300
-+++ b/internal/congestion/bbr/ringbuffer.go	2026-09-29 23:22:11.983114500 +0300
++++ b/internal/congestion/bbr/ringbuffer.go	2026-10-02 02:05:30.948077800 +0300
 @@ -0,0 +1,118 @@
 +package bbr
 +
@@ -2866,7 +2880,7 @@
 +	r.headPos, r.tailPos, r.full = 0, 0, false
 +}
 --- a/internal/congestion/bbr/windowed_filter.go	1970-01-01 03:00:00.000000000 +0300
-+++ b/internal/congestion/bbr/windowed_filter.go	2026-09-29 23:22:11.984801900 +0300
++++ b/internal/congestion/bbr/windowed_filter.go	2026-10-02 02:05:30.949637700 +0300
 @@ -0,0 +1,162 @@
 +package bbr
 +
@@ -3031,7 +3045,7 @@
 +	f.estimates = make([]entry[V, T], 3, 3)
 +}
 --- a/internal/congestion/brutal_sender.go	1970-01-01 03:00:00.000000000 +0300
-+++ b/internal/congestion/brutal_sender.go	2026-09-29 23:22:11.980010400 +0300
++++ b/internal/congestion/brutal_sender.go	2026-10-02 02:05:30.943288200 +0300
 @@ -0,0 +1,92 @@
 +package congestion
 +
@@ -3125,8 +3139,8 @@
 +func (b *brutalSender) InRecovery() bool                    { return false }
 +func (b *brutalSender) GetSlowStartThreshold() protocol.ByteCount { return 0 }
 +func (b *brutalSender) BandwidthEstimate() Bandwidth        { return b.bps }
---- a/internal/congestion/interface.go	2026-09-29 23:22:11.751813200 +0300
-+++ b/internal/congestion/interface.go	2026-09-29 23:22:11.982091800 +0300
+--- a/internal/congestion/interface.go	2026-10-02 02:05:30.417563600 +0300
++++ b/internal/congestion/interface.go	2026-10-02 02:05:30.946529700 +0300
 @@ -25,3 +25,18 @@
  	InRecovery() bool
  	GetCongestionWindow() protocol.ByteCount
@@ -3146,8 +3160,17 @@
 +type SendAlgorithmEx interface {
 +	OnCongestionEventEx(priorInFlight protocol.ByteCount, eventTime monotime.Time, ackedPackets []AckedPacketInfo, lostPackets []LostPacketInfo)
 +}
---- a/internal/protocol/params.go	2026-09-29 23:22:11.766664400 +0300
-+++ b/internal/protocol/params.go	2026-09-29 23:22:11.963195700 +0300
+--- a/internal/protocol/params.go	2026-10-02 02:05:30.454238200 +0300
++++ b/internal/protocol/params.go	2026-10-02 02:05:30.911511400 +0300
+@@ -78,7 +78,7 @@
+ 
+ // MaxStreamFrameSorterGaps is the maximum number of gaps between received StreamFrames
+ // prevents DoS attacks against the streamFrameSorter
+-const MaxStreamFrameSorterGaps = 1000
++const MaxStreamFrameSorterGaps = 10000
+ 
+ // MinStreamFrameBufferSize is the minimum data length of a received STREAM frame
+ // that we use the buffer for. This protects against a DoS where an attacker would send us
 @@ -149,6 +149,8 @@
  // MaxAckDelay is the maximum time by which we delay sending ACKs.
  const MaxAckDelay = 25 * time.Millisecond
@@ -3157,8 +3180,8 @@
  // MaxAckDelayInclGranularity is the max_ack_delay including the timer granularity.
  // This is the value that should be advertised to the peer.
  const MaxAckDelayInclGranularity = MaxAckDelay + TimerGranularity
---- a/internal/wire/short_header.go	2026-09-29 23:22:11.789803400 +0300
-+++ b/internal/wire/short_header.go	2026-09-29 23:22:11.954924400 +0300
+--- a/internal/wire/short_header.go	2026-10-02 02:05:30.508475600 +0300
++++ b/internal/wire/short_header.go	2026-10-02 02:05:30.894672200 +0300
 @@ -18,9 +18,6 @@
  	if data[0]&0x80 > 0 {
  		return 0, 0, 0, 0, errors.New("not a short header packet")
@@ -3169,8 +3192,8 @@
  	pnLen := protocol.PacketNumberLen(data[0]&0b11) + 1
  	if len(data) < 1+int(pnLen)+connIDLen {
  		return 0, 0, 0, 0, io.EOF
---- a/internal/wire/transport_parameters.go	2026-09-29 23:22:11.784742300 +0300
-+++ b/internal/wire/transport_parameters.go	2026-09-29 23:22:11.950441700 +0300
+--- a/internal/wire/transport_parameters.go	2026-10-02 02:05:30.494658700 +0300
++++ b/internal/wire/transport_parameters.go	2026-10-02 02:05:30.884342600 +0300
 @@ -50,6 +50,8 @@
  	resetStreamAtParameterID transportParameterID = 0x17f7586d2cb571
  	// https://datatracker.ietf.org/doc/draft-ietf-quic-ack-frequency/11/
@@ -3213,8 +3236,8 @@
  	if p.MinAckDelay != nil {
  		b = p.marshalVarintParam(b, minAckDelayParameterID, uint64(*p.MinAckDelay/time.Microsecond))
  	}
---- a/packet_packer.go	2026-09-29 23:22:11.799502000 +0300
-+++ b/packet_packer.go	2026-09-29 23:22:11.881883300 +0300
+--- a/packet_packer.go	2026-10-02 02:05:30.532720100 +0300
++++ b/packet_packer.go	2026-10-02 02:05:30.734934500 +0300
 @@ -116,6 +116,8 @@
  }
  
@@ -3234,8 +3257,8 @@
  	payloadOffset := protocol.ByteCount(len(raw))
  
  	raw, err = p.appendPacketPayload(raw, pl, paddingLen, v)
---- a/send_queue.go	2026-09-29 23:22:11.804610400 +0300
-+++ b/send_queue.go	2026-09-29 23:22:11.988418400 +0300
+--- a/send_queue.go	2026-10-02 02:05:30.544996400 +0300
++++ b/send_queue.go	2026-10-02 02:05:30.966305900 +0300
 @@ -87,12 +87,16 @@
  			// make sure that all queued packets are actually sent out
  			shouldClose = true
@@ -3256,7 +3279,7 @@
  				}
  			}
 --- a/send_transient_other.go	1970-01-01 03:00:00.000000000 +0300
-+++ b/send_transient_other.go	2026-09-29 23:22:11.926685100 +0300
++++ b/send_transient_other.go	2026-10-02 02:05:30.835207100 +0300
 @@ -0,0 +1,9 @@
 +//go:build !windows && !linux
 +
@@ -3268,7 +3291,7 @@
 +
 +func retrySend(_ func() error, err error) error { return err }
 --- a/send_transient_unix.go	1970-01-01 03:00:00.000000000 +0300
-+++ b/send_transient_unix.go	2026-09-29 23:22:11.922573800 +0300
++++ b/send_transient_unix.go	2026-10-02 02:05:30.825717600 +0300
 @@ -0,0 +1,49 @@
 +//go:build linux
 +
@@ -3320,7 +3343,7 @@
 +	return err
 +}
 --- a/send_transient_windows.go	1970-01-01 03:00:00.000000000 +0300
-+++ b/send_transient_windows.go	2026-09-29 23:22:11.919990200 +0300
++++ b/send_transient_windows.go	2026-10-02 02:05:30.819374500 +0300
 @@ -0,0 +1,38 @@
 +//go:build windows
 +
@@ -3361,7 +3384,7 @@
 +	return err
 +}
 --- a/sys_conn_uso_windows.go	1970-01-01 03:00:00.000000000 +0300
-+++ b/sys_conn_uso_windows.go	2026-09-29 23:22:11.925654400 +0300
++++ b/sys_conn_uso_windows.go	2026-10-02 02:05:30.831596900 +0300
 @@ -0,0 +1,126 @@
 +//go:build windows
 +
@@ -3489,8 +3512,8 @@
 +	}
 +	return int(sent), nil
 +}
---- a/sys_conn_windows.go	2026-09-29 23:22:11.726750200 +0300
-+++ b/sys_conn_windows.go	2026-09-29 23:22:11.923603000 +0300
+--- a/sys_conn_windows.go	2026-10-02 02:05:30.359201500 +0300
++++ b/sys_conn_windows.go	2026-10-02 02:05:30.826765400 +0300
 @@ -9,8 +9,8 @@
  	"golang.org/x/sys/windows"
  )
@@ -3502,8 +3525,8 @@
  }
  
  func inspectReadBuffer(c syscall.RawConn) (int, error) {
---- a/transport.go	2026-09-29 23:22:11.812035700 +0300
-+++ b/transport.go	2026-09-29 23:22:11.909792300 +0300
+--- a/transport.go	2026-10-02 02:05:30.565623600 +0300
++++ b/transport.go	2026-10-02 02:05:30.794733500 +0300
 @@ -563,10 +563,6 @@
  	if len(p.data) == 0 {
  		return

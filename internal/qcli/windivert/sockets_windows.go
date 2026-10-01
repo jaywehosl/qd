@@ -22,6 +22,7 @@ func WatchSockets(dllPath string) (*Sockets, error) {
 	if err != nil {
 		return nil, fmt.Errorf("socket layer: %w", err)
 	}
+	_ = setParam(h, ParamQueueLength, queueLenBoost)
 	return &Sockets{h: h}, nil
 }
 

@@ -21,6 +21,7 @@ type chained struct {
 	endpoint string
 	seat     uint32
 	hops     int
+	from     origin
 }
 
 func (c chained) at() where { return where{c.endpoint, c.seat} }

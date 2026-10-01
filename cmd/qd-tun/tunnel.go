@@ -51,6 +51,9 @@ type tunnel struct {
 	starting bool
 	abort    context.CancelFunc
 	wanted   atomic.Bool
+	swift    atomic.Bool
+	relost   func(error)
+	carried  string
 	stop     chan struct{}
 	wg       sync.WaitGroup
 
@@ -121,6 +124,7 @@ func (t *tunnel) Start(servers []string, relays []relay.Link, sessionID uint32) 
 	ctx, abort := context.WithCancel(context.Background())
 	t.starting, t.abort = true, abort
 	t.mu.Unlock()
+	carried := carriageNow()
 
 	held, sharp, lost, keepOut, err := t.bring(ctx, servers, relays)
 
@@ -160,6 +164,8 @@ func (t *tunnel) Start(servers []string, relays []relay.Link, sessionID uint32) 
 
 	go flushSystemDNS()
 	t.running = true
+	t.relost = lost
+	t.carried = carried
 	t.stop = held.Halt
 	t.live = held.Live
 	t.liveStop = held.Quit
@@ -208,6 +214,7 @@ func (t *tunnel) bring(ctx context.Context, servers []string, relays []relay.Lin
 		Route:     routeTag(),
 		MTU:       t.cfg.MTU,
 		Brutal:    rateNow(),
+		BBR:       profileNow(),
 		Workers:   t.cfg.Workers,
 		Bypass:    keepOut,
 		Fast:      runFast,
@@ -220,6 +227,10 @@ func (t *tunnel) bring(ctx context.Context, servers []string, relays []relay.Lin
 	plan.Say = func(format string, args ...any) { fmt.Printf(format+"\n", args...) }
 	plan.Lost = func(err error) {
 		t.halt()
+		if errors.Is(err, errBetter) {
+			t.swift.Store(true)
+			err = nil
+		}
 		t.noteResult(err)
 		if t.cfg.Lost != nil {
 			t.cfg.Lost()
@@ -286,6 +297,24 @@ func (t *tunnel) peerAddresses() []netip.Prefix {
 }
 
 func (t *tunnel) Wanted() bool { return t.wanted.Load() }
+
+func (t *tunnel) Carried() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !t.running {
+		return ""
+	}
+	return t.carried
+}
+
+func (t *tunnel) Redial() {
+	t.mu.Lock()
+	lost, running := t.relost, t.running
+	t.mu.Unlock()
+	if running && lost != nil {
+		go lost(errBetter)
+	}
+}
 
 func (t *tunnel) Stop() error {
 	t.wanted.Store(false)

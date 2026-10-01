@@ -25,6 +25,7 @@ type marks struct {
 	role map[string]byte
 
 	flows sync.Map
+	ports sync.Map
 	live  atomic.Int64
 	seed  maphash.Seed
 }
@@ -32,11 +33,15 @@ type marks struct {
 const (
 	flowCap  = 4096
 	flowIdle = 5 * time.Minute
+
+	portFresh = 10 * time.Second
+	unsureFor = time.Second
 )
 
 type held struct {
 	mark byte
 	at   int64
+	sure bool
 }
 
 func newMarks(host Host) *marks {
@@ -77,6 +82,7 @@ func (m *marks) forget() {
 		m.flows.Delete(key)
 		return true
 	})
+	m.ports.Clear()
 	m.live.Store(0)
 }
 
@@ -86,7 +92,7 @@ func (m *marks) interested() bool {
 	return len(m.role) > 0
 }
 
-func (m *marks) forFlow(src, dst netip.AddrPort, udp bool, wait bool) qdcrypt.Exit {
+func (m *marks) forFlow(src, dst netip.AddrPort, udp bool) qdcrypt.Exit {
 	global := qdcrypt.Exit(exit.Load())
 	if !m.interested() || !src.IsValid() || !dst.IsValid() {
 		return global
@@ -97,18 +103,29 @@ func (m *marks) forFlow(src, dst netip.AddrPort, udp bool, wait bool) qdcrypt.Ex
 		proto = 17
 	}
 
+	now := time.Now().UnixMilli()
 	key := m.key(proto, src.Port(), dst.Addr())
-	if kept, known := m.flows.Load(key); known {
-		return exitOf(kept.(held).mark, global)
+	kept, known := m.flows.Load(key)
+	if known {
+		if was := kept.(held); was.sure || now-was.at < unsureFor.Milliseconds() {
+			return exitOf(was.mark, global)
+		}
 	}
 
-	if !wait {
-		go m.remember(key, m.owner(proto, src, dst))
-		return global
+	var mark byte
+	sure := false
+	if recent, seen := m.ports.Load(src.Port()); udp && seen && now-recent.(held).at < portFresh.Milliseconds() {
+		mark, sure = recent.(held).mark, true
+	} else if mark, sure = m.owner(proto, src, dst); sure && udp {
+		m.ports.Store(src.Port(), held{mark: mark, at: now})
 	}
 
-	mark := m.owner(proto, src, dst)
-	m.remember(key, mark)
+	fresh := held{mark: mark, at: now, sure: sure}
+	if known {
+		m.flows.Store(key, fresh)
+	} else {
+		m.remember(key, fresh)
+	}
 	return exitOf(mark, global)
 }
 
@@ -133,7 +150,7 @@ func exitOf(mark byte, global qdcrypt.Exit) qdcrypt.Exit {
 	return global
 }
 
-func (m *marks) owner(proto byte, src, dst netip.AddrPort) byte {
+func (m *marks) owner(proto byte, src, dst netip.AddrPort) (byte, bool) {
 	started := time.Now()
 	named := m.host.Owner(int(proto),
 		src.Addr().String(), int(src.Port()),
@@ -142,20 +159,20 @@ func (m *marks) owner(proto byte, src, dst netip.AddrPort) byte {
 		say("owner: lookup took %d ms for proto=%d port=%d", spent, proto, src.Port())
 	}
 	if named == "" {
-		return markGlobal
+		return markGlobal, false
 	}
 
 	m.mu.RLock()
 	mark, known := m.role[named]
 	m.mu.RUnlock()
 	if !known {
-		return markGlobal
+		return markGlobal, true
 	}
-	return mark
+	return mark, true
 }
 
-func (m *marks) remember(key uint64, mark byte) {
-	if _, already := m.flows.LoadOrStore(key, held{mark: mark, at: time.Now().UnixMilli()}); already {
+func (m *marks) remember(key uint64, fresh held) {
+	if _, already := m.flows.LoadOrStore(key, fresh); already {
 		return
 	}
 	if m.live.Add(1) > flowCap {

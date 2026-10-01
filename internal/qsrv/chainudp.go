@@ -40,6 +40,9 @@ func (c chained) DialUDP(ctx context.Context, dst netip.AddrPort) (net.Conn, err
 	head.Set(HeaderProto, "udp")
 	head.Set(HeaderDgram, "1")
 	head.Set(HeaderHops, strconv.Itoa(c.hops))
+	if c.from.known() {
+		head.Set(HeaderBind, strconv.FormatUint(uint64(c.from.slot), 10))
+	}
 	req := &http.Request{
 		Method: http.MethodConnect,
 		URL:    &url.URL{Scheme: "https", Host: dst.String()},
@@ -143,7 +146,7 @@ func (d *dgramConn) Read(p []byte) (int, error) {
 
 func (d *dgramConn) Write(p []byte) (int, error) {
 	err := d.rs.SendDatagram(p)
-	if errors.Is(err, &quic.DatagramTooLargeError{}) {
+	if tooLarge(err) {
 		d.wmu.Lock()
 		_, err = d.rs.Write(frame(p))
 		d.wmu.Unlock()
@@ -170,6 +173,11 @@ func (d *dgramConn) RemoteAddr() net.Addr             { return net.UDPAddrFromAd
 func (d *dgramConn) SetDeadline(time.Time) error      { return nil }
 func (d *dgramConn) SetReadDeadline(time.Time) error  { return nil }
 func (d *dgramConn) SetWriteDeadline(time.Time) error { return nil }
+
+func tooLarge(err error) bool {
+	var size *quic.DatagramTooLargeError
+	return errors.As(err, &size)
+}
 
 func frame(p []byte) []byte {
 	out := make([]byte, 2+len(p))
@@ -247,7 +255,7 @@ func (n *Node) relayDatagrams(w http.ResponseWriter, hs http3.HTTPStreamer, out 
 			return
 		}
 		err = str.SendDatagram(buf[:read])
-		if errors.Is(err, &quic.DatagramTooLargeError{}) {
+		if tooLarge(err) {
 			_, err = str.Write(frame(buf[:read]))
 		}
 		if err != nil {

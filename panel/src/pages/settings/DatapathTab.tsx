@@ -1,6 +1,7 @@
+import { useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { Card, Input } from '@/components/ds';
+import { Card, Input, Select } from '@/components/ds';
 import { SettingListItem } from '@/components/ui';
 import type { AllSetting } from '@/models/setting';
 
@@ -23,6 +24,9 @@ export default function DatapathTab({ allSetting, updateSetting }: DatapathTabPr
     onChange: (e: React.ChangeEvent<HTMLInputElement>) =>
       updateSetting({ [key]: e.target.value } as Partial<AllSetting>),
   });
+
+  const brutal = (allSetting.brutalMbit ?? 0) > 0;
+  const kept = useRef(brutal ? allSetting.brutalMbit : 100);
 
   return (
     <div className="settings-tab">
@@ -47,11 +51,53 @@ export default function DatapathTab({ allSetting, updateSetting }: DatapathTabPr
       <Card title={t('pages.settings.carriage')}>
         <SettingListItem
           paddings="small"
-          title={t('pages.settings.brutal')}
-          description={t('pages.settings.brutalDesc')}
+          title={t('pages.settings.congestion')}
+          description={t('pages.settings.congestionDesc')}
         >
-          <Input type="number" min={0} max={10000} {...num('brutalMbit', 0)} />
+          <Select
+            value={brutal ? 'brutal' : 'bbr'}
+            onChange={(mode) => updateSetting({ brutalMbit: mode === 'brutal' ? kept.current : 0 })}
+            options={[
+              { value: 'bbr', label: t('pages.settings.congestionBbr') },
+              { value: 'brutal', label: t('pages.settings.congestionBrutal') },
+            ]}
+          />
         </SettingListItem>
+
+        {brutal ? (
+          <SettingListItem
+            paddings="small"
+            title={t('pages.settings.brutal')}
+            description={t('pages.settings.brutalDesc')}
+          >
+            <Input
+              type="number"
+              min={1}
+              max={10000}
+              value={allSetting.brutalMbit}
+              onChange={(e) => {
+                kept.current = Math.max(1, Number(e.target.value) || 1);
+                updateSetting({ brutalMbit: kept.current });
+              }}
+            />
+          </SettingListItem>
+        ) : (
+          <SettingListItem
+            paddings="small"
+            title={t('pages.settings.bbrProfile')}
+            description={t('pages.settings.bbrProfileDesc')}
+          >
+            <Select
+              value={allSetting.bbrProfile || 'standard'}
+              onChange={(bbrProfile) => updateSetting({ bbrProfile })}
+              options={[
+                { value: 'conservative', label: t('pages.settings.bbrConservative') },
+                { value: 'standard', label: t('pages.settings.bbrStandard') },
+                { value: 'aggressive', label: t('pages.settings.bbrAggressive') },
+              ]}
+            />
+          </SettingListItem>
+        )}
 
         <SettingListItem
           paddings="small"

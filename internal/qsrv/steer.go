@@ -121,7 +121,7 @@ type steering struct {
 	node  *Node
 	grant Grant
 	hops  int
-	local netstack.NetDialer
+	local here
 }
 
 func (d steering) via(ctx context.Context, dst netip.Addr) netstack.Dialer {
@@ -133,7 +133,7 @@ func (d steering) via(ctx context.Context, dst netip.Addr) netstack.Dialer {
 		return d.local
 	}
 	d.node.transits.Add(1)
-	return chained{cc: won, ls: d.node.links, endpoint: endpoint, seat: d.grant.Seat, hops: d.hops - 1}
+	return chained{cc: won, ls: d.node.links, endpoint: endpoint, seat: d.grant.Seat, hops: d.hops - 1, from: d.local.from}
 }
 
 func (d steering) DialTCP(ctx context.Context, dst netip.AddrPort) (net.Conn, error) {

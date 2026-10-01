@@ -22,6 +22,7 @@ var networkKeys = []string{
 	"statsSeconds",
 	"pool",
 	"brutalMbit",
+	"bbrProfile",
 	"maxStreams",
 	"streamWindowKb",
 	"maxStreamWindowKb",

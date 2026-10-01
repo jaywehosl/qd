@@ -119,6 +119,7 @@ type Device struct {
 	Model       string `json:"model"`
 	Kind        string `json:"kind"`
 	Name        string `json:"name"`
+	Version     string `json:"version"`
 	Blocked     bool   `json:"blocked"`
 	NodeID      int    `json:"nodeId"`
 	FirstSeen   int64  `json:"firstSeen"`
@@ -136,15 +137,16 @@ func (d *DB) RecordDevice(clientID, nodeID int, dev Device, at int64) error {
 		kind = "desktop"
 	}
 	_, err := d.sql.Exec(`
-		INSERT INTO devices (client_id, fingerprint, platform, model, kind, node_id, first_seen, last_seen, up, down)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0)
+		INSERT INTO devices (client_id, fingerprint, platform, model, kind, version, node_id, first_seen, last_seen, up, down)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)
 		ON CONFLICT(client_id, fingerprint) DO UPDATE SET
 			platform  = excluded.platform,
 			model     = excluded.model,
 			kind      = excluded.kind,
+			version   = excluded.version,
 			node_id   = excluded.node_id,
 			last_seen = MAX(devices.last_seen, excluded.last_seen)`,
-		clientID, dev.Fingerprint, dev.Platform, labelled(dev), kind, nodeID, at, at)
+		clientID, dev.Fingerprint, dev.Platform, labelled(dev), kind, dev.Version, nodeID, at, at)
 	return err
 }
 
@@ -161,9 +163,9 @@ func labelled(dev Device) string {
 func (d *DB) Device(clientID int, fingerprint string) (Device, bool, error) {
 	var dev Device
 	err := d.sql.QueryRow(
-		`SELECT fingerprint, platform, model, kind, blocked, node_id, first_seen, last_seen, up, down
+		`SELECT fingerprint, platform, model, kind, version, blocked, node_id, first_seen, last_seen, up, down
 		   FROM devices WHERE client_id = ? AND fingerprint = ?`, clientID, fingerprint).
-		Scan(&dev.Fingerprint, &dev.Platform, &dev.Model, &dev.Kind, &dev.Blocked,
+		Scan(&dev.Fingerprint, &dev.Platform, &dev.Model, &dev.Kind, &dev.Version, &dev.Blocked,
 			&dev.NodeID, &dev.FirstSeen, &dev.LastSeen, &dev.Up, &dev.Down)
 	if err == sql.ErrNoRows {
 		return Device{}, false, nil
@@ -206,12 +208,12 @@ func removed(res sql.Result, err error) (int, error) {
 func (d *DB) Devices() (map[int][]Device, error) {
 	out := map[int][]Device{}
 	err := scan(d.sql,
-		`SELECT client_id, fingerprint, platform, model, kind, blocked, node_id, first_seen, last_seen, up, down
+		`SELECT client_id, fingerprint, platform, model, kind, version, blocked, node_id, first_seen, last_seen, up, down
 		   FROM devices ORDER BY last_seen DESC`,
 		func(r *sql.Rows) error {
 			var id int
 			var dev Device
-			if err := r.Scan(&id, &dev.Fingerprint, &dev.Platform, &dev.Model, &dev.Kind,
+			if err := r.Scan(&id, &dev.Fingerprint, &dev.Platform, &dev.Model, &dev.Kind, &dev.Version,
 				&dev.Blocked, &dev.NodeID, &dev.FirstSeen, &dev.LastSeen, &dev.Up, &dev.Down); err != nil {
 				return err
 			}

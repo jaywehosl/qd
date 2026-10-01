@@ -4,7 +4,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/jaywehosl/qd/internal/qcli"
@@ -32,12 +34,30 @@ func roamWatch(ctx context.Context, stop <-chan struct{}, live *qcli.Tunnel, los
 	deaf := time.Time{}
 	heardAt := time.Now()
 	last := time.Now()
+	better := live.Better()
+	var later <-chan time.Time
+	if !live.OverTCP() {
+		switches.Store(0)
+	}
 
 	for {
 		select {
 		case <-stop:
 			return
 		case <-ctx.Done():
+			return
+
+		case <-better:
+			better = nil
+			if held := lastSwitch.Load(); held != nil && time.Since(*held) < switchPause() {
+				later = time.After(switchPause() - time.Since(*held))
+				continue
+			}
+			comeOver(lost)
+			return
+
+		case <-later:
+			comeOver(lost)
 			return
 
 		case <-changed:
@@ -185,6 +205,25 @@ func migrate(ctx context.Context, live *qcli.Tunnel) bool {
 	}
 	fmt.Printf("roam     the path did not move, coming back through a fresh dial\n")
 	return false
+}
+
+var (
+	errBetter  = errors.New("a better path answers")
+	lastSwitch atomic.Pointer[time.Time]
+)
+
+const switchRest = 90 * time.Second
+
+var switches atomic.Int32
+
+func switchPause() time.Duration { return switchRest << min(switches.Load(), 5) }
+
+func comeOver(lost func(error)) {
+	now := time.Now()
+	lastSwitch.Store(&now)
+	switches.Add(1)
+	fmt.Printf("roam     quic answers on this path after all, coming back over it\n")
+	lost(errBetter)
 }
 
 const (

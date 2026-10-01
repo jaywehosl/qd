@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -118,14 +119,18 @@ type live struct {
 	since   int64
 	transit bool
 	stream  bool
+	marked  bool
 	end     func()
 	over    atomic.Bool
 	under   *live
 
 	route  atomic.Pointer[string]
-	marks  sync.Map
-	marked atomic.Int64
-	flows  sync.Map
+	marks  [markSlots / 64]atomic.Uint64
+	flowMu sync.Mutex
+	flows  map[uint32][]io.Closer
+
+	outMu   sync.Mutex
+	outlets map[uint32]*outlet
 
 	up, down       atomic.Uint64
 	pktUp, pktDown atomic.Uint64
@@ -467,7 +472,9 @@ func (n *Node) serveAuth(w http.ResponseWriter, r *http.Request) {
 
 		if turned {
 			n.cfg.Log("quic      %s now steers to %q", grant.Client, route)
-			n.links.forget(grant.Seat)
+			if !s.marked {
+				n.links.forget(grant.Seat)
+			}
 		}
 	}
 	if qc := sessionOf(r.Context()).quic(); qc != nil && !handshaken(qc) {
@@ -495,19 +502,23 @@ func (s *live) steer(route string) bool {
 		return false
 	}
 	s.route.Store(&route)
-	s.shutFlows()
+	if !s.marked {
+		s.shutFlows()
+	}
 	return true
 }
 
 func (s *live) shutFlows() {
-	s.flows.Range(func(key, held any) bool {
-		s.flows.Delete(key)
-		if shut, ok := held.(io.Closer); ok {
+	s.flowMu.Lock()
+	held := s.flows
+	s.flows = nil
+	s.flowMu.Unlock()
+
+	for _, flows := range held {
+		for _, shut := range flows {
 			shut.Close()
 		}
-		return true
-	})
-	s.forgetStaleMarks()
+	}
 }
 
 func (s *live) heading() string {
@@ -517,57 +528,75 @@ func (s *live) heading() string {
 	return ""
 }
 
+const markSlots = 1 << 17
+
+func slotOf(v6 bool, port uint16) uint32 {
+	if v6 {
+		return 1<<16 | uint32(port)
+	}
+	return uint32(port)
+}
+
 func (s *live) noteMark(pkt []byte, mark uint64) {
 	port, ok := ippkt.SrcPort(pkt)
 	if !ok {
 		return
 	}
-	if s.markOf(port) == mark {
+	slot := slotOf(pkt[0]>>4 == 6, port)
+	word, bit := &s.marks[slot>>6], uint64(1)<<(slot&63)
+	out := mark == MarkEgress
+	if (word.Load()&bit != 0) == out {
 		return
 	}
-	if mark == MarkHere {
-		s.marks.Delete(port)
-		s.marked.Add(-1)
+	if out {
+		word.Or(bit)
 	} else {
-		s.marks.Store(port, mark)
-		if s.marked.Add(1) > markCeiling {
-			s.forgetStaleMarks()
+		word.And(^bit)
+	}
+	s.shutFlow(slot)
+}
+
+func (s *live) leaves(src netip.AddrPort) bool {
+	slot := slotOf(src.Addr().Is6() && !src.Addr().Is4In6(), src.Port())
+	return s.marks[slot>>6].Load()&(1<<(slot&63)) != 0
+}
+
+func (s *live) shutFlow(slot uint32) {
+	s.flowMu.Lock()
+	held := s.flows[slot]
+	delete(s.flows, slot)
+	s.flowMu.Unlock()
+
+	for _, shut := range held {
+		shut.Close()
+	}
+}
+
+func (s *live) holdFlow(src netip.AddrPort, shut io.Closer) func() {
+	slot := slotOf(src.Addr().Is6() && !src.Addr().Is4In6(), src.Port())
+
+	s.flowMu.Lock()
+	if s.flows == nil {
+		s.flows = map[uint32][]io.Closer{}
+	}
+	s.flows[slot] = append(s.flows[slot], shut)
+	s.flowMu.Unlock()
+
+	return func() {
+		s.flowMu.Lock()
+		defer s.flowMu.Unlock()
+		held := s.flows[slot]
+		at := slices.Index(held, shut)
+		if at < 0 {
+			return
 		}
+		if held = slices.Delete(held, at, at+1); len(held) == 0 {
+			delete(s.flows, slot)
+			return
+		}
+		s.flows[slot] = held
 	}
-	s.shutFlow(port)
 }
-
-func (s *live) shutFlow(port uint16) {
-	held, ok := s.flows.LoadAndDelete(port)
-	if !ok {
-		return
-	}
-	held.(io.Closer).Close()
-}
-
-func (s *live) holdFlow(port uint16, shut io.Closer) func() {
-	if was, ok := s.flows.Swap(port, shut); ok {
-		was.(io.Closer).Close()
-	}
-	return func() { s.flows.CompareAndDelete(port, shut) }
-}
-
-func (s *live) markOf(port uint16) uint64 {
-	if held, ok := s.marks.Load(port); ok {
-		return held.(uint64)
-	}
-	return MarkHere
-}
-
-func (s *live) forgetStaleMarks() {
-	s.marks.Range(func(k, _ any) bool {
-		s.marks.Delete(k)
-		return true
-	})
-	s.marked.Store(0)
-}
-
-const markCeiling = 4096
 
 func (n *Node) serveSite(ctx context.Context, quicSrv *http3.Server, served http.Handler) {
 	conf := n.cfg.TLS.Clone()

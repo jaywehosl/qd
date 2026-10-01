@@ -44,6 +44,7 @@ func (c *Client) carry(servers []string, relays []relay.Link, session uint32) er
 	}
 
 	seen := c.seen
+	carried := c.carriage()
 	round, giveUp := context.WithCancel(context.Background())
 	c.mu.Lock()
 	c.dialing = giveUp
@@ -65,6 +66,7 @@ func (c *Client) carry(servers []string, relays []relay.Link, session uint32) er
 			MTU:       mtu,
 			Workers:   readers,
 			Brutal:    int(c.rate.Load()),
+			BBR:       c.bbr(),
 			Fast:      runFast,
 			Bypass:    c.keepOut(),
 			Keep:      c.keeper(),
@@ -103,6 +105,7 @@ func (c *Client) carry(servers []string, relays []relay.Link, session uint32) er
 
 	c.mu.Lock()
 	c.stop, c.live, c.liveStop, c.session, c.running = held.Halt, held.Live, held.Quit, session, true
+	c.carried = carried
 	c.dns, c.server, c.gone = held.DNS, held.Endpoint, held.Gone
 	c.src = held.Source
 	c.mu.Unlock()
@@ -235,7 +238,7 @@ func (c *Client) route() string {
 }
 
 func (c *Client) exitFor(src, dst netip.AddrPort, udp bool) string {
-	if c.marks.forFlow(src, dst, udp, !udp) == qdcrypt.ExitEgress {
+	if c.marks.forFlow(src, dst, udp) == qdcrypt.ExitEgress {
 		return qsrv.AnyExit
 	}
 	return ""

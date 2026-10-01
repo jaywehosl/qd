@@ -322,6 +322,7 @@ type deviceRow struct {
 	Platform    string `json:"platform"`
 	Model       string `json:"model"`
 	Kind        string `json:"kind"`
+	Version     string `json:"version"`
 	Blocked     bool   `json:"blocked"`
 	IP          string `json:"ip"`
 	NodeID      int    `json:"nodeId"`

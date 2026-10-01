@@ -178,9 +178,6 @@ func keepSplit() {
 	for {
 		select {
 		case pid := <-events:
-			if r := routeByProcess.Load(); r != nil {
-				r.forgetPid(pid)
-			}
 			place(pid)
 		case <-tick.C:
 			sweep()
@@ -288,13 +285,7 @@ func cgroupOf(pid uint32) string {
 func (r *procRouter) roleNow(ident procIdent) string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.roleOf(ident, r.byPath, r.byName, r.def)
-}
-
-func (r *procRouter) forgetPid(pid uint32) {
-	r.pidMu.Lock()
-	delete(r.pids, pid)
-	r.pidMu.Unlock()
+	return roleIn(ident, r.byPath, r.byName, r.def)
 }
 
 func watchExecs(out chan<- uint32) error {

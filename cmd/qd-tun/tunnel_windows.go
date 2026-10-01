@@ -63,6 +63,8 @@ func (t *tunnel) opener() (sourceOpener, error) {
 		return nil, err
 	}
 	return func(ctx context.Context, live *qcli.Tunnel, keepOut []netip.Prefix) (packet.Source, error) {
+		held := t.bypass(live, keepOut)
+		keptOut.Store(&held)
 		filter := windivert.BuildFilter(windivert.CaptureConfig{
 			TCP: true, UDP: true, DNS: t.servesDNS(),
 			Bypass: t.bypass(live, keepOut),

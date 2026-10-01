@@ -16,6 +16,8 @@ const (
 	HeaderFrom    = "Qd-From"
 	HeaderICMP    = "Qd-Icmp"
 	HeaderDgram   = "Qd-Dgram"
+	HeaderMarks   = "Qd-Marks"
+	HeaderBind    = "Qd-Bind"
 
 	AnyExit  = "egress"
 	HereExit = "here"

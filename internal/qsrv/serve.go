@@ -16,6 +16,7 @@ import (
 	quic "github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 
+	"github.com/jaywehosl/qd/internal/ippkt"
 	"github.com/jaywehosl/qd/internal/qsrv/server/netstack"
 )
 
@@ -110,6 +111,7 @@ func (n *Node) carry(ctx context.Context, conn *connectip.Conn, qc *quic.Conn, g
 
 	s := newLive(grant, address, "", route)
 	s.conn = qc
+	s.marked = true
 	s.end = func() { conn.Close() }
 	defer conn.Close()
 
@@ -156,21 +158,26 @@ func (n *Node) runStack(ctx context.Context, s *live, tun netstack.Tunnel) {
 const exitDrain = 200 * time.Millisecond
 
 type streamTun struct {
-	r io.Reader
-	w io.Writer
+	r     io.Reader
+	w     io.Writer
+	marks int
+	note  func(pkt []byte, mark uint64)
 }
 
 func (t *streamTun) ReadPacket(b []byte) (int, error) {
-	var hdr [2]byte
-	if _, err := io.ReadFull(t.r, hdr[:]); err != nil {
+	var hdr [3]byte
+	if _, err := io.ReadFull(t.r, hdr[:2+t.marks]); err != nil {
 		return 0, err
 	}
-	n := int(binary.BigEndian.Uint16(hdr[:]))
-	if n > len(b) {
+	n := int(binary.BigEndian.Uint16(hdr[:])) - t.marks
+	if n < 0 || n > len(b) {
 		return 0, fmt.Errorf("stream tun: packet %d over buffer %d", n, len(b))
 	}
 	if _, err := io.ReadFull(t.r, b[:n]); err != nil {
 		return 0, err
+	}
+	if t.note != nil {
+		t.note(b[:n], uint64(hdr[2]))
 	}
 	return n, nil
 }
@@ -220,15 +227,20 @@ func (n *Node) serveIPOverTCP(ctx context.Context) http.HandlerFunc {
 			return
 		}
 
+		tun := &streamTun{r: r.Body, w: flushWriter{w}}
+		if r.Header.Get(HeaderMarks) == "1" {
+			tun.marks = 1
+			w.Header().Set(HeaderMarks, "1")
+		}
 		w.WriteHeader(http.StatusOK)
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()
 		}
-		n.carryStream(ctx, &streamTun{r: r.Body, w: flushWriter{w}}, func() { r.Body.Close() }, grant, r.RemoteAddr, n.routeFor(r))
+		n.carryStream(ctx, tun, func() { r.Body.Close() }, grant, r.RemoteAddr, n.routeFor(r))
 	}
 }
 
-func (n *Node) carryStream(ctx context.Context, tun netstack.Tunnel, end func(), grant Grant, peer, route string) {
+func (n *Node) carryStream(ctx context.Context, tun *streamTun, end func(), grant Grant, peer, route string) {
 	address, err := n.pool.take(grant.Seat)
 	if err != nil {
 		return
@@ -237,6 +249,9 @@ func (n *Node) carryStream(ctx context.Context, tun netstack.Tunnel, end func(),
 	s := newLive(grant, address, peer, route)
 	s.stream = true
 	s.end = end
+	if tun.marks > 0 {
+		s.marked, tun.note = true, s.noteMark
+	}
 
 	n.runStack(ctx, s, countedTun{tun: tun, s: s})
 }
@@ -257,14 +272,24 @@ func (c counted) ReadPacket(b []byte) (int, error) {
 
 func (c counted) WritePacket(b []byte) ([]byte, error) {
 	icmp, err := c.conn.WritePacket(b)
+	if err == nil && len(icmp) > 0 {
+		for _, piece := range ippkt.Fragments4(b, pieceSize) {
+			if _, err = c.conn.WritePacket(piece); err != nil {
+				break
+			}
+			icmp = nil
+		}
+	}
 	if err == nil {
 		c.s.cameDown(len(b))
 	}
 	return icmp, err
 }
 
-func (n *Node) dialerFor(ctx context.Context, grant Grant, route string, hops int) netstack.Dialer {
-	local := netstack.NetDialer{}
+const pieceSize = 1200
+
+func (n *Node) dialerFor(ctx context.Context, grant Grant, route string, hops int, from origin) netstack.Dialer {
+	local := here{from: from}
 
 	if hops <= 0 {
 		return local
@@ -288,7 +313,7 @@ func (n *Node) dialerFor(ctx context.Context, grant Grant, route string, hops in
 	}
 
 	n.transits.Add(1)
-	return chained{cc: won, ls: n.links, endpoint: endpoint, seat: grant.Seat, hops: hops - 1}
+	return chained{cc: won, ls: n.links, endpoint: endpoint, seat: grant.Seat, hops: hops - 1, from: from}
 }
 
 type refusing struct{ why error }
@@ -330,7 +355,7 @@ func (n *Node) serveConnect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	dialCtx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-	dialer := n.dialerFor(dialCtx, grant, route, hops)
+	dialer := n.dialerFor(dialCtx, grant, route, hops, origin{})
 	if n.stale(dst) && endsHere(dialer, dst.Addr()) {
 		cancel()
 		w.WriteHeader(http.StatusGone)
@@ -345,6 +370,9 @@ func (n *Node) serveConnect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Header.Get(HeaderProto) == "udp" {
+		if slot, err := strconv.ParseUint(r.Header.Get(HeaderBind), 10, 32); err == nil && s != nil && slot < markSlots {
+			dialer = n.dialerFor(dialCtx, grant, route, hops, origin{s: s, slot: uint32(slot)})
+		}
 		out, err := dialer.DialUDP(dialCtx, dst)
 		cancel()
 		if err != nil {
@@ -409,19 +437,27 @@ type steered struct {
 
 func (d steered) DialTCP(ctx context.Context, dst netip.AddrPort) (net.Conn, error) {
 	dst = d.node.behind(dst)
-	return d.node.dialerFor(ctx, d.grant, d.route(ctx), d.hops).DialTCP(ctx, dst)
+	return d.node.dialerFor(ctx, d.grant, d.route(ctx), d.hops, origin{}).DialTCP(ctx, dst)
 }
 
 func (d steered) DialUDP(ctx context.Context, dst netip.AddrPort) (net.Conn, error) {
 	dst = d.node.behind(dst)
-	return d.node.dialerFor(ctx, d.grant, d.route(ctx), d.hops).DialUDP(ctx, dst)
+	from := origin{}
+	if flow, ok := netstack.FlowOf(ctx); ok {
+		from = origin{s: d.s, slot: slotOf(flow.Src.Addr().Is6() && !flow.Src.Addr().Is4In6(), flow.Src.Port())}
+	}
+	return d.node.dialerFor(ctx, d.grant, d.route(ctx), d.hops, from).DialUDP(ctx, dst)
 }
 
 func (d steered) route(ctx context.Context) string {
-	if flow, ok := netstack.FlowOf(ctx); ok && d.s.markOf(flow.Src.Port()) == MarkEgress {
+	flow, ok := netstack.FlowOf(ctx)
+	if !ok || !d.s.marked {
+		return d.s.heading()
+	}
+	if d.s.leaves(flow.Src) {
 		return AnyExit
 	}
-	return d.s.heading()
+	return ""
 }
 
 func (n *Node) relayPackets(w http.ResponseWriter, r *http.Request, out net.Conn, s *live) {
@@ -485,7 +521,7 @@ func (n *Node) relayPackets(w http.ResponseWriter, r *http.Request, out net.Conn
 	}
 }
 
-const flowQuiet = 60 * time.Second
+const flowQuiet = 2 * time.Minute
 
 type tally struct {
 	to   io.Writer

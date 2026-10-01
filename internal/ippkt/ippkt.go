@@ -41,6 +41,9 @@ func after(pkt []byte, need int) (byte, []byte, bool) {
 		if head < 20 || len(pkt) < head+need {
 			return 0, nil, false
 		}
+		if need > 0 && binary.BigEndian.Uint16(pkt[6:8])&0x1FFF != 0 {
+			return 0, nil, false
+		}
 		return pkt[9], pkt[head:], true
 	case len(pkt) >= 40+need && pkt[0]>>4 == 6:
 		return pkt[6], pkt[40:], true
@@ -115,5 +118,37 @@ func ICMPv6(from, to netip.Addr, hop uint8, msg []byte) []byte {
 	copy(out[40:], msg)
 	out[42], out[43] = 0, 0
 	binary.BigEndian.PutUint16(out[42:], Checksum6(out))
+	return out
+}
+
+func Fragments4(pkt []byte, size int) [][]byte {
+	if len(pkt) < 20 || pkt[0] != 0x45 || pkt[6]&0x40 != 0 {
+		return nil
+	}
+	total := int(binary.BigEndian.Uint16(pkt[2:4]))
+	step := (size - 20) &^ 7
+	if total > len(pkt) || total <= size || step <= 0 {
+		return nil
+	}
+	body := pkt[20:total]
+	field := binary.BigEndian.Uint16(pkt[6:8])
+	base, more := int(field&0x1FFF), field&0x2000 != 0
+
+	var out [][]byte
+	for off := 0; off < len(body); off += step {
+		end := min(off+step, len(body))
+		frag := make([]byte, 20+end-off)
+		copy(frag, pkt[:20])
+		copy(frag[20:], body[off:end])
+		binary.BigEndian.PutUint16(frag[2:], uint16(len(frag)))
+		at := uint16(base + off/8)
+		if end < len(body) || more {
+			at |= 0x2000
+		}
+		binary.BigEndian.PutUint16(frag[6:], at)
+		frag[10], frag[11] = 0, 0
+		binary.BigEndian.PutUint16(frag[10:], Checksum(frag[:20]))
+		out = append(out, frag)
+	}
 	return out
 }

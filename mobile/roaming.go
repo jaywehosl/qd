@@ -8,6 +8,22 @@ import (
 
 var moving atomic.Bool
 
+var lastSwitch atomic.Pointer[time.Time]
+
+const switchRest = 90 * time.Second
+
+var switches atomic.Int32
+
+func switchPause() time.Duration { return switchRest << min(switches.Load(), 5) }
+
+func (c *Client) comeOver() {
+	now := time.Now()
+	lastSwitch.Store(&now)
+	switches.Add(1)
+	say("roam: quic answers on this path after all, coming back over it")
+	go c.lost()
+}
+
 func (c *Client) watch(ctx context.Context, stop <-chan struct{}) {
 	tick := time.NewTicker(deafStep)
 	defer tick.Stop()
@@ -23,12 +39,28 @@ func (c *Client) watch(ctx context.Context, stop <-chan struct{}) {
 	deaf := time.Time{}
 	heardAt := time.Now()
 	last := time.Now()
+	better := live.Better()
+	var later <-chan time.Time
+	if !live.OverTCP() {
+		switches.Store(0)
+	}
 
 	for {
 		select {
 		case <-stop:
 			return
 		case <-ctx.Done():
+			return
+		case <-better:
+			better = nil
+			if held := lastSwitch.Load(); held != nil && time.Since(*held) < switchPause() {
+				later = time.After(switchPause() - time.Since(*held))
+				continue
+			}
+			c.comeOver()
+			return
+		case <-later:
+			c.comeOver()
 			return
 		case <-tick.C:
 		}

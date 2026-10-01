@@ -15,28 +15,23 @@ import (
 )
 
 const (
-	tableTTL     = 5 * time.Second
-	missCooldown = 40 * time.Millisecond
-
-	flowCap  = 8192
-	flowIdle = 5 * time.Minute
+	ownerTTL   = 5 * time.Second
+	unknownTTL = time.Second
+	ownerKeep  = 10 * time.Second
+	tidyEvery  = 30 * time.Second
 )
 
 type stats struct {
 	procMiss atomic.Uint64
+	lastMiss atomic.Pointer[string]
 }
 
 var st stats
 
 type portKey struct {
 	proto uint8
+	v6    bool
 	port  uint16
-}
-
-type flowKey struct {
-	proto uint8
-	port  uint16
-	dst   netip.Addr
 }
 
 type procIdent struct {
@@ -44,9 +39,16 @@ type procIdent struct {
 	path string
 }
 
-type verdict struct {
-	role string
-	at   int64
+type owner struct {
+	pid      uint32
+	bound    procIdent
+	closed   bool
+	closedAt int64
+
+	decided bool
+	by      uint32
+	ident   procIdent
+	until   int64
 }
 
 type procRouter struct {
@@ -62,29 +64,15 @@ type procRouter struct {
 	active atomic.Bool
 	fixed  atomic.Pointer[string]
 
-	aside      sync.Map
-	keptAside  atomic.Int64
-	chosen     sync.Map
-	keptChosen atomic.Int64
-
-	watched sync.Map
-	tbl     atomic.Pointer[map[portKey]uint32]
-	refresh chan struct{}
-
-	readMu sync.Mutex
-	readAt time.Time
-
-	pidMu sync.Mutex
-	pids  map[uint32]procIdent
+	owners sync.Map
+	plat   platformRouter
 }
 
 func newProcRouter() *procRouter {
 	return &procRouter{
-		byPath:  map[string]string{},
-		byName:  map[string]string{},
-		def:     clientstate.RoleTunnel,
-		refresh: make(chan struct{}, 1),
-		pids:    map[uint32]procIdent{},
+		byPath: map[string]string{},
+		byName: map[string]string{},
+		def:    clientstate.RoleTunnel,
 	}
 }
 
@@ -107,8 +95,6 @@ func (r *procRouter) Load(defaultRole string, rules []clientstate.Rule) {
 	r.byPath, r.byName, r.def = byPath, byName, defaultRole
 	r.mu.Unlock()
 
-	r.forgetFlows()
-
 	if len(byPath) == 0 && len(byName) == 0 {
 		held := defaultRole
 		r.fixed.Store(&held)
@@ -119,120 +105,120 @@ func (r *procRouter) Load(defaultRole string, rules []clientstate.Rule) {
 	r.active.Store(true)
 }
 
-func (r *procRouter) forgetFlows() {
-	for _, one := range []struct {
-		where *sync.Map
-		count *atomic.Int64
-	}{{&r.aside, &r.keptAside}, {&r.chosen, &r.keptChosen}} {
-		one.where.Range(func(k, _ any) bool {
-			one.where.Delete(k)
-			return true
-		})
-		one.count.Store(0)
-	}
-}
-
 func (r *procRouter) Active() bool { return r.active.Load() }
 
 func (r *procRouter) RoleFor(pkt []byte) string {
 	if held := r.fixed.Load(); held != nil {
 		return *held
 	}
-
-	key, ok := flowOf(pkt)
+	key, src, flags, ok := flowOf(pkt)
 	if !ok {
 		return r.fallback()
 	}
-	if held, known := r.aside.Load(key); known {
-		return held.(verdict).role
-	}
-
-	pid, known := r.pidFor(portKey{proto: key.proto, port: key.port})
-	if !known {
-		pid, known = r.lookNow(portKey{proto: key.proto, port: key.port})
-	}
-	role, _ := r.roleOfPid(pid, known)
-	r.keep(&r.aside, &r.keptAside, key, role)
-	return role
+	return r.roleOf(r.ownerOf(key, src, flags&(tcpSyn|tcpAck) == tcpSyn, flags&tcpRst != 0))
 }
 
-func (r *procRouter) RoleForFlow(proto uint8, port uint16, dst netip.Addr) string {
+func (r *procRouter) RoleForFlow(proto uint8, src netip.AddrPort) string {
 	if held := r.fixed.Load(); held != nil {
 		return *held
 	}
-
-	key := flowKey{proto: proto, port: port, dst: dst}
-	if held, known := r.chosen.Load(key); known {
-		return held.(verdict).role
-	}
-
-	pid, known := r.awaitOwner(portKey{proto: proto, port: port})
-	role, sure := r.roleOfPid(pid, known)
-	if sure {
-		r.keep(&r.chosen, &r.keptChosen, key, role)
-	}
-	return role
+	addr := src.Addr().Unmap()
+	return r.roleOf(r.ownerOf(portKey{proto: proto, v6: addr.Is6(), port: src.Port()}, addr, false, false))
 }
 
-func (r *procRouter) awaitOwner(key portKey) (uint32, bool) {
-	for waited := time.Duration(0); ; waited += ownerStep {
-		if pid, ok := r.pidFor(key); ok {
-			return pid, true
-		}
-		if waited >= ownerPatience {
-			return 0, false
-		}
-		time.Sleep(ownerStep)
-	}
-}
-
-func (r *procRouter) keep(where *sync.Map, count *atomic.Int64, key flowKey, role string) {
-	if _, already := where.LoadOrStore(key, verdict{role: role, at: time.Now().UnixMilli()}); already {
-		return
-	}
-	if count.Add(1) > flowCap {
-		r.evict(where, count)
-	}
-}
-
-func (r *procRouter) roleOfPid(pid uint32, known bool) (string, bool) {
-	if !known {
-		st.procMiss.Add(1)
-		return r.fallback(), false
-	}
-	ident, ok := r.identFor(pid)
-	if !ok {
-		st.procMiss.Add(1)
-		return r.fallback(), false
-	}
-
+func (r *procRouter) roleOf(ident procIdent, known bool) string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.roleOf(ident, r.byPath, r.byName, r.def), true
+	if !known {
+		return r.def
+	}
+	return roleIn(ident, r.byPath, r.byName, r.def)
 }
 
-const (
-	ownerStep     = 2 * time.Millisecond
-	ownerPatience = 60 * time.Millisecond
-)
-
-func (r *procRouter) evict(where *sync.Map, count *atomic.Int64) {
-	cutoff := time.Now().Add(-flowIdle).UnixMilli()
-	where.Range(func(key, held any) bool {
-		if held.(verdict).at < cutoff {
-			where.Delete(key)
-			count.Add(-1)
+func (r *procRouter) ownerOf(key portKey, src netip.Addr, opens, resets bool) (procIdent, bool) {
+	now := time.Now().UnixMilli()
+	held, seen := r.owners.Load(key)
+	var o owner
+	if seen {
+		o = held.(owner)
+		if o.decided && !opens && now < o.until {
+			return o.ident, o.ident.name != ""
 		}
-		return true
-	})
-	if count.Load() <= flowCap {
-		return
 	}
-	where.Range(func(key, _ any) bool {
-		where.Delete(key)
-		count.Add(-1)
-		return count.Load() > flowCap/2
-	})
+
+	pid, found, read := r.pidOf(key, src)
+	switch {
+	case !read && o.decided:
+	case found:
+		ident := identOf(pid)
+		if ident.name != "" || !o.decided || o.by != pid {
+			o.ident = ident
+		}
+		o.by = pid
+	default:
+		r.flush()
+		if again, still := r.owners.Load(key); still {
+			held, seen, o = again, true, again.(owner)
+		}
+		o.by, o.ident = o.pid, o.bound
+	}
+
+	o.decided, o.until = true, now+ownerTTL.Milliseconds()
+	if o.ident.name == "" {
+		o.until = now + unknownTTL.Milliseconds()
+		if !resets {
+			missed(key, o.by)
+		}
+	}
+	if seen {
+		r.owners.CompareAndSwap(key, held, o)
+	} else {
+		r.owners.LoadOrStore(key, o)
+	}
+	return o.ident, o.ident.name != ""
+}
+
+func (r *procRouter) tidy() {
+	for range time.Tick(tidyEvery) {
+		cut := time.Now().Add(-ownerKeep).UnixMilli()
+		r.owners.Range(func(key, held any) bool {
+			o := held.(owner)
+			if o.until < cut && (o.pid == 0 || (o.closed && o.closedAt < cut)) {
+				r.owners.CompareAndDelete(key, held)
+			}
+			return true
+		})
+	}
+}
+
+func identOf(pid uint32) procIdent {
+	ident := lookupProcess(pid)
+	return procIdent{name: strings.ToLower(ident.name), path: strings.ToLower(ident.path)}
+}
+
+func identMemo() func(pid uint32) (procIdent, bool) {
+	seen := map[uint32]procIdent{}
+	return func(pid uint32) (procIdent, bool) {
+		ident, ok := seen[pid]
+		if !ok {
+			ident = lookupProcess(pid)
+			seen[pid] = ident
+		}
+		return ident, ident.name != ""
+	}
+}
+
+func missed(key portKey, pid uint32) {
+	proto := "tcp"
+	if key.proto == protoUDP {
+		proto = "udp"
+	}
+	what := fmt.Sprintf("%s port %d, no process holds it", proto, key.port)
+	if pid != 0 {
+		what = fmt.Sprintf("%s port %d, process %d gave no name", proto, key.port, pid)
+	}
+	st.lastMiss.Store(&what)
+	st.procMiss.Add(1)
 }
 
 func (r *procRouter) fallback() string {
@@ -241,148 +227,58 @@ func (r *procRouter) fallback() string {
 	return r.def
 }
 
-func flowOf(pkt []byte) (flowKey, bool) {
+const (
+	tcpSyn = 0x02
+	tcpRst = 0x04
+	tcpAck = 0x10
+)
+
+func flowOf(pkt []byte) (key portKey, src netip.Addr, flags byte, ok bool) {
 	if len(pkt) < 20 {
-		return flowKey{}, false
+		return portKey{}, netip.Addr{}, 0, false
 	}
 	var proto byte
 	var rest []byte
-	var dst netip.Addr
 	switch pkt[0] >> 4 {
 	case 4:
 		ihl := int(pkt[0]&0x0F) * 4
 		if ihl < 20 || len(pkt) < ihl+4 {
-			return flowKey{}, false
+			return portKey{}, netip.Addr{}, 0, false
 		}
 		proto, rest = pkt[9], pkt[ihl:]
-		dst = netip.AddrFrom4([4]byte(pkt[16:20]))
+		src = netip.AddrFrom4([4]byte(pkt[12:16]))
 	case 6:
 		if len(pkt) < 44 {
-			return flowKey{}, false
+			return portKey{}, netip.Addr{}, 0, false
 		}
 		proto, rest = pkt[6], pkt[40:]
-		dst = netip.AddrFrom16([16]byte(pkt[24:40]))
+		src = netip.AddrFrom16([16]byte(pkt[8:24]))
 	default:
-		return flowKey{}, false
+		return portKey{}, netip.Addr{}, 0, false
 	}
 	if proto != protoTCP && proto != protoUDP {
-		return flowKey{}, false
+		return portKey{}, netip.Addr{}, 0, false
 	}
-	return flowKey{proto: proto, port: binary.BigEndian.Uint16(rest[0:2]), dst: dst}, true
+	if proto == protoTCP && len(rest) > 13 {
+		flags = rest[13]
+	}
+	return portKey{proto: proto, v6: src.Is6(), port: binary.BigEndian.Uint16(rest[0:2])}, src, flags, true
 }
 
-func (r *procRouter) pidFor(key portKey) (uint32, bool) {
-	if pid, ok := r.watched.Load(key); ok {
-		return pid.(uint32), true
-	}
-
-	held := r.tbl.Load()
-	if held == nil {
-		r.wake()
-		return 0, false
-	}
-	pid, ok := (*held)[key]
-	if !ok {
-		r.wake()
-	}
-	return pid, ok
-}
-
-func (r *procRouter) lookNow(key portKey) (uint32, bool) {
-	r.readMu.Lock()
-	if time.Since(r.readAt) > lookEvery {
-		r.readTable()
-		r.readAt = time.Now()
-	}
-	r.readMu.Unlock()
-
-	if pid, ok := r.watched.Load(key); ok {
-		return pid.(uint32), true
-	}
-	held := r.tbl.Load()
-	if held == nil {
-		return 0, false
-	}
-	pid, ok := (*held)[key]
-	return pid, ok
-}
-
-const lookEvery = 10 * time.Millisecond
-
-func (r *procRouter) wake() {
-	select {
-	case r.refresh <- struct{}{}:
-	default:
-	}
-}
-
-func (r *procRouter) tellMisses(stop <-chan struct{}) {
-	tick := time.NewTicker(30 * time.Second)
-	defer tick.Stop()
-
+func (r *procRouter) tellMisses() {
 	was := uint64(0)
-	for {
-		select {
-		case <-stop:
-			return
-		case <-tick.C:
-		}
+	for range time.Tick(30 * time.Second) {
 		now := st.procMiss.Load()
-		if now > was {
-			fmt.Printf("routing  %d flows went by the default role, their owner was not known in time\n", now-was)
-			was = now
+		if now == was {
+			continue
 		}
-	}
-}
-
-func (r *procRouter) keepTable(stop <-chan struct{}) {
-	tick := time.NewTicker(tableTTL)
-	defer tick.Stop()
-
-	for {
-		if r.fixed.Load() == nil {
-			r.readTable()
+		last := ""
+		if held := st.lastMiss.Load(); held != nil {
+			last = *held
 		}
-
-		select {
-		case <-stop:
-			return
-		case <-tick.C:
-		case <-r.refresh:
-			time.Sleep(missCooldown)
-		}
+		fmt.Printf("routing  %d flows went by the default role, their owner is not known (the last one: %s)\n", now-was, last)
+		was = now
 	}
-}
-
-func (r *procRouter) readTable() {
-	next := make(map[portKey]uint32, 512)
-	readSockets(next)
-	if len(next) == 0 {
-		return
-	}
-	r.tbl.Store(&next)
-}
-
-func (r *procRouter) identFor(pid uint32) (procIdent, bool) {
-	if pid == 0 {
-		return procIdent{}, false
-	}
-
-	r.pidMu.Lock()
-	ident, ok := r.pids[pid]
-	r.pidMu.Unlock()
-	if ok {
-		return ident, ident.name != ""
-	}
-
-	ident = lookupProcess(pid)
-	r.pidMu.Lock()
-	if len(r.pids) > 4096 {
-		r.pids = map[uint32]procIdent{}
-	}
-	r.pids[pid] = ident
-	r.pidMu.Unlock()
-	return ident, ident.name != ""
 }
 
 func reloadProcessRules(db *clientstate.DB) {
@@ -392,9 +288,10 @@ func reloadProcessRules(db *clientstate.DB) {
 	r := routeByProcess.Load()
 	if r == nil {
 		r = newProcRouter()
+		r.start()
 		routeByProcess.Store(r)
-		go r.keepTable(nil)
-		go r.tellMisses(nil)
+		go r.tidy()
+		go r.tellMisses()
 	}
 	def, rules, err := db.RulesInForce()
 	if err != nil {
@@ -411,7 +308,7 @@ func reloadProcessRules(db *clientstate.DB) {
 	}
 }
 
-func (r *procRouter) roleOf(ident procIdent, byPath, byName map[string]string, def string) string {
+func roleIn(ident procIdent, byPath, byName map[string]string, def string) string {
 	if ident.path != "" {
 		if role, ok := byPath[strings.ToLower(ident.path)]; ok {
 			return role

@@ -348,7 +348,7 @@ func (a *API) Greet() {
 
 func (a *API) adoptNetworkDefaults(answer Standing) {
 	if answer.Known {
-		a.adoptFixedRate(answer.FixedRate)
+		a.adoptCarriage(answer.FixedRate, answer.BBRProfile)
 	}
 	a.adoptExit(answer)
 	a.adoptRefresh(answer)
@@ -509,22 +509,21 @@ func (a *API) adoptExit(answer Standing) {
 	}
 }
 
-func (a *API) adoptFixedRate(mbit int) {
+func (a *API) adoptCarriage(mbit int, profile string) {
 	settings, err := a.db.Settings()
 	if err != nil {
-		a.platform.SetFixedRate(mbit)
+		a.platform.SetCarriage(mbit, profile)
 		return
 	}
 	if settings.RatePinned {
-		a.platform.SetFixedRate(settings.FixedRate)
-		return
+		mbit = settings.FixedRate
 	}
 
-	a.platform.SetFixedRate(mbit)
-	if settings.FixedRate == mbit {
+	a.platform.SetCarriage(mbit, profile)
+	if settings.FixedRate == mbit && settings.BBRProfile == profile {
 		return
 	}
-	settings.FixedRate = mbit
+	settings.FixedRate, settings.BBRProfile = mbit, profile
 	a.db.SaveSettings(settings)
 }
 
@@ -618,6 +617,7 @@ func (a *API) Connect() error {
 			break
 		}
 	}
+	go a.Greet()
 	return nil
 }
 
@@ -783,7 +783,7 @@ func (a *API) SaveSettingsJSON(raw string) error {
 	if err := a.db.SaveSettings(next); err != nil {
 		return err
 	}
-	a.platform.SetFixedRate(next.FixedRate)
+	a.platform.SetCarriage(next.FixedRate, next.BBRProfile)
 	return nil
 }
 

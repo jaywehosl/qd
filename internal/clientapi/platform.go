@@ -31,7 +31,7 @@ type Platform interface {
 	Stop() error
 	SetKey(key *qdcrypt.Key)
 	SetExit(egress bool)
-	SetFixedRate(mbit int)
+	SetCarriage(mbit int, profile string)
 	SyncControlRelays(relays []relay.Link)
 	Wire() Asker
 	Identify() Device

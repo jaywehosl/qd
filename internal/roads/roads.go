@@ -11,7 +11,7 @@ import (
 	"github.com/jaywehosl/qd/internal/qsrv/uplink/quicconn"
 )
 
-const quicHeadStart = 300 * time.Millisecond
+const quicHeadStart = time.Second
 
 var (
 	only      atomic.Bool

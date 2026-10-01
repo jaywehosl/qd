@@ -14,7 +14,7 @@ import (
 )
 
 func (d steered) Ping(ctx context.Context, dst netip.Addr, ttl uint8, payload []byte) (netstack.Echo, error) {
-	p, ok := d.node.dialerFor(ctx, d.grant, d.s.heading(), d.hops).(netstack.Pinger)
+	p, ok := d.node.dialerFor(ctx, d.grant, d.s.heading(), d.hops, origin{}).(netstack.Pinger)
 	if !ok {
 		return netstack.Echo{}, errors.New("this route cannot ping")
 	}

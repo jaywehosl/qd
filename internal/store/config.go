@@ -410,6 +410,7 @@ type NetworkSettings struct {
 	StatsSeconds     int    `json:"statsSeconds"`
 	Pool             string `json:"pool"`
 	BrutalMbit       int    `json:"brutalMbit"`
+	BBRProfile       string `json:"bbrProfile"`
 	MaxStreams       int    `json:"maxStreams"`
 	StreamWindow     int    `json:"streamWindowKb"`
 	MaxStreamWindow  int    `json:"maxStreamWindowKb"`
@@ -437,6 +438,7 @@ func defaultNetworkSettings() NetworkSettings {
 		MTU:              1500,
 		StatsSeconds:     5,
 		Pool:             "10.7.0.0/16",
+		BBRProfile:       "standard",
 		MaxStreams:       65536,
 		StreamWindow:     2048,
 		MaxStreamWindow:  6144,
@@ -452,14 +454,14 @@ func (d *DB) NetworkSettings() (NetworkSettings, error) {
 	out := defaultNetworkSettings()
 	err := d.sql.QueryRow(
 		`SELECT refresh_minutes, dns_primary, dns_secondary, dns_cache, dns_min_ttl,
-		        dns_max_ttl, dns_stale, mtu, stats_seconds, pool, brutal_mbit,
+		        dns_max_ttl, dns_stale, mtu, stats_seconds, pool, brutal_mbit, bbr_profile,
 		        max_streams, stream_window, max_stream_window, conn_window, max_conn_window,
 		        idle_seconds, keepalive_seconds, socket_buffer, route_list, route_services, ech_name,
 		        client_version, client_releases
 		 FROM network WHERE id = 1`).Scan(
 		&out.RefreshMinutes, &out.DNSPrimary, &out.DNSSecondary,
 		&out.DNSCache, &out.DNSMinTTL, &out.DNSMaxTTL, &out.DNSStale,
-		&out.MTU, &out.StatsSeconds, &out.Pool, &out.BrutalMbit, &out.MaxStreams, &out.StreamWindow, &out.MaxStreamWindow,
+		&out.MTU, &out.StatsSeconds, &out.Pool, &out.BrutalMbit, &out.BBRProfile, &out.MaxStreams, &out.StreamWindow, &out.MaxStreamWindow,
 		&out.ConnWindow, &out.MaxConnWindow, &out.IdleSeconds, &out.KeepAliveSeconds,
 		&out.SocketBuffer, &out.RouteList, &out.RouteServices, &out.ECHName,
 		&out.ClientVersion, &out.ClientReleases)
@@ -535,6 +537,11 @@ func (s NetworkSettings) sane() NetworkSettings {
 	if s.BrutalMbit < 0 {
 		s.BrutalMbit = 0
 	}
+	switch s.BBRProfile {
+	case "conservative", "standard", "aggressive":
+	default:
+		s.BBRProfile = fallback.BBRProfile
+	}
 	s.ECHName = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(s.ECHName), "."))
 	s.ClientVersion = strings.TrimSpace(s.ClientVersion)
 	return s
@@ -569,14 +576,14 @@ func (d *DB) SaveNetworkSettings(s NetworkSettings) error {
 		`UPDATE network SET refresh_minutes = ?, dns_primary = ?, dns_secondary = ?,
 		        dns_cache = ?, dns_min_ttl = ?, dns_max_ttl = ?, dns_stale = ?,
 		        mtu = ?, stats_seconds = ?,
-		        pool = ?, brutal_mbit = ?, max_streams = ?, stream_window = ?,
+		        pool = ?, brutal_mbit = ?, bbr_profile = ?, max_streams = ?, stream_window = ?,
 		        max_stream_window = ?, conn_window = ?, max_conn_window = ?,
 		        idle_seconds = ?, keepalive_seconds = ?, socket_buffer = ?, route_list = ?, route_services = ?,
 		        ech_name = ?, client_version = ?, client_releases = ?
 		 WHERE id = 1`,
 		s.RefreshMinutes, s.DNSPrimary, s.DNSSecondary,
 		s.DNSCache, s.DNSMinTTL, s.DNSMaxTTL, s.DNSStale,
-		s.MTU, s.StatsSeconds, s.Pool, s.BrutalMbit,
+		s.MTU, s.StatsSeconds, s.Pool, s.BrutalMbit, s.BBRProfile,
 		s.MaxStreams, s.StreamWindow, s.MaxStreamWindow, s.ConnWindow, s.MaxConnWindow,
 		s.IdleSeconds, s.KeepAliveSeconds, s.SocketBuffer, s.RouteList, s.RouteServices,
 		s.ECHName, s.ClientVersion, s.ClientReleases)

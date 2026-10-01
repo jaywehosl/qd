@@ -1,6 +1,7 @@
 package qdmobile
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -47,8 +48,30 @@ func (p platform) SetKey(key *qdcrypt.Key) {
 
 func (p platform) SetExit(egress bool) { p.c.applyExit(egress) }
 
-func (p platform) SetFixedRate(mbit int) {
+func (p platform) SetCarriage(mbit int, profile string) {
 	p.c.rate.Store(int64(mbit))
+	p.c.profile.Store(&profile)
+	p.c.mu.Lock()
+	held, running := p.c.carried, p.c.running
+	p.c.mu.Unlock()
+	if running && held != p.c.carriage() {
+		say("carry: the congestion control changed, the tunnel comes back with it")
+		go p.c.lost()
+	}
+}
+
+func (c *Client) bbr() string {
+	if held := c.profile.Load(); held != nil {
+		return *held
+	}
+	return ""
+}
+
+func (c *Client) carriage() string {
+	if rate := c.rate.Load(); rate > 0 {
+		return fmt.Sprintf("brutal %d", rate)
+	}
+	return "bbr " + cmp.Or(c.bbr(), "standard")
 }
 
 func (p platform) SyncControlRelays(relays []relay.Link) { p.c.wire().SetRelays(relays) }
