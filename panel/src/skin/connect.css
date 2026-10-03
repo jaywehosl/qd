@@ -477,6 +477,8 @@ html.is-dark .cx-duo .cx-card {
 }
 
 html.is-dark .cx-duo .cx-power { box-shadow: none; }
+html.is-dark :where(.cx-power) { background: var(--card); }
+html.is-dark :where(.cx-power > .cx-exit) { background: var(--idle); }
 
 .cx-stage { z-index: 2; }
 
