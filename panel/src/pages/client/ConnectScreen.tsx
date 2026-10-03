@@ -9,7 +9,7 @@ import { fetchClientNodes, type ClientState } from '@/hooks/useClientState';
 import { shortBits } from '@/lib/rate';
 import { progressOf, useUpdate } from '@/hooks/useUpdate';
 import { useSetup } from '@/hooks/useSetup';
-import { HOST_EVENT, phone } from '@/lib/phone';
+import { HOST_EVENT, phone, worded } from '@/lib/phone';
 import FlowCanvas from './FlowCanvas';
 import UpdateShell from './UpdateShell';
 import { updateWord } from './UpdateButton';
@@ -207,12 +207,18 @@ export default function ConnectScreen({
   const stamp = state.subscription?.lastRefresh ?? 0;
   const seen = useRef(stamp);
   const [pulse, setPulse] = useState(false);
+  const shown = useRef(0);
+  if (refreshing) shown.current = Number.POSITIVE_INFINITY;
+  else if (shown.current === Number.POSITIVE_INFINITY) shown.current = Date.now() + 4000;
   useEffect(() => {
     if (stamp === seen.current) return;
     const first = seen.current === 0;
     seen.current = stamp;
-    if (main && !first) setPulse(true);
+    if (main && !first && Date.now() > shown.current) setPulse(true);
   }, [stamp, main]);
+  useEffect(() => {
+    if (refreshing) setPulse(true);
+  }, [refreshing]);
   useEffect(() => {
     if (!pulse) return undefined;
     const id = window.setTimeout(() => setPulse(false), PULSE * tempo());
@@ -246,8 +252,7 @@ export default function ConnectScreen({
   });
 
   const exiting = state.egress && state.allowExit !== false;
-  const [hop = '', veil] = (state.connected && state.road ? state.road : '').split('·');
-  const road = hop ? hop + (exiting ? '+H3' : '') + (veil ? '·' + veil : '') : '';
+  const road = state.connected && state.road ? state.road + (exiting ? '+H3' : '') : '';
   const lastNode = useRef('');
   if (state.node?.name) lastNode.current = state.node.name;
 
@@ -429,7 +434,10 @@ export default function ConnectScreen({
   if (at <= 0.01) peaked.current = false;
   const parting = going || (!state.connected && peaked.current && at > 0.01);
   const tunnel = parting ? 'disconnecting' : at <= 0.01 ? 'ready' : at < GATE + 0.09 ? 'connecting' : 'node';
-  const tag = (refreshing || pulse) && (tunnel === 'ready' || tunnel === 'node') ? 'updating' : tunnel;
+  const live = (refreshing || pulse) && (tunnel === 'ready' || tunnel === 'node') ? 'updating' : tunnel;
+  const kept = useRef(live);
+  if (headState === 'normal') kept.current = live;
+  const tag = kept.current;
   const [slideTag, tagEase] = useSlide(tag);
 
   const word = tunnel === 'ready'
@@ -512,8 +520,8 @@ export default function ConnectScreen({
         </div>
         <div className={`cx-head__say${slide('cheer')}`} aria-hidden={headState !== 'cheer'}>
           {cheerKind === 'delayed' && !justUpdated
-            ? (state.connected ? t('client.update.delayedOnline') : t('client.update.delayedHead'))
-            : (state.connected ? t('client.update.doneConnected') : t('client.update.done'))}
+            ? (state.connected ? t('client.update.delayedOnline', worded()) : t('client.update.delayedHead'))
+            : (state.connected ? t('client.update.doneConnected', worded()) : t('client.update.done'))}
         </div>
       </section>
 

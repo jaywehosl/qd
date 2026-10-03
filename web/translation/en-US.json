@@ -460,6 +460,7 @@
       "manual": "Download manually",
       "done": "Updated successfully",
       "doneConnected": "Updated successfully and connected",
+      "doneConnected_phone": "Updated and connected",
       "delayedTitle": "Update is delayed",
       "delayedText": "Your qd will ask for an update in {when} again. Your connection is intact and you can proceed to work.",
       "delayedNever": "Your qd will not ask for this update again; update from Settings whenever you like. Your connection is intact and you can proceed to work.",
@@ -467,6 +468,7 @@
       "when12h": "12 hours",
       "when1d": "1 day",
       "delayedOnline": "Update is delayed, connection is online",
+      "delayedOnline_phone": "Update delayed",
       "delayedHead": "Update is delayed",
       "serviceHead": "Service required",
       "manualHead": "Manual service required"

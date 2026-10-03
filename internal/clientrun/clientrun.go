@@ -145,8 +145,13 @@ func Carry(ctx context.Context, p Plan) (*Carried, error) {
 		go dns.KeepWarm(out.Halt)
 	}
 
-	out.tell(p.Say, "carry: up in %d ms through %s as %s, node gave %s",
-		time.Since(began).Milliseconds(), out.Endpoint, out.Live.Path().Short(), assigned)
+	way := out.Live.Path()
+	veil := ""
+	if way.Hidden {
+		veil = " +ech"
+	}
+	out.tell(p.Say, "carry: up in %d ms through %s as %s%s, node gave %s",
+		time.Since(began).Milliseconds(), out.Endpoint, way.Short(), veil, assigned)
 	return out, nil
 }
 

@@ -68,7 +68,7 @@ export function useClientState() {
       if (!msg?.success) return null;
       return parseMsg(msg, RefreshResultSchema, 'client/subscription/refresh').obj ?? null;
     },
-    onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ['client'] }); },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['client'] }),
   });
 
   return {
