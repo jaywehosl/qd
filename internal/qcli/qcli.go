@@ -450,7 +450,8 @@ func (t *Tunnel) Six() (netip.Prefix, bool) {
 }
 
 func (t *Tunnel) Path() roads.Path {
-	return roads.Path{Endpoint: t.endpoint, OverTCP: t.overTCP, Relay: t.weblink}
+	hidden, _ := t.road.(interface{ Hidden() bool })
+	return roads.Path{Endpoint: t.endpoint, OverTCP: t.overTCP, Relay: t.weblink, Hidden: hidden != nil && hidden.Hidden()}
 }
 
 func (t *Tunnel) Peers() []netip.Addr { return t.peers }

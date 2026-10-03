@@ -246,7 +246,8 @@ export default function ConnectScreen({
   });
 
   const exiting = state.egress && state.allowExit !== false;
-  const road = state.connected && state.road ? state.road + (exiting ? '+H3' : '') : '';
+  const [hop = '', veil] = (state.connected && state.road ? state.road : '').split('·');
+  const road = hop ? hop + (exiting ? '+H3' : '') + (veil ? '·' + veil : '') : '';
   const lastNode = useRef('');
   if (state.node?.name) lastNode.current = state.node.name;
 

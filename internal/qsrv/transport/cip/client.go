@@ -33,6 +33,8 @@ type Client struct {
 
 func (c *Client) H3Conn() *http3.ClientConn { return c.cc }
 
+func (c *Client) Hidden() bool { return c.qc.QUIC().ConnectionState().TLS.ECHAccepted }
+
 func (c *Client) WritePacket(b []byte) (icmp []byte, err error) { return c.ip.WritePacket(b) }
 
 func (c *Client) ReadPacket(b []byte) (int, error) { return c.ip.ReadPacket(b) }

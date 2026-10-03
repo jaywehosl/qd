@@ -24,6 +24,7 @@ type Path struct {
 	Endpoint string
 	OverTCP  bool
 	Relay    string
+	Hidden   bool
 }
 
 func (p Path) String() string {
@@ -38,6 +39,13 @@ func (p Path) String() string {
 }
 
 func (p Path) Short() string {
+	if p.Hidden {
+		return p.hop() + "·ECH"
+	}
+	return p.hop()
+}
+
+func (p Path) hop() string {
 	switch {
 	case p.Relay != "":
 		return "R+H3"
