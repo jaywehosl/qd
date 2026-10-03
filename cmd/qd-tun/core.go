@@ -18,9 +18,9 @@ func newAdminUI(*qdcrypt.Key, *clientstate.DB) *adminUI { return nil }
 
 func (*adminUI) SetKey(*qdcrypt.Key) {}
 
-func (*adminUI) peers() []string { return nil }
+func (*adminUI) Peers() []string { return nil }
 
-func (*adminUI) live() []localapi.Push { return nil }
+func (*adminUI) Feed() []localapi.Push { return nil }
 
 func (*adminUI) ServeHTTP(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) }
 

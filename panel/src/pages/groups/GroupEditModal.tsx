@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { PlusOutlined } from '@ant-design/icons';
+import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 
 import { Button, Dialog, Divider, Field, Input, Switch, Tag } from '@/components/ds';
+import { VerticalTabs } from '@/components/ui';
+import { phone } from '@/lib/phone';
 import { getMessage } from '@/utils/messageBus';
 import { clientsApi } from '@/generated/client';
 import { useFormSeed } from '@/hooks/useFormSeed';
@@ -205,34 +207,63 @@ export default function GroupEditModal({
     }
   }
 
+  const onPhone = !!phone();
+  const [tab, setTab] = useState('general');
+  const shows = (part: string) => !onPhone || tab === part;
+
   return (
     <Dialog
       open={open}
       onOpenChange={(o) => { if (!o && !saving) onClose(); }}
       width={720}
       autoHeight
-      title={(
+      title={onPhone ? (
+        <span className="ms-title">
+          <small>{t('pages.groups.editGroup', { defaultValue: 'Edit Group' })}</small>
+          <span>{group?.name ?? '—'}</span>
+        </span>
+      ) : (
         <span className="ef-title">
           {t('edit', { defaultValue: 'Edit' })}
           <Tag tone="success" className="ef-title__node">{group?.name ?? '—'}</Tag>
           {t('pages.groups.groupWord', { defaultValue: 'group' })}
         </span>
       )}
-      footer={
+      footer={onPhone ? (
+        <div className="ms-actions">
+          <Button onClick={onClose}>{t('close')}</Button>
+          <Button variant="primary" loading={saving} onClick={submit}>{t('save')}</Button>
+        </div>
+      ) : (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
           <span style={{ marginInlineStart: 'auto', display: 'flex', gap: 8 }}>
             <Button onClick={onClose}>{t('close')}</Button>
             <Button variant="primary" loading={saving} onClick={submit}>{t('save')}</Button>
           </span>
         </div>
-      }
+      )}
     >
       <div className="group-edit">
+      {onPhone && (
+        <div className="ge-tabs">
+          <VerticalTabs
+            items={[
+              { key: 'general', label: t('pages.groups.tabGeneral', { defaultValue: 'General' }) },
+              ...(relayEnable ? [{ key: 'relays', label: t('pages.groups.tabRelays', { defaultValue: 'Relays' }) }] : []),
+              { key: 'members', label: t('pages.groups.tabMembers', { defaultValue: 'Members' }) },
+            ]}
+            activeKey={tab}
+            onChange={setTab}
+          />
+        </div>
+      )}
+      {shows('general') && (
+      <>
       <div className="ge-head">
         <Field label={t('pages.groups.groupTag', { defaultValue: 'Group Tag' })}>
           <Input value={name} onChange={(e) => setName(e.target.value)} />
         </Field>
-        <Field label={t('pages.groups.deviceLimit', { defaultValue: 'Device limit (0 = unlimited)' })}>
+        <Field label={t('pages.groups.deviceLimit', { defaultValue: 'Device limit' })}>
           <Input
             type="number"
             min={0}
@@ -282,8 +313,10 @@ export default function GroupEditModal({
           <Switch checked={allowCore} onChange={setAllowCore} aria-label={t('pages.groups.allowCore')} />
         </div>
       </div>
+      </>
+      )}
 
-      {relayEnable && (
+      {shows('relays') && relayEnable && (
         relayNodes.length === 0 ? (
           <div className="ge-empty">{t('pages.groups.relayNoNodes', { defaultValue: 'Pick inbounds first — relay links are set per ingress.' })}</div>
         ) : (
@@ -307,7 +340,13 @@ export default function GroupEditModal({
                         onChange={(e) => setRow(nid, at, e.target.value)}
                         placeholder={t('pages.groups.relayLink', { defaultValue: 'public document link id' })}
                       />
-                      <Button danger onClick={() => dropRow(nid, at)}>{t('delete')}</Button>
+                      {onPhone ? (
+                        <button type="button" className="mc-icon is-danger" aria-label={t('delete')} onClick={() => dropRow(nid, at)}>
+                          <DeleteOutlined />
+                        </button>
+                      ) : (
+                        <Button danger onClick={() => dropRow(nid, at)}>{t('delete')}</Button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -317,6 +356,8 @@ export default function GroupEditModal({
         )
       )}
 
+      {shows('members') && (
+      <>
       <Divider>{t('pages.groups.inboundsInGroup', { defaultValue: 'Inbounds in group' })}</Divider>
       {activeInbounds.length === 0 ? (
         <div className="ge-empty">{t('pages.groups.noInbounds', { defaultValue: 'No active entrypoints.' })}</div>
@@ -359,6 +400,8 @@ export default function GroupEditModal({
             );
           })}
         </div>
+      )}
+      </>
       )}
       </div>
     </Dialog>

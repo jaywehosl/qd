@@ -9,8 +9,6 @@ import {
   ExclamationCircleOutlined,
   EyeInvisibleOutlined,
   EyeOutlined,
-  InfoCircleOutlined,
-  MoreOutlined,
   PlusOutlined,
   ReloadOutlined,
   ThunderboltOutlined,
@@ -21,15 +19,15 @@ import {
   Card,
   DataTable,
   Dialog,
-  DropdownMenu,
   Switch,
   Tag,
   Tooltip,
   TooltipProvider,
   type ColumnDef,
-  type MenuEntry,
 } from '@/components/ds';
+import { cellOf } from '@/components/ui';
 import { usePublish } from '@/layouts/PublishController';
+import { useHold } from '@/hooks/useHold';
 import type { NodeRecord } from '@/api/queries/useNodesQuery';
 interface NodeListProps {
   nodes: NodeRecord[];
@@ -72,9 +70,11 @@ function StatusLabel({ status }: { status?: string }) {
   );
 }
 
-function formatPct(p?: number): string {
-  if (typeof p !== 'number' || Number.isNaN(p)) return '-';
-  return `${p.toFixed(1)}%`;
+function dotOf(n: NodeRecord) {
+  if (!n.enable) return 'disabled';
+  if (n.status === 'online') return 'online';
+  if (n.status === 'waiting') return 'expiring';
+  return 'depleted';
 }
 
 function formatUptime(secs?: number): string {
@@ -116,7 +116,8 @@ export default function NodeList({
   const published = draft?.publishedRevision ?? 0;
 
   const [showAddress, setShowAddress] = useState(false);
-  const [statsNode, setStatsNode] = useState<NodeRow | null>(null);
+  const hold = useHold();
+  const [openedId, setOpenedId] = useState<number | null>(null);
 
   const dataSource = useMemo<NodeRow[]>(
     () => nodes
@@ -279,128 +280,132 @@ export default function NodeList({
     },
   ], [t, showAddress, relativeTime, published, onToggleEnable, onProbe, onSync, onEdit, onDelete]);
 
-  function mobileMenu(record: NodeRow): MenuEntry[] {
-    return [
-      { key: 'probe', icon: <ThunderboltOutlined />, label: t('pages.nodes.probe'), onSelect: () => onProbe(record) },
-      { key: 'edit', icon: <EditOutlined />, label: t('edit'), onSelect: () => onEdit(record) },
-      { key: 'sync', icon: <CloudSyncOutlined />, label: t('pages.nodes.syncNode', { defaultValue: 'Copy the network database onto this node' }), onSelect: () => onSync(record) },
-      { key: 'delete', icon: <DeleteOutlined />, label: t('delete'), danger: true, onSelect: () => onDelete(record) },
-    ];
-  }
+  const opened = dataSource.find((n) => n.id === openedId) ?? null;
 
   return (
     <TooltipProvider>
       <>
-      <div className="clients-add">
-        <div className="vertical-tabs-container">
-          <button type="button" className="vtab-btn is-active" onClick={onAdd}>
-            <span className="vtab-icon"><PlusOutlined /></span>
-            {t('pages.nodes.addNode')}
-          </button>
+      {!isMobile && (
+        <div className="clients-add">
+          <div className="vertical-tabs-container">
+            <button type="button" className="vtab-btn is-active" onClick={onAdd}>
+              <span className="vtab-icon"><PlusOutlined /></span>
+              {t('pages.nodes.addNode')}
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       <Card flush>
         {isMobile ? (
           <>
-            <div className="node-cards">
-              {dataSource.length === 0 ? (
+            <div className="mc-head">
+              <span>{t('pages.nodes.totalNodes')}: {dataSource.length}</span>
+              <button type="button" className="mc-add" aria-label={t('pages.nodes.addNode')} onClick={onAdd}>
+                <PlusOutlined />
+              </button>
+            </div>
+            <div className="mc-list">
+              {dataSource.length === 0 && (
                 <div className="card-empty">
                   <ClusterOutlined style={{ fontSize: 28, opacity: 0.5 }} />
                   <div>{t('noData')}</div>
                 </div>
-              ) : (
-                dataSource.map((record) => (
-                  <div key={record.id} className="node-card">
-                    <div className="card-head">
-                      <StatusDot status={record.status} />
-                      <span className="node-name">{record.name}</span>
-                      <div className="card-actions" onClick={(e) => e.stopPropagation()}>
-                        <Tooltip title={t('info')}>
-                          <InfoCircleOutlined className="row-action-trigger" onClick={() => setStatsNode(record)} />
-                        </Tooltip>
-                        <Switch checked={!!record.enable} onChange={(v) => onToggleEnable(record, v)} />
-                        <DropdownMenu
-                          items={mobileMenu(record)}
-                          trigger={<MoreOutlined className="row-action-trigger" />}
-                        />
-                      </div>
-                    </div>
-
-                  </div>
-                ))
               )}
-            </div>
-
-            <Dialog
-              open={!!statsNode}
-              onOpenChange={(o) => !o && setStatsNode(null)}
-              width={360}
-              title={statsNode?.name || ''}
-            >
-              {statsNode && (
-                <div className="card-stats">
-                  {statsNode.remark && (
-                    <div className="stat-row">
-                      <span className="stat-label">{t('pages.nodes.name')}</span>
-                      <span>{statsNode.remark}</span>
-                    </div>
-                  )}
-                  <div className="stat-row">
-                    <span className="stat-label">{t('pages.nodes.address')}</span>
-                    <span className={showAddress ? 'address-visible' : 'address-hidden'}>{statsNode.url}</span>
-                    <Tooltip title={t('pages.index.toggleIpVisibility')}>
-                      {showAddress ? (
-                        <EyeOutlined className="ip-toggle-icon" onClick={() => setShowAddress(false)} />
-                      ) : (
-                        <EyeInvisibleOutlined className="ip-toggle-icon" onClick={() => setShowAddress(true)} />
+              {dataSource.map((record) => {
+                const applied = record.appliedRevision || 0;
+                const lagging = published > 0 && applied < published;
+                const ms = record.latencyMs || 0;
+                return (
+                  <div key={record.id} className="mc is-tap" {...hold(() => setOpenedId(record.id), () => onEdit(record))}>
+                    <span className={`mc__dot is-${dotOf(record)}`} />
+                    <div className="mc__body">
+                      <span className="mc__name">{record.name}</span>
+                      <span className="mc__sub">
+                        <span>{(record as { role?: string }).role || '-'}</span>
+                        {record.status === 'online' && <span>{formatUptime(record.uptimeSecs)}</span>}
+                        <span>{record.onlineCount || 0} / {record.clientCount || 0}</span>
+                        <span>{ms > 0 ? `${ms} ms` : t(`pages.nodes.statusValues.${record.status || 'unknown'}`)}</span>
+                      </span>
+                      {lagging && (
+                        <span className="mc__note is-warning">
+                          {applied ? t('pages.nodes.behindBy', { n: published - applied, current: published }) : t('pages.nodes.neverApplied')}
+                        </span>
                       )}
-                    </Tooltip>
+                    </div>
+                    <span className="mc__end" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
+                      <Switch checked={!!record.enable} onChange={(v) => onToggleEnable(record, v)} />
+                    </span>
                   </div>
-                  <div className="stat-row">
-                    <span className="stat-label">{t('pages.nodes.status')}</span>
-                    <StatusDot status={statsNode.status} />
-                    <StatusLabel status={statsNode.status} />
-                    {statsNode.lastError && (
-                      <Tooltip title={statsNode.lastError}>
-                        <ExclamationCircleOutlined style={{ color: 'var(--color-warning)' }} />
-                      </Tooltip>
+                );
+              })}
+            </div>
+            <Dialog
+              open={opened !== null}
+              onOpenChange={(o) => !o && setOpenedId(null)}
+              title={opened?.name ?? ''}
+              autoHeight
+              footer={opened && (
+                <div className="ms-foot">
+                  <Button danger onClick={() => { setOpenedId(null); onDelete(opened); }}>{t('delete')}</Button>
+                  <Button icon={<CloudSyncOutlined />} onClick={() => { setOpenedId(null); onSync(opened); }}>
+                    {t('pages.nodes.sync', { defaultValue: 'Sync' })}
+                  </Button>
+                  <Button variant="primary" onClick={() => { setOpenedId(null); onEdit(opened); }}>{t('edit')}</Button>
+                </div>
+              )}
+            >
+              {opened && (
+                <div className="ms">
+                  <div className="ms-status">
+                    <span className={`mc__dot is-${dotOf(opened)}`} />
+                    <StatusLabel status={opened.status} />
+                    {opened.status === 'offline' && (
+                      <Button size="sm" icon={<ReloadOutlined />} onClick={() => onProbe(opened)}>{t('pages.nodes.reconnect')}</Button>
                     )}
+                    <span className="ms-status__state">{opened.enable ? t('enabled') : t('disabled')}</span>
                   </div>
-                  <div className="stat-row">
-                    <span className="stat-label">{t('pages.nodes.cpu')}</span>
-                    <Tag>{formatPct(statsNode.cpuPct)}</Tag>
-                  </div>
-                  <div className="stat-row">
-                    <span className="stat-label">{t('pages.nodes.mem')}</span>
-                    <Tag>{formatPct(statsNode.memPct)}</Tag>
-                  </div>
-                  <div className="stat-row">
-                    <span className="stat-label">{t('pages.nodes.uptime')}</span>
-                    <Tag>{formatUptime(statsNode.uptimeSecs)}</Tag>
-                  </div>
-                  <div className="stat-row">
-                    <span className="stat-label">{t('pages.nodes.revision')}</span>
-                    {(() => {
-                      const applied = statsNode.appliedRevision || 0;
-                      if (!published) return <Tag>{applied || '—'}</Tag>;
-                      if (!applied) return <Tag tone="warning">{t('pages.nodes.neverApplied')}</Tag>;
-                      if (applied >= published) return <Tag tone="success">{applied}</Tag>;
-                      return <Tag tone="warning">{applied} / {published}</Tag>;
-                    })()}
-                  </div>
-                  <div className="stat-row">
-                    <span className="stat-label">{t('pages.nodes.latency')}</span>
-                    <Tag>{statsNode.latencyMs && statsNode.latencyMs > 0 ? `${statsNode.latencyMs} ms` : '-'}</Tag>
-                  </div>
-                  <div className="stat-row">
-                    <span className="stat-label">{t('clients')}</span>
-                    <Tag tone={(statsNode.onlineCount || 0) > 0 ? 'primary' : 'neutral'}>{statsNode.onlineCount || 0}</Tag>
-                  </div>
-                  <div className="stat-row">
-                    <span className="stat-label">{t('pages.nodes.lastHeartbeat')}</span>
-                    <Tag>{relativeTime(statsNode.lastHeartbeat)}</Tag>
-                  </div>
+                  {opened.lastError && (
+                    <div className="ms-error"><ExclamationCircleOutlined /> {opened.lastError}</div>
+                  )}
+                  <section className="ms-sec">
+                    <div className="ms-row">
+                      <span className="ms-row__key">{t('pages.nodes.address')}</span>
+                      <span className="ms-row__val is-mono">
+                        <span className={showAddress ? 'address-visible' : 'address-hidden'}>{opened.url}</span>
+                      </span>
+                      <button type="button" className="mc-icon" aria-label={t('pages.index.toggleIpVisibility')} onClick={() => setShowAddress(!showAddress)}>
+                        {showAddress ? <EyeOutlined /> : <EyeInvisibleOutlined />}
+                      </button>
+                    </div>
+                    <div className="ms-row">
+                      <span className="ms-row__key">{t('pages.nodes.role')}</span>
+                      <span className="ms-row__val">{(opened as { role?: string }).role || '-'}</span>
+                    </div>
+                    <div className="ms-row">
+                      <span className="ms-row__key">{t('pages.nodes.revision')}</span>
+                      <span className="ms-row__val">{cellOf(columns, 'revision', opened)}</span>
+                    </div>
+                    <div className="ms-row">
+                      <span className="ms-row__key">{t('pages.nodes.uptime')}</span>
+                      <span className="ms-row__val">{formatUptime(opened.uptimeSecs)}</span>
+                    </div>
+                    <div className="ms-row">
+                      <span className="ms-row__key">{t('clients')}</span>
+                      <span className="ms-row__val">{opened.onlineCount || 0} / {opened.clientCount || 0}</span>
+                    </div>
+                    <div className="ms-row">
+                      <span className="ms-row__key">{t('pages.nodes.latency')}</span>
+                      <span className="ms-row__val">{(opened.latencyMs || 0) > 0 ? `${opened.latencyMs} ms` : '—'}</span>
+                      <button type="button" className="mc-icon" aria-label={t('pages.nodes.probe')} onClick={() => onProbe(opened)}>
+                        <ThunderboltOutlined />
+                      </button>
+                    </div>
+                    <div className="ms-row">
+                      <span className="ms-row__key">{t('pages.nodes.lastHeartbeat')}</span>
+                      <span className="ms-row__val">{relativeTime(opened.lastHeartbeat)}</span>
+                    </div>
+                  </section>
                 </div>
               )}
             </Dialog>

@@ -5,7 +5,6 @@
   background: var(--card);
 }
 
-html.is-dark .ds-table-wrap { border: 1px solid var(--edge); }
 
 .ds-table {
   width: 100%;
@@ -115,3 +114,8 @@ html.is-dark .ds-table-wrap { border: 1px solid var(--edge); }
   text-align: center;
   color: var(--text);
 }
+
+html.in-phone .ds-table th { padding: var(--step-2); white-space: normal; }
+html.in-phone .ds-table td { padding: 0 var(--step-2); }
+html.in-phone .ds-table__empty { padding: var(--step-5) var(--step-2); }
+html.in-phone .ds-table tbody tr:hover td { background: none; }

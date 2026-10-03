@@ -8,6 +8,7 @@ const RoleSchema = z.enum(ROUTING_ROLES).catch('tunnel');
 export const RoutingRuleSchema = z.object({
   id: z.number(),
   process: z.string(),
+  title: z.string().optional(),
   path: z.string().optional(),
   icon: z.string().optional(),
   role: RoleSchema,
@@ -25,6 +26,7 @@ export const RoutingStateSchema = z.object({
 
 export const ProcessSchema = z.object({
   name: z.string(),
+  title: z.string().optional(),
   path: z.string().optional(),
   icon: z.string().optional(),
   pid: z.number().optional(),

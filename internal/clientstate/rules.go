@@ -28,6 +28,7 @@ type Rule struct {
 	Matched int    `json:"matched"`
 	Running bool   `json:"running"`
 	Icon    string `json:"icon,omitempty"`
+	Title   string `json:"title,omitempty"`
 }
 
 func (d *DB) Rules() ([]Rule, error) {

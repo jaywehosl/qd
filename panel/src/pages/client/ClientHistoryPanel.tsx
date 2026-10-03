@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -82,7 +82,7 @@ const WINDOWS = [1, 5, 15, 60];
 function formatter(unit: Unit): (v: number) => string {
   if (unit === 'bits') return bitsPerSec;
   if (unit === 'rate') {
-    return (v) => `${Math.max(0, v).toFixed(v < 10 ? 1 : 0)}/s`;
+    return (v) => `${Number(Math.max(0, v).toFixed(v < 10 ? 1 : 0))}/s`;
   }
   return (v) => Math.round(Math.max(0, v)).toLocaleString();
 }
@@ -95,13 +95,13 @@ function clockLabel(unixSec: number, window: number): string {
   return `${hh}:${mm}:${String(d.getSeconds()).padStart(2, '0')}`;
 }
 
-export default function ClientHistoryPanel() {
+function ClientHistoryPanel({ live }: { live: boolean }) {
   const { t } = useTranslation();
   const { isMobile } = useMediaQuery();
   const [activeKey, setActiveKey] = useState('throughput');
   const [window_, setWindow] = useState(5);
 
-  const { data: points = [] } = useQuery<HistPoint[]>({
+  const { data: points = [], refetch } = useQuery<HistPoint[]>({
     queryKey: ['client', 'history', window_],
     queryFn: async () => {
       const msg = await HttpUtil.get<{ points?: HistPoint[] }>(
@@ -109,9 +109,15 @@ export default function ClientHistoryPanel() {
       );
       return msg?.success ? (msg.obj?.points ?? []) : [];
     },
-    refetchInterval: window_ <= 5 ? 2000 : 10000,
+    refetchInterval: live ? (window_ <= 5 ? 2000 : 10000) : false,
     refetchIntervalInBackground: true,
   });
+
+  useEffect(() => {
+    if (!live) return undefined;
+    const first = window.setTimeout(() => void refetch(), 320);
+    return () => window.clearTimeout(first);
+  }, [live, refetch]);
 
   const metric = useMemo(
     () => METRICS.find((m) => m.key === activeKey) ?? METRICS[0],
@@ -130,7 +136,9 @@ export default function ClientHistoryPanel() {
 
   const yFormatter = useMemo(() => formatter(metric.unit), [metric.unit]);
 
-  const chart = useCallback(() => (
+  const chart = useCallback(() => (points.length === 0 ? (
+    <div className="chp-void">{t('client.history.empty')}</div>
+  ) : (
     <Sparkline
       data={series[0] ?? []}
       data2={series[1]}
@@ -154,9 +162,10 @@ export default function ClientHistoryPanel() {
       valueMin={0}
       valueMax={null}
       yFormatter={yFormatter}
+      tickScale={metric.unit === 'bits' ? 8 : 1}
       extrema={{ show: metric.series.length === 1, formatter: yFormatter }}
     />
-  ), [series, metric, labels, yFormatter, t]);
+  )), [points.length, series, metric, labels, yFormatter, t]);
 
   return (
     <div className="chp">
@@ -185,10 +194,8 @@ export default function ClientHistoryPanel() {
           </button>
         ))}
       </div>
-
-      {points.length === 0 && (
-        <div className="chp-empty">{t('client.history.empty')}</div>
-      )}
     </div>
   );
 }
+
+export default memo(ClientHistoryPanel);

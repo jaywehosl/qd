@@ -1,16 +1,18 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { InfoCircleOutlined, SettingOutlined } from '@ant-design/icons';
 
-import { Button, Card, Dialog, Input, Select, Switch, Tag } from '@/components/ds';
+import { Button, Card, Dialog, Input, Select, Switch, Tag, toast } from '@/components/ds';
 import { SettingListItem, Spin, VerticalTabs } from '@/components/ui';
 import { HttpUtil, SizeFormatter } from '@/utils';
 import { useClientState } from '@/hooks/useClientState';
 import { useClientSettings } from '@/layouts/ClientSettingsController';
 import { resetAll } from '@/stores/notificationStore';
 import UpdateButton from './UpdateButton';
+import { useTheme } from '@/hooks/useTheme';
+import { HOST_EVENT, hostChecks, phone, worded } from '@/lib/phone';
 
 const TAB_SLUGS = ['preferences', 'about'];
 
@@ -50,6 +52,20 @@ export default function ClientSettingsPage() {
   const activeSlug = TAB_SLUGS.includes(slug) ? slug : 'preferences';
 
   const [confirm, setConfirm] = useState<'data' | 'all' | null>(null);
+
+  const onPhone = !!phone();
+  const { follow, setFollow } = useTheme();
+  const [checks, setChecks] = useState(hostChecks);
+  const saveJournal = () => {
+    const said = phone()?.journal?.() ?? '';
+    if (said.startsWith('Downloads/')) toast.success(said);
+    else toast.warning(said);
+  };
+  useEffect(() => {
+    const read = () => setChecks(hostChecks());
+    window.addEventListener(HOST_EVENT, read);
+    return () => window.removeEventListener(HOST_EVENT, read);
+  }, []);
 
   const { data: about } = useQuery<AboutPayload | null>({
     queryKey: ['client', 'about'],
@@ -103,7 +119,7 @@ export default function ClientSettingsPage() {
                 </div>
               ))}
             </div>
-            <p className="cset-note">{t('client.settings.sitesNote')}</p>
+            <p className="cset-note">{t('client.settings.sitesNote', worded())}</p>
           </Card>
 
           <div className="cset-danger">
@@ -132,6 +148,62 @@ export default function ClientSettingsPage() {
           />
         </SettingListItem>
 
+        {onPhone && (
+          <>
+            <SettingListItem paddings="small" title={t('client.settings.connectOnLaunch')}>
+              <Switch
+                checked={settings.manualBehaviour === 'openConnect' || settings.manualBehaviour === 'connect'}
+                onChange={(v) => patch({ manualBehaviour: v ? 'openConnect' : 'open' })}
+              />
+            </SettingListItem>
+
+            <SettingListItem
+              paddings="small"
+              title={t('client.settings.theme')}
+              description={t('client.settings.themeDesc')}
+            >
+              <Select
+                value={follow ? 'system' : 'button'}
+                onChange={(v) => setFollow(v === 'system')}
+                options={[
+                  { value: 'button', label: t('client.settings.themeButton') },
+                  { value: 'system', label: t('client.settings.themeSystem') },
+                ]}
+              />
+            </SettingListItem>
+
+            {(settings.fixedRate ?? 0) > 0 && (
+              <SettingListItem paddings="small" title={t('client.settings.rate')}>
+                <b>{settings.fixedRate} Mbit/s</b>
+              </SettingListItem>
+            )}
+
+            <div className="cset-head">{t('client.settings.resilience')}</div>
+            {checks.map((c) => (
+              <SettingListItem
+                key={c.id}
+                paddings="small"
+                title={(
+                  <span className="cset-check">
+                    <i className={`cset-check__dot is-${c.state}`} />
+                    {t(`client.settings.host.${c.id}.${c.state}`)}
+                  </span>
+                )}
+              >
+                <Button size="sm" onClick={() => phone()?.open?.(c.id)}>{t('client.settings.open')}</Button>
+              </SettingListItem>
+            ))}
+
+            <SettingListItem paddings="small" title={t('client.settings.journal')}>
+              <Button size="sm" onClick={saveJournal}>
+                {t('client.settings.journalSave')}
+              </Button>
+            </SettingListItem>
+          </>
+        )}
+
+        {!onPhone && (
+        <>
         <SettingListItem paddings="small" title={t('client.settings.autostart')}>
           <Switch checked={settings.autostart} onChange={(v) => patch({ autostart: v })} />
         </SettingListItem>
@@ -169,6 +241,8 @@ export default function ClientSettingsPage() {
             ]}
           />
         </SettingListItem>
+        </>
+        )}
 
       </>
     );

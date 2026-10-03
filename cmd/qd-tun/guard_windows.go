@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"slices"
 	"strconv"
 	"syscall"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -23,10 +25,26 @@ const (
 )
 
 func init() {
+	settleCursor()
 	if len(os.Args) > 2 && os.Args[1] == guardFlag {
 		standGuard(os.Args[2:])
 		os.Exit(0)
 	}
+}
+
+var (
+	peekMessage       = user32.NewProc("PeekMessageW")
+	getMessage        = user32.NewProc("GetMessageW")
+	postThreadMessage = user32.NewProc("PostThreadMessageW")
+)
+
+func settleCursor() {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	var msg [48]byte
+	peekMessage.Call(uintptr(unsafe.Pointer(&msg)), 0, 0, 0, 0)
+	postThreadMessage.Call(uintptr(windows.GetCurrentThreadId()), 0, 0, 0)
+	getMessage.Call(uintptr(unsafe.Pointer(&msg)), 0, 0, 0)
 }
 
 func namedEvent(name string, manual bool) windows.Handle {
@@ -54,6 +72,7 @@ func startGuard(tun *tunnel, stop <-chan struct{}) {
 	}
 	watcher := exec.Command(exe, append([]string{guardFlag, strconv.Itoa(os.Getpid())}, os.Args[1:]...)...)
 	watcher.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.DETACHED_PROCESS | windows.CREATE_NEW_PROCESS_GROUP}
+	bequeath(watcher)
 	if err := watcher.Start(); err != nil {
 		fmt.Printf("guard    not started: %v\n", err)
 		return

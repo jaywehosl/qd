@@ -25,8 +25,6 @@
   overflow: hidden;
 }
 
-html.is-dark .ds-dialog__content { border: 1px solid var(--edge); }
-
 .ds-dialog__header {
   display: flex;
   align-items: center;
@@ -72,63 +70,6 @@ html.is-dark .ds-dialog__content { border: 1px solid var(--edge); }
   border-top: 1px solid var(--edge);
 }
 
-.ds-drawer {
-  position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 101;
-  width: min(480px, 92vw);
-  display: flex;
-  flex-direction: column;
-  background: var(--ink);
-  border-left: 1px solid var(--edge);
-}
-
-.ds-drawer__body { flex: 1; padding: var(--step-4); overflow: auto; }
-
-.ds-drawer__footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--step-2);
-  padding: var(--step-3) var(--step-4);
-  border-top: 1px solid var(--edge);
-}
-
-.ds-toast-viewport {
-  position: fixed;
-  top: var(--step-3);
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 200;
-  display: flex;
-  flex-direction: column;
-  gap: var(--step-2);
-  pointer-events: none;
-}
-
-.ds-toast {
-  display: flex;
-  align-items: center;
-  gap: var(--step-2);
-  max-width: 520px;
-  padding: 10px var(--step-3);
-  border-radius: var(--radius-round);
-  background: var(--ink);
-  color: var(--bold);
-  font-size: var(--size-note);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
-  pointer-events: auto;
-}
-
-html.is-dark .ds-toast { border: 1px solid var(--edge); }
-
-.ds-toast__icon { display: grid; place-items: center; flex: 0 0 auto; }
-.ds-toast__text { min-width: 0; }
-.ds-toast--success .ds-toast__icon { color: var(--good); }
-.ds-toast--error .ds-toast__icon { color: #e03a2f; }
-.ds-toast--warning .ds-toast__icon { color: #f0a020; }
-
 .ds-tooltip {
   padding: 6px 10px;
   border-radius: var(--radius-chip);
@@ -138,6 +79,22 @@ html.is-dark .ds-toast { border: 1px solid var(--edge); }
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
   font-size: 12px;
   z-index: 300;
+}
+
+.qd-tip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  max-width: 320px;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.14s ease, transform 0.14s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.qd-tip.is-shown {
+  opacity: 1;
+  transform: none;
 }
 
 .ds-menu {
@@ -224,11 +181,6 @@ html.is-dark .ds-toast { border: 1px solid var(--edge); }
   align-items: start;
 }
 
-.cf-hint {
-  font-size: var(--size-note);
-  color: var(--text);
-}
-
 .cf-regen {
   display: flex;
   gap: var(--step-2);
@@ -311,3 +263,25 @@ html.is-dark .ds-toast { border: 1px solid var(--edge); }
   font-size: var(--size-body);
   font-weight: 600;
 }
+
+html.is-dark :is(.ds-tooltip, .ds-menu, .ds-popover, .ds-select__content) {
+  border-color: transparent;
+  background: var(--idle);
+}
+
+html.is-dark .ds-dialog__content { background: var(--card); }
+
+html.in-phone .ds-dialog__viewport {
+  grid-template-columns: minmax(0, 1fr);
+  padding: calc(var(--inset-top, 0px) + var(--step-3)) calc(var(--inset-right, 0px) + var(--step-3)) calc(var(--inset-bottom, 0px) + var(--step-3)) calc(var(--inset-left, 0px) + var(--step-3));
+  overflow: hidden;
+  transition: padding-bottom 0.25s cubic-bezier(0.2, 0, 0, 1);
+}
+html.in-phone .ds-dialog__content {
+  justify-self: center;
+  max-width: 100%;
+  max-height: calc(100vh - var(--inset-top, 0px) - var(--inset-bottom, 0px) - 2 * var(--step-3));
+  transition: max-height 0.25s cubic-bezier(0.2, 0, 0, 1);
+}
+html.in-phone .ds-dialog__title { font-size: 22px; line-height: 1.2; }
+html:not(.is-dark) .ds-dialog__content .ds-select { background: var(--card); }

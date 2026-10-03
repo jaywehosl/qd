@@ -111,53 +111,23 @@ export const clientApi = {
   clientApiReset<T = unknown>(body: { subscription?: boolean }, options?: HttpOptions): Promise<Msg<T>> {
     return HttpUtil.post<T>('/client/api/reset', body, { ...JSON_HEADERS, ...options });
   },
+
+  /** Windows only. Whether this copy of the client runs from Program Files. A copy that runs from anywhere else shows the install screen instead of the client. */
+  clientApiSetup<T = unknown>(params?: Record<string, unknown>, options?: HttpOptions): Promise<Msg<T>> {
+    return HttpUtil.get<T>('/client/api/setup', params, options);
+  },
+
+  /** Windows only. Copy the running client into Program Files, add it to the Start menu and to the list of installed apps, then restart from the installed copy; a tunnel that was up comes back. Removal is done from Windows settings and takes the */
+  clientApiSetupInstall<T = unknown>(body: { autostart: boolean; desktop: boolean }, options?: HttpOptions): Promise<Msg<T>> {
+    return HttpUtil.post<T>('/client/api/setup/install', body, { ...JSON_HEADERS, ...options });
+  },
 };
 
 /** Entrypoints */
 export const inboundsApi = {
-  /** Every entrypoint with its node, port and traffic counters. The counters are telemetry collected from the nodes, not something the panel maintains. */
-  list<T = unknown>(params?: Record<string, unknown>, options?: HttpOptions): Promise<Msg<T>> {
-    return HttpUtil.get<T>('/panel/api/inbounds/list', params, options);
-  },
-
   /** Picker projection: id, node, tag, port and the enable flag, without counters or certificate state. Feeds the entrypoint chooser in the group editor. */
   options<T = unknown>(params?: Record<string, unknown>, options?: HttpOptions): Promise<Msg<T>> {
     return HttpUtil.get<T>('/panel/api/inbounds/options', params, options);
-  },
-
-  /** One entrypoint by id. */
-  getById<T = unknown>(id: string | number, params?: Record<string, unknown>, options?: HttpOptions): Promise<Msg<T>> {
-    return HttpUtil.get<T>(`/panel/api/inbounds/get/${enc(id)}`, params, options);
-  },
-
-  /** Open a new entrypoint on a node. The port must be free on that node — the check is per node, not global, since two nodes may both listen on 443. Draft edit. */
-  add<T = unknown>(body: { nodeId: number; port: number; remark: string; enable: boolean }, options?: HttpOptions): Promise<Msg<T>> {
-    return HttpUtil.post<T>('/panel/api/inbounds/add', body, { ...JSON_HEADERS, ...options });
-  },
-
-  /** Change an entrypoint: port, name and enable flag. Moving the port rewrites the connection URI of every client whose group holds this entrypoint — they need the new link once the draft is published. */
-  updateById<T = unknown>(id: string | number, body?: unknown, options?: HttpOptions): Promise<Msg<T>> {
-    return HttpUtil.post<T>(`/panel/api/inbounds/update/${enc(id)}`, body, { ...JSON_HEADERS, ...options });
-  },
-
-  /** Flip only the enable flag. A disabled entrypoint stops accepting connections but stays in its groups, so re-enabling it does not require touching any client. */
-  setEnableById<T = unknown>(id: string | number, body?: unknown, options?: HttpOptions): Promise<Msg<T>> {
-    return HttpUtil.post<T>(`/panel/api/inbounds/setEnable/${enc(id)}`, body, { ...JSON_HEADERS, ...options });
-  },
-
-  /** Close an entrypoint and drop it from every group holding it. Clients whose group is left with no entrypoints keep their records but lose their route — check the group before deleting. Draft edit. */
-  delById<T = unknown>(id: string | number, body?: unknown, options?: HttpOptions): Promise<Msg<T>> {
-    return HttpUtil.post<T>(`/panel/api/inbounds/del/${enc(id)}`, body, options);
-  },
-
-  /** Zero the accumulated traffic of one entrypoint. Panel-side baseline shift, like the client counterpart — the node keeps counting and is not told. */
-  resetTrafficById<T = unknown>(id: string | number, body?: unknown, options?: HttpOptions): Promise<Msg<T>> {
-    return HttpUtil.post<T>(`/panel/api/inbounds/${enc(id)}/resetTraffic`, body, options);
-  },
-
-  /** Zero the accumulated traffic of every entrypoint. Collected history is discarded and cannot be recovered from the nodes — their own counters restarted at their last datapath start, not at yours. */
-  resetAllTraffics<T = unknown>(body?: unknown, options?: HttpOptions): Promise<Msg<T>> {
-    return HttpUtil.post<T>('/panel/api/inbounds/resetAllTraffics', body, options);
   },
 };
 
@@ -251,7 +221,7 @@ export const clientsApi = {
     return HttpUtil.post<T>('/panel/api/clients/groups/create', body, { ...JSON_HEADERS, ...options });
   },
 
-  /** Rename a group and carry the new name to every client holding it, in one transaction. Returns how many clients were relabelled. Draft edit — the connection URIs handed out afterwards carry the new name. */
+  /** Rename a group and carry the new name to every client holding it, in one transaction. Returns how many clients were relabeled. Draft edit — the connection URIs handed out afterwards carry the new name. */
   groupsRename<T = unknown>(body?: unknown, options?: HttpOptions): Promise<Msg<T>> {
     return HttpUtil.post<T>('/panel/api/clients/groups/rename', body, { ...JSON_HEADERS, ...options });
   },

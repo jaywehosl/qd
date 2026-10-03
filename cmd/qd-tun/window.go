@@ -5,10 +5,14 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
+	"time"
 	"unsafe"
 
 	webview2 "github.com/jchv/go-webview2"
@@ -20,7 +24,6 @@ import (
 type shell struct {
 	mu   sync.Mutex
 	live webview2.WebView
-	up   bool
 }
 
 var (
@@ -30,6 +33,97 @@ var (
 )
 
 const (
+	windowFlag  = "-window"
+	windowMutex = `Global\qdWindow`
+	windowShow  = `Global\qdWindowShow`
+	windowShut  = `Global\qdWindowShut`
+)
+
+func init() {
+	if len(os.Args) > 3 && os.Args[1] == windowFlag {
+		hostWindow(os.Args[2:])
+		os.Exit(0)
+	}
+}
+
+func nudge(event string) bool {
+	name, err := windows.UTF16PtrFromString(event)
+	if err != nil {
+		return false
+	}
+	handle, err := windows.OpenEvent(windows.EVENT_MODIFY_STATE, false, name)
+	if err != nil {
+		return false
+	}
+	defer windows.CloseHandle(handle)
+	return windows.SetEvent(handle) == nil
+}
+
+func windowUp() bool {
+	name, err := windows.UTF16PtrFromString(windowMutex)
+	if err != nil {
+		return false
+	}
+	held, err := windows.OpenMutex(windows.SYNCHRONIZE, false, name)
+	if err != nil {
+		return false
+	}
+	windows.CloseHandle(held)
+	return true
+}
+
+func shutWindow() {
+	if paneDev != "" || !nudge(windowShut) {
+		return
+	}
+	for i := 0; i < 30 && windowUp(); i++ {
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+func hostWindow(args []string) {
+	name, err := windows.UTF16PtrFromString(windowMutex)
+	if err != nil {
+		return
+	}
+	held, err := windows.CreateMutex(nil, false, name)
+	if held == 0 || err == windows.ERROR_ALREADY_EXISTS {
+		nudge(windowShow)
+		return
+	}
+	defer windows.CloseHandle(held)
+
+	paneData = args[1]
+	if len(args) > 3 {
+		paneDev, paneToken = args[2], args[3]
+	}
+	show, shut := namedEvent(windowShow, false), namedEvent(windowShut, false)
+
+	go func() {
+		for {
+			which, err := windows.WaitForMultipleObjects([]windows.Handle{show, shut}, false, windows.INFINITE)
+			if err != nil {
+				return
+			}
+			pane.mu.Lock()
+			open := pane.live
+			pane.mu.Unlock()
+			if which != windows.WAIT_OBJECT_0 {
+				if open == nil {
+					os.Exit(0)
+				}
+				open.Dispatch(open.Terminate)
+				return
+			}
+			if open != nil {
+				open.Dispatch(func() { front(open) })
+			}
+		}
+	}()
+	pane.carry(args[0])
+}
+
+const (
 	guardPage = false
 	headless  = false
 )
@@ -37,26 +131,30 @@ const (
 func bindPane(statePath, url, token string) {
 	paneData = filepath.Join(filepath.Dir(statePath), "webview")
 	paneToken = token
+	if !inherited {
+		shutWindow()
+	}
 }
 
 func (s *shell) show(url string) {
-	if url == "" {
+	if url == "" || nudge(windowShow) {
 		return
 	}
-
-	s.mu.Lock()
-	if s.up {
-		open := s.live
-		s.mu.Unlock()
-		if open != nil {
-			open.Dispatch(func() { front(open) })
-		}
+	exe, err := os.Executable()
+	if err != nil {
 		return
 	}
-	s.up = true
-	s.mu.Unlock()
-
-	go s.carry(url)
+	args := []string{windowFlag, url, paneData}
+	if paneDev != "" {
+		args = append(args, paneDev, paneToken)
+	}
+	host := exec.Command(exe, args...)
+	host.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.DETACHED_PROCESS | windows.CREATE_NEW_PROCESS_GROUP}
+	if err := host.Start(); err != nil {
+		fmt.Printf("window   not opened: %v\n", err)
+		return
+	}
+	host.Process.Release()
 }
 
 func (s *shell) carry(url string) {
@@ -65,7 +163,7 @@ func (s *shell) carry(url string) {
 
 	defer func() {
 		s.mu.Lock()
-		s.live, s.up = nil, false
+		s.live = nil
 		s.mu.Unlock()
 	}()
 

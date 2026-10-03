@@ -85,6 +85,8 @@
 
 .ds-input::placeholder { color: var(--text); }
 
+html.is-dark :is(.ds-input, .ds-select, .ds-field input, .ds-field textarea, .ds-field select):not(:focus) { border-color: transparent; }
+
 .ds-field {
   display: flex;
   flex-direction: column;
@@ -166,7 +168,7 @@
 
 .ds-card .ds-card { box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05); }
 
-html.is-dark .ds-card { border: 1px solid var(--edge); box-shadow: none; }
+html.is-dark .ds-card { box-shadow: none; }
 
 .ds-divider {
   height: 1px;
@@ -175,34 +177,11 @@ html.is-dark .ds-card { border: 1px solid var(--edge); box-shadow: none; }
   border: none;
 }
 
-.ds-segmented {
-  display: inline-flex;
-  gap: 3px;
-  padding: 3px;
-  border-radius: var(--radius-control);
-  background: var(--card);
-}
-
-.ds-segmented button {
-  padding: 7px var(--step-3);
-  border: none;
-  border-radius: 11px;
-  background: none;
-  color: var(--text);
-  font-size: var(--size-note);
-  cursor: pointer;
-}
-
-.ds-segmented button[aria-selected='true'],
-.ds-segmented button.is-active {
-  background: var(--good);
-  color: #fff;
-}
-
 .ds-select {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  justify-content: space-between;
   padding: 7px var(--step-2) 7px var(--step-3);
   border: none;
   border-radius: var(--radius-control);
@@ -213,6 +192,10 @@ html.is-dark .ds-card { border: 1px solid var(--edge); box-shadow: none; }
   cursor: pointer;
   transition: filter 0.16s ease;
 }
+
+.ds-select__face { display: grid; min-width: 0; text-align: start; }
+.ds-select__face > * { grid-area: 1 / 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ds-select__ghost { visibility: hidden; }
 
 .ds-select:hover { filter: brightness(0.97); }
 .ds-select:disabled { opacity: 0.5; cursor: default; }
@@ -235,8 +218,6 @@ html.is-dark .ds-card { border: 1px solid var(--edge); box-shadow: none; }
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
   overflow: hidden;
 }
-
-html.is-dark .ds-select__content { border: 1px solid var(--edge); }
 
 .ds-select__viewport {
   display: flex;
@@ -468,6 +449,9 @@ input[type='datetime-local']::-webkit-calendar-picker-indicator:hover { opacity:
 
 .cal-link:hover { color: var(--bold); }
 
+html.in-phone .cal { width: calc(var(--radix-popover-trigger-width) - 2px - 2 * var(--step-3)); }
+html.in-phone .cal-day { height: 40px; }
+
 .cal-done {
   margin-inline-start: auto;
   padding: 5px var(--step-3);
@@ -486,6 +470,6 @@ input[type='datetime-local']::-webkit-calendar-picker-indicator:hover { opacity:
 }
 
 html.is-dark .ds-popover:has(.cal) {
-  border-color: rgba(255, 255, 255, 0.16);
+  border-color: transparent;
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.6);
 }

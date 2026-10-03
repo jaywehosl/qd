@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   BellOutlined,
+  CrownOutlined,
 } from '@ant-design/icons';
 import { Button } from '@/components/ds';
 
@@ -17,8 +18,8 @@ import { useTheme } from '@/hooks/useTheme';
 import WindowButtons from '@/components/ui/WindowButtons';
 import BrandMark from '@/components/ui/BrandMark';
 import { useClientState } from '@/hooks/useClientState';
+import { phone } from '@/lib/phone';
 import {
-  InboundsIcon,
   ClientsIcon,
   GroupsIcon,
   NodesIcon,
@@ -26,10 +27,9 @@ import {
 
   ApiDocsIcon,
 } from '@/components/ui';
-type IconName = 'inbound' | 'team' | 'groups' | 'setting' | 'cluster' | 'apidocs';
+type IconName = 'team' | 'groups' | 'setting' | 'cluster' | 'apidocs';
 
 const iconByName: Record<IconName, ComponentType> = {
-  inbound: InboundsIcon,
   team: ClientsIcon,
   groups: GroupsIcon,
   setting: SettingsIcon,
@@ -41,18 +41,19 @@ const iconByName: Record<IconName, ComponentType> = {
 export default function AppSidebar() {
   const { t } = useTranslation();
   const { state: link } = useClientState();
-  const { isDark, isUltra, cycleTheme } = useTheme();
+  const { isDark, isUltra, cycleTheme, follow } = useTheme();
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { open: metricsOpen, toggle: toggleMetrics, notifyOpen, toggleNotify } = useMetricsPanel();
   const headerActions = useHeaderActions();
+  const onPhone = !!phone();
 
   const notifyActive = useSyncExternalStore(notifSubscribe, notifSnapshot, notifSnapshot).active;
   const notifyCount = useNotifications().length + notifyActive.length;
 
   const [clickedKey, setClickedKey] = useState<string | null>(null);
   useEffect(() => { setClickedKey(null); }, [pathname]);
-  const routeKey = useMemo(() => (pathname === '/panel' ? '/panel/inbounds' : pathname), [pathname]);
+  const routeKey = useMemo(() => (pathname === '/panel' ? '/panel/clients' : pathname), [pathname]);
   const activeKey = clickedKey ?? routeKey;
 
   const onLogoClick = useCallback(() => {
@@ -60,7 +61,6 @@ export default function AppSidebar() {
   }, [toggleMetrics]);
 
   const tabs = useMemo<{ key: string; icon: IconName; title: string }[]>(() => [
-    { key: '/panel/inbounds', icon: 'inbound', title: t('menu.inbounds') },
     { key: '/panel/clients', icon: 'team', title: t('menu.clients') },
     { key: '/panel/groups', icon: 'groups', title: t('menu.groups') },
     { key: '/panel/nodes', icon: 'cluster', title: t('menu.nodes') },
@@ -108,6 +108,18 @@ export default function AppSidebar() {
                   </li>
                 );
               })}
+              {onPhone && (
+                <li className="header-nav-item-wrapper">
+                  <button
+                    type="button"
+                    className="nav-menu-item"
+                    aria-label={t('client.menu.back')}
+                    onClick={() => navigate('/client', { viewTransition: true })}
+                  >
+                    <CrownOutlined />
+                  </button>
+                </li>
+              )}
             </ul>
           </nav>
         </div>
@@ -145,13 +157,15 @@ export default function AppSidebar() {
               <span className="notif-badge">{notifyCount > 99 ? '99+' : notifyCount}</span>
             )}
           </button>
-          <ThemeCycleButton
-            id="theme-cycle"
-            isDark={isDark}
-            isUltra={isUltra}
-            onCycle={() => cycleTheme('theme-cycle')}
-            ariaLabel={t('menu.theme')}
-          />
+          {!(onPhone && follow) && (
+            <ThemeCycleButton
+              id="theme-cycle"
+              isDark={isDark}
+              isUltra={isUltra}
+              onCycle={() => cycleTheme('theme-cycle')}
+              ariaLabel={t('menu.theme')}
+            />
+          )}
           <LanguageSelector />
           <WindowButtons />
           </div>

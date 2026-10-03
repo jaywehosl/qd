@@ -10,6 +10,7 @@ export interface ClientSettings {
   autostart: boolean;
   autostartBehaviour: string;
   manualBehaviour: string;
+  fixedRate?: number;
 }
 
 const SETTLE_MS = 600;

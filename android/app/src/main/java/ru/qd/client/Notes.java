@@ -48,13 +48,6 @@ public final class Notes {
         }
     }
 
-    public static void drop(Context context) {
-        NotificationManager manager = context.getSystemService(NotificationManager.class);
-        if (manager != null) {
-            manager.cancel(ID);
-        }
-    }
-
     public static Notification build(Context context) {
         channel(context);
 

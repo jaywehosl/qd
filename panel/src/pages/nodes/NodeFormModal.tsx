@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { useTranslation } from 'react-i18next';
 import { CopyOutlined } from '@ant-design/icons';
 
@@ -147,15 +148,22 @@ export default function NodeFormModal({
     if (free.length > 0) set('name', free[Math.floor(Math.random() * free.length)]);
   }, [open, values.role, pools]);
 
+  const { isMobile } = useMediaQuery();
+
   const title = useMemo(
-    () => (isEdit ? (
+    () => (isEdit && isMobile ? (
+      <span className="ms-title">
+        <small>{t('pages.nodes.editNode', { defaultValue: 'Edit Node' })}</small>
+        <span>{node?.name || '—'}</span>
+      </span>
+    ) : isEdit ? (
       <span className="ef-title">
         {t('edit', { defaultValue: 'Edit' })}
         <Tag tone="success" className="ef-title__node">{node?.name || '—'}</Tag>
         {t('pages.nodes.nodeWord', { defaultValue: 'node' })}
       </span>
     ) : t('pages.nodes.addNode')),
-    [isEdit, node?.name, t],
+    [isEdit, isMobile, node?.name, t],
   );
 
   const addressLabel = t("pages.nodes.authority", { defaultValue: "Domain clients dial" });
@@ -250,6 +258,12 @@ export default function NodeFormModal({
       okText={t('save')}
       confirmLoading={submitting}
       onOk={submit}
+      footer={isMobile ? (
+        <div className="ms-actions">
+          <Button onClick={() => onOpenChange(false)}>{t('cancel')}</Button>
+          <Button variant="primary" loading={submitting} onClick={submit}>{t('save')}</Button>
+        </div>
+      ) : undefined}
     >
       <div className="node-form">
         <div className="node-form-grid cols-2">

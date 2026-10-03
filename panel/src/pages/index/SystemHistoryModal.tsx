@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button, Select, Tabs } from '@/components/ds';
@@ -22,9 +22,9 @@ import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { useNodesQuery } from '@/api/queries/useNodesQuery';
 import NodeSelect from './NodeSelect';
 import LogView from './LogView';
-import type { Status } from '@/models/status';
 interface SystemHistoryModalProps {
-  status: Status;
+  tint?: string;
+  live: boolean;
 }
 
 interface MetricDef {
@@ -108,7 +108,7 @@ function formatFullTimestamp(unixSec: number): string {
   return `${MM}-${DD} ${time}`;
 }
 
-export default function SystemHistoryPanel({ status }: SystemHistoryModalProps) {
+function SystemHistoryPanel({ tint, live }: SystemHistoryModalProps) {
   const { t } = useTranslation();
   const { isMobile } = useMediaQuery();
   const { nodes } = useNodesQuery();
@@ -129,12 +129,13 @@ export default function SystemHistoryPanel({ status }: SystemHistoryModalProps) 
 
   const activeMetric = useMemo(() => METRICS.find((m) => m.key === activeKey), [activeKey]);
   const trName = (n?: string) => (n && n.startsWith('pages.') ? t(n) : n);
-  const strokeColor = activeMetric?.stroke || status?.cpu?.color || '#008771';
+  const strokeColor = activeMetric?.stroke || tint || '#008771';
   const yFormatter = useMemo(
     () => unitFormatter(activeMetric?.unit ?? '', activeKey),
     [activeMetric, activeKey],
   );
 
+  const extrema = useMemo(() => ({ show: !activeMetric?.key2, formatter: yFormatter }), [activeMetric, yFormatter]);
   const tsLookup = useMemo(() => {
     const m = new Map<string, number>();
     for (let i = 0; i < labels.length; i++) {
@@ -225,11 +226,14 @@ export default function SystemHistoryPanel({ status }: SystemHistoryModalProps) 
   }, [mode, activeKey, span, fetchBucket]);
 
   useEffect(() => {
-    if (mode !== 'charts') return undefined;
-    const ms = span <= 5 ? 2000 : 10000;
-    const id = window.setInterval(() => fetchBucket(), ms);
-    return () => window.clearInterval(id);
-  }, [mode, span, fetchBucket]);
+    if (mode !== 'charts' || !live) return undefined;
+    const first = window.setTimeout(() => fetchBucket(), 320);
+    const id = window.setInterval(() => fetchBucket(), span <= 5 ? 2000 : 10000);
+    return () => {
+      window.clearTimeout(first);
+      window.clearInterval(id);
+    };
+  }, [mode, span, fetchBucket, live]);
 
   const fetchLogs = useCallback(async () => {
     if (nodeId === null) return;
@@ -296,7 +300,7 @@ export default function SystemHistoryPanel({ status }: SystemHistoryModalProps) 
         valueMax={activeMetric?.valueMax ?? null}
         yFormatter={yFormatter}
         tooltipLabelFormatter={tooltipLabelFormatter}
-        extrema={{ show: !activeMetric?.key2, formatter: yFormatter }}
+        extrema={extrema}
       />
     </div>
   );
@@ -408,3 +412,5 @@ export default function SystemHistoryPanel({ status }: SystemHistoryModalProps) 
     </div>
   );
 }
+
+export default memo(SystemHistoryPanel);

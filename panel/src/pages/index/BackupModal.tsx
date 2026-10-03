@@ -6,6 +6,7 @@ import { DownloadOutlined, UploadOutlined } from '@ant-design/icons';
 import { HttpUtil, PromiseUtil } from '@/utils';
 import { markBackupDone } from '@/stores/notificationStore';
 import { readLocalToken } from '@/api/localToken';
+import { saveOnPhone } from '@/lib/phone';
 import { useBusyOverlay, BOOT_BUSY_KEY } from '@/layouts/busy-overlay-context';
 async function waitForPanelBack(timeoutMs = 90000): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
@@ -40,10 +41,13 @@ export default function BackupModal({ open, basePath: _basePath, onClose }: Back
       toast.error(t('pages.index.exportDatabaseError', { defaultValue: 'Could not read the database' }));
       return;
     }
-    const url = URL.createObjectURL(await res.blob());
+    const blob = await res.blob();
+    const name = `qd-network-${dayjs().format('YYYY-MM-DD_HH-mm-ss')}.db`;
+    if (saveOnPhone(name, blob)) return;
+    const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `qd-network-${dayjs().format('YYYY-MM-DD_HH-mm-ss')}.db`;
+    link.download = name;
     link.click();
     URL.revokeObjectURL(url);
   }

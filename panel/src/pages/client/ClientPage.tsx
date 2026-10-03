@@ -1,29 +1,23 @@
-import { lazy, Suspense, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Navigate, useLocation } from 'react-router-dom';
+import { Navigate, useLocation, useOutletContext } from 'react-router-dom';
 
 import { Spin } from '@/components/ui';
 import { useClientState } from '@/hooks/useClientState';
 import ConnectScreen from './ConnectScreen';
-const ImportPage = lazy(() => import('./ImportPage'));
 
 export default function ClientPage() {
   const { t } = useTranslation();
   const { hash } = useLocation();
+  const { ready, setStaging } = useOutletContext<{ ready: boolean; setStaging: (busy: boolean) => void }>();
   const {
-    state, loading,
+    state, loading, refetch,
     importUri, connect, disconnect, setEgress, setAdblock,
     refreshSubscription, refreshing,
   } = useClientState();
 
-  const onImport = useCallback(async (uri: string) => {
-    const next = await importUri(uri);
-    return next ? { ok: true } : { ok: false, error: t('client.import.failed') };
-  }, [importUri, t]);
-
   if (hash === '#routing') return <Navigate to="/client/routing" replace />;
 
-  if (loading) {
+  if (loading || !state) {
     return (
       <div className="client-boot">
         <Spin spinning size="large" description={t('loading')} />
@@ -31,17 +25,9 @@ export default function ClientPage() {
     );
   }
 
-  if (!state?.imported) {
-    return (
-      <Suspense fallback={<div className="client-boot"><Spin spinning size="large" /></div>}>
-        <ImportPage onImport={onImport} />
-      </Suspense>
-    );
-  }
-
   return (
     <section className="feed-section">
-      <div className="section-header">
+      <div className={`section-header${ready ? '' : ' is-veiled'}`}>
         <h2>{t('client.menu.connect')}</h2>
       </div>
       <ConnectScreen
@@ -51,6 +37,9 @@ export default function ClientPage() {
         onEgress={setEgress}
         onAdblock={setAdblock}
         onRefresh={refreshSubscription}
+        onImport={importUri}
+        onSettle={refetch}
+        onStage={setStaging}
         refreshing={refreshing}
       />
     </section>

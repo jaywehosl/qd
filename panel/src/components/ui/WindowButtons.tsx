@@ -8,7 +8,7 @@ export default function WindowButtons() {
       <button
         type="button"
         className="win-button"
-        aria-label="minimise"
+        aria-label="minimize"
         onClick={() => windowCommand('minimise')}
       >
         <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 6h8" /></svg>
@@ -16,7 +16,7 @@ export default function WindowButtons() {
       <button
         type="button"
         className="win-button"
-        aria-label="maximise"
+        aria-label="maximize"
         onClick={() => windowCommand('maximise')}
       >
         <svg viewBox="0 0 12 12" aria-hidden="true"><rect x="2.5" y="2.5" width="7" height="7" rx="1" /></svg>

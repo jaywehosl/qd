@@ -37,6 +37,17 @@ func (p Path) String() string {
 	}
 }
 
+func (p Path) Short() string {
+	switch {
+	case p.Relay != "":
+		return "R+H3"
+	case p.OverTCP:
+		return "H2"
+	default:
+		return "H3"
+	}
+}
+
 func Follow(p Path) (release func()) {
 	held := &p
 	pinned.Store(held)

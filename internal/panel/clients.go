@@ -342,37 +342,6 @@ type carriedTotals struct {
 	At   int64  `json:"at"`
 }
 
-func (a *API) carried() map[int]carriedTotals {
-	return a.cache.get("carried", a.askCarried).(map[int]carriedTotals)
-}
-
-func (a *API) askCarried() any {
-	out := map[int]carriedTotals{}
-
-	for _, body := range a.fleet.Gather("clients.stats", nil) {
-		var answer struct {
-			Carried map[string]carriedTotals `json:"carried"`
-		}
-		if json.Unmarshal(body, &answer) != nil {
-			continue
-		}
-		for id, t := range answer.Carried {
-			k, err := strconv.Atoi(id)
-			if err != nil {
-				continue
-			}
-			row := out[k]
-			row.Up += t.Up
-			row.Down += t.Down
-			if t.At > row.At {
-				row.At = t.At
-			}
-			out[k] = row
-		}
-	}
-	return out
-}
-
 func (a *API) askStored() any {
 	out := map[int]keptStats{}
 

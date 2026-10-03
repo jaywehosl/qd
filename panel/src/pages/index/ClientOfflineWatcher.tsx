@@ -1,12 +1,15 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { z } from 'zod';
 
 import { clientsApi } from '@/generated/client';
 import { parseMsg } from '@/utils/zodValidate';
-import { LastOnlineMapSchema, type LastOnlineMap } from '@/schemas/inbound';
 import { subscribe, getSnapshot, pushEvent } from '@/stores/notificationStore';
 
 const POLL_MS = 60000;
+
+const LastOnlineMapSchema = z.record(z.string(), z.number());
+type LastOnlineMap = z.infer<typeof LastOnlineMapSchema>;
 
 export default function ClientOfflineWatcher() {
   const { sensors } = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);

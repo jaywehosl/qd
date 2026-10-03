@@ -43,7 +43,6 @@ type NodeHealth struct {
 	Heartbeat int64   `json:"lastHeartbeat"`
 	CPUPct    float64 `json:"cpuPct"`
 	MemPct    float64 `json:"memPct"`
-	Carrying  int     `json:"carrying"`
 	Error     string  `json:"lastError,omitempty"`
 }
 
@@ -470,7 +469,6 @@ func (f *Fleet) Health() []NodeHealth {
 				UptimeSec int64   `json:"uptimeSecs"`
 				CPUPct    float64 `json:"cpuPct"`
 				MemPct    float64 `json:"memPct"`
-				Carrying  int     `json:"carrying"`
 				Version   string  `json:"version"`
 			}
 			json.Unmarshal(body, &info)
@@ -485,7 +483,6 @@ func (f *Fleet) Health() []NodeHealth {
 			health.Heartbeat = time.Now().Unix()
 			health.CPUPct = info.CPUPct
 			health.MemPct = info.MemPct
-			health.Carrying = info.Carrying
 			f.mu.Lock()
 			f.seen[n.ID] = health
 			f.mu.Unlock()
@@ -588,16 +585,5 @@ func disagreeing(want, now map[string]any) string {
 }
 
 const settleStep = 700 * time.Millisecond
-
-func (f *Fleet) Seen() []NodeHealth {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-
-	out := make([]NodeHealth, 0, len(f.seen))
-	for _, h := range f.seen {
-		out = append(out, h)
-	}
-	return out
-}
 
 const healthWait = 2500 * time.Millisecond

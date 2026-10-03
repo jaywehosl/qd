@@ -37,14 +37,6 @@
   --bar-height: 64px;
 }
 
-.is-dense {
-  --size-body: 14px;
-  --size-note: 12px;
-  --pad-card: var(--step-3);
-  --gap-card: var(--step-3);
-  --row-height: 36px;
-}
-
 html.is-dark {
   --ink: #000000;
   --card: #131318;

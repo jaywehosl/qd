@@ -13,7 +13,6 @@ export const keys = {
   },
   inbounds: {
     root: () => ['inbounds'] as const,
-    slim: () => ['inbounds', 'slim'] as const,
     options: () => ['inbounds', 'options'] as const,
   },
   clients: {

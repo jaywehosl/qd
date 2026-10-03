@@ -6,9 +6,11 @@ export const queryClient = new QueryClient({
       staleTime: 30_000,
       refetchOnWindowFocus: true,
       retry: 1,
+      networkMode: 'always',
     },
     mutations: {
       retry: 0,
+      networkMode: 'always',
     },
   },
 });

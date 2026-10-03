@@ -16,4 +16,6 @@ func startShell(db *clientstate.DB, tun *tunnel, ui *localapi.Server, api *clien
 
 func openPage(url string) {}
 
+func shutWindow() {}
+
 func bindPane(statePath, url, token string) {}

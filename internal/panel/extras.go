@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jaywehosl/qd/internal/netstate"
 	"github.com/jaywehosl/qd/internal/qdcrypt"
 )
 
@@ -328,20 +327,8 @@ func emptyObject(w http.ResponseWriter, r *http.Request) {
 	sendOK(w, map[string]any{})
 }
 
-func (a *API) entrypointsList(w http.ResponseWriter, r *http.Request) {
-	rows, err := a.entrypoints()
-	if err != nil {
-		sendFail(w, err)
-		return
-	}
-	sendOK(w, rows)
-}
-
 func (a *API) Live() map[string]any {
 	out := map[string]any{"nodes": a.nodeRowsWithCounts()}
-	if rows, err := a.entrypoints(); err == nil {
-		out["inbounds"] = rows
-	}
 
 	clients, _, err := a.readClients()
 	if err != nil {
@@ -379,57 +366,6 @@ type entryView struct {
 	err  error
 }
 
-func (a *API) throughEntry(entry int, node int) ([]map[string]any, float64, float64) {
-	clients, _, err := a.readClients()
-	if err != nil {
-		return []map[string]any{}, 0, 0
-	}
-
-	stats := []map[string]any{}
-	var up, down float64
-
-	for _, c := range clients {
-		ids, ok := c["inboundIds"].([]int)
-		if !ok {
-			continue
-		}
-		reaches := false
-		for _, id := range ids {
-			if id == entry {
-				reaches = true
-				break
-			}
-		}
-		if !reaches {
-			continue
-		}
-
-		row := map[string]any{
-			"email":      textOf(c["email"]),
-			"enable":     c["enable"],
-			"expiryTime": c["expiryTime"],
-		}
-		mine, split := c["trafficByNode"].(map[string]map[string]uint64)
-		if node != 0 && split {
-			held := mine[strconv.Itoa(node)]
-			rowUp, rowDown := float64(held["up"]), float64(held["down"])
-			row["up"] = rowUp
-			row["down"] = rowDown
-			row["total"] = rowUp + rowDown
-			up += rowUp
-			down += rowDown
-		} else if traffic, ok := c["traffic"].(map[string]any); ok {
-			row["up"] = traffic["up"]
-			row["down"] = traffic["down"]
-			row["total"] = traffic["total"]
-			up += numberOf(traffic["up"])
-			down += numberOf(traffic["down"])
-		}
-		stats = append(stats, row)
-	}
-	return stats, up, down
-}
-
 func (a *API) entrypoints() ([]map[string]any, error) {
 	held := a.cache.get("entrypoints", func() any {
 		rows, err := a.buildEntrypoints()
@@ -447,44 +383,6 @@ func (a *API) buildEntrypoints() ([]map[string]any, error) {
 	var rows []map[string]any
 	if err := json.Unmarshal(body, &rows); err != nil {
 		return nil, err
-	}
-
-	names := map[int]string{}
-	roles := map[int]string{}
-	for _, n := range a.fleet.Nodes() {
-		names[n.ID] = n.Tag
-		roles[n.ID] = n.Role
-	}
-
-	for _, row := range rows {
-		nodeID, _ := row["nodeId"].(float64)
-		port, _ := row["port"].(float64)
-
-		row["protocol"] = "qd"
-		row["listen"] = "0.0.0.0"
-		row["tag"] = fmt.Sprintf("%s:%d", names[int(nodeID)], int(port))
-		row["settings"] = `{"clients":[]}`
-		row["streamSettings"] = `{}`
-		row["sniffing"] = `{}`
-		id := int(numberOf(row["id"]))
-		stats, up, down := a.throughEntry(id, int(nodeID))
-
-		count := len(stats)
-		if roles[int(nodeID)] == string(netstate.RoleEgress) {
-			if t, carried := a.carried()[int(nodeID)]; carried {
-				up, down = float64(t.Up), float64(t.Down)
-			}
-			if n := a.carrying()[int(nodeID)]; n > 0 {
-				count = n
-			}
-		}
-
-		row["clientStats"] = stats
-		row["up"] = up
-		row["down"] = down
-		row["total"] = up + down
-		row["clientCount"] = count
-		row["expiryTime"] = 0
 	}
 	return rows, nil
 }
@@ -526,11 +424,3 @@ func (a *API) themeWrite(w http.ResponseWriter, r *http.Request) {
 }
 
 const settleWait = 15 * time.Second
-
-func (a *API) carrying() map[int]int {
-	out := map[int]int{}
-	for _, h := range a.fleet.Seen() {
-		out[h.ID] = h.Carrying
-	}
-	return out
-}

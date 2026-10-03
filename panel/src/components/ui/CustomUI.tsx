@@ -2,58 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { toast as dsToast } from '@/components/ds/Toast';
 
-if (typeof document !== 'undefined') {
-  const styleId = 'custom-ui-grid-styles';
-  if (!document.getElementById(styleId)) {
-    const styleEl = document.createElement('style');
-    styleEl.id = styleId;
-    let css = `
-      .custom-row {
-        display: flex;
-        flex-wrap: wrap;
-        margin-left: -8px;
-        margin-right: -8px;
-      }
-      .custom-col {
-        box-sizing: border-box;
-        padding-left: 8px;
-        padding-right: 8px;
-        width: 100%;
-        flex: 0 0 100%;
-      }
-    `;
-    for (let i = 1; i <= 24; i++) {
-      const pct = (i / 24) * 100;
-      css += `.custom-col-${i} { width: ${pct}%; flex: 0 0 ${pct}%; }\n`;
-    }
-    const breakpoints = {
-      xs: 0,
-      sm: 576,
-      md: 768,
-      lg: 992,
-      xl: 1200
-    };
-    for (const [key, val] of Object.entries(breakpoints)) {
-      if (val === 0) {
-        for (let i = 1; i <= 24; i++) {
-          const pct = (i / 24) * 100;
-          css += `.custom-col-xs-${i} { width: ${pct}%; flex: 0 0 ${pct}%; }\n`;
-        }
-      } else {
-        css += `@media (min-width: ${val}px) {\n`;
-        for (let i = 1; i <= 24; i++) {
-          const pct = (i / 24) * 100;
-          css += `  .custom-col-${key}-${i} { width: ${pct}%; flex: 0 0 ${pct}%; }\n`;
-        }
-        css += `}\n`;
-      }
-    }
-    styleEl.textContent = css;
-    document.head.appendChild(styleEl);
-  }
-}
-
-
 export function Button({ type = 'default', children, className = '', icon, loading, ...props }: any) {
   return (
     <button className={`custom-btn custom-btn-${type} ${className}`} disabled={loading} {...props}>
@@ -61,48 +9,6 @@ export function Button({ type = 'default', children, className = '', icon, loadi
       {icon && <span className="btn-icon">{icon}</span>}
       {children}
     </button>
-  );
-}
-
-export function Row({ gutter = [0, 0], children, className = '', style, ...props }: any) {
-  const rowStyle = {
-    display: 'flex',
-    flexWrap: 'wrap',
-    marginLeft: Array.isArray(gutter) ? -gutter[0] / 2 : 0,
-    marginRight: Array.isArray(gutter) ? -gutter[0] / 2 : 0,
-    rowGap: Array.isArray(gutter) ? gutter[1] : 0,
-    ...style,
-  };
-  return (
-    <div className={`custom-row ${className}`} style={rowStyle as any} {...props}>
-      {children}
-    </div>
-  );
-}
-
-export function Col({ span, xs, sm, md, lg, children, className = '', style, ...props }: any) {
-  const colClass = [
-    'custom-col',
-    span ? `custom-col-${span}` : '',
-    xs ? `custom-col-xs-${xs}` : '',
-    sm ? `custom-col-sm-${sm}` : '',
-    md ? `custom-col-md-${md}` : '',
-    lg ? `custom-col-lg-${lg}` : '',
-    className,
-  ]
-    .filter(Boolean)
-    .join(' ');
-
-  const colStyle = {
-    paddingLeft: 8,
-    paddingRight: 8,
-    ...style,
-  };
-
-  return (
-    <div className={colClass} style={colStyle} {...props}>
-      {children}
-    </div>
   );
 }
 

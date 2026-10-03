@@ -403,7 +403,6 @@ public class TunnelService extends VpnService {
                     Log.e(TAG, "bring up", e);
                     String plain = Core.plain(e.getMessage());
                     Core.say(TunnelService.this, "java: connect failed: " + e.getMessage());
-                    Core.gaveUp(plain);
                     Core.mark(TunnelService.this, false, "");
                     update(plain.isEmpty() ? "Отключён" : plain);
                     showNote();
@@ -488,13 +487,6 @@ public class TunnelService extends VpnService {
                 }
             }
         }).start();
-    }
-
-    static void refreshNote() {
-        TunnelService running = live;
-        if (running != null) {
-            running.showNote();
-        }
     }
 
     static void refreshNote(android.content.Context context) {

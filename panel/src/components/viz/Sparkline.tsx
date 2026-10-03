@@ -1,4 +1,4 @@
-import { useId, useMemo } from 'react';
+import { memo, useId, useMemo, useState } from 'react';
 import {
   Area,
   AreaChart,
@@ -26,6 +26,55 @@ export interface SparklineExtrema {
 
 const DEFAULT_MIN_COLOR = '#52c41a';
 const DEFAULT_MAX_COLOR = '#fa541c';
+const TICK_FONT = 10;
+const Y_PARTS = 4;
+const NICE = [1, 2, 2.5, 5, 10];
+
+const NO_LINES = () => [];
+
+interface TickProps {
+  x?: number | string;
+  y?: number | string;
+  index?: number;
+  payload?: { value?: unknown };
+  textAnchor?: 'start' | 'middle' | 'end' | 'inherit';
+  verticalAnchor?: string;
+  tickFormatter?: (value: unknown, index: number) => string;
+}
+
+function Tick({ x, y, index = 0, payload, textAnchor, verticalAnchor, tickFormatter, dx = 0 }: TickProps & { dx?: number }) {
+  const value = payload?.value;
+  return (
+    <text
+      x={x}
+      y={y}
+      dx={dx}
+      dy={verticalAnchor === 'start' ? '0.71em' : verticalAnchor === 'end' ? 0 : '0.355em'}
+      textAnchor={textAnchor}
+      fontSize={TICK_FONT}
+      fill="var(--text)"
+    >
+      {tickFormatter ? tickFormatter(value, index) : String(value ?? '')}
+    </text>
+  );
+}
+
+const TickLeft = (props: TickProps) => <Tick {...props} dx={-4} />
+
+let ruler: CanvasRenderingContext2D | null = null;
+
+function textWidth(text: string) {
+  if (!ruler) {
+    ruler = document.createElement('canvas').getContext('2d');
+    if (ruler) ruler.font = `${TICK_FONT}px ${getComputedStyle(document.body).fontFamily}`;
+  }
+  return ruler ? ruler.measureText(text).width : text.length * TICK_FONT * 0.6;
+}
+
+function niceAbove(raw: number) {
+  const p = 10 ** Math.floor(Math.log10(raw));
+  return (NICE.find((k) => k * p >= raw * (1 - 1e-9)) ?? 10) * p;
+}
 
 interface SparklineProps {
   data: number[];
@@ -56,6 +105,7 @@ interface SparklineProps {
   tooltipLabelFormatter?: ((label: string) => string) | null;
   referenceLines?: SparklineReferenceLine[];
   extrema?: SparklineExtrema;
+  tickScale?: number;
 }
 
 interface ChartPoint {
@@ -66,7 +116,7 @@ interface ChartPoint {
   label: string;
 }
 
-export default function Sparkline({
+function Sparkline({
   data,
   data2 = [],
   data3 = [],
@@ -95,8 +145,10 @@ export default function Sparkline({
   tooltipLabelFormatter = null,
   referenceLines,
   extrema,
+  tickScale = 1,
 }: SparklineProps) {
   const reactId = useId();
+  const [plot, setPlot] = useState(0);
   const safeId = reactId.replace(/[^a-zA-Z0-9]/g, '');
   const gradId = `spkGrad-${safeId}`;
   const gradId2 = `spkGrad2-${safeId}`;
@@ -121,35 +173,42 @@ export default function Sparkline({
     }));
   }, [data, data2, data3, labels, maxPoints]);
 
-  const yDomain = useMemo<[number, number]>(() => {
-    if (valueMax != null) return [valueMin, valueMax];
+  const scale = useMemo(() => {
+    if (valueMax != null) {
+      const ticks = valueMax === 100 && valueMin === 0 && yTickStep > 0
+        ? Array.from({ length: Math.floor(valueMax / yTickStep) + 1 }, (_, i) => i * yTickStep)
+        : Array.from({ length: Y_PARTS + 1 }, (_, i) => valueMin + ((valueMax - valueMin) * i) / Y_PARTS);
+      return { domain: [valueMin, valueMax] as [number, number], ticks };
+    }
     let max = valueMin;
     for (const p of points) {
       if (Number.isFinite(p.value) && p.value > max) max = p.value;
       if (hasSeries2 && Number.isFinite(p.value2) && p.value2 > max) max = p.value2;
       if (hasSeries3 && Number.isFinite(p.value3) && p.value3 > max) max = p.value3;
     }
-    if (max <= valueMin) max = valueMin + 1;
-    return [valueMin, max * 1.1];
-  }, [points, valueMin, valueMax, hasSeries2, hasSeries3]);
-
-  const yTicks = useMemo(() => {
-    if (!showAxes) return undefined;
-    const [min, max] = yDomain;
-    if (valueMax === 100 && valueMin === 0 && yTickStep > 0) {
-      const out: number[] = [];
-      for (let v = min; v <= max; v += yTickStep) out.push(v);
-      return out;
+    const along = (step: number) => Array.from({ length: Y_PARTS + 1 }, (_, i) => valueMin + (i * step) / tickScale);
+    let step = niceAbove(((max > valueMin ? max - valueMin : 1) * tickScale * 1.05) / Y_PARTS);
+    for (let tries = 0; tries < 80 && new Set(along(step).map(yFormatter)).size <= Y_PARTS; tries++) {
+      step = niceAbove(step * 1.01);
     }
-    const n = 5;
-    return Array.from({ length: n }, (_, i) => min + ((max - min) * i) / (n - 1));
-  }, [showAxes, yDomain, valueMin, valueMax, yTickStep]);
+    const ticks = along(step);
+    return { domain: [valueMin, ticks[Y_PARTS]] as [number, number], ticks };
+  }, [points, valueMin, valueMax, hasSeries2, hasSeries3, yTickStep, tickScale, yFormatter]);
+
+  const yDomain = scale.domain;
+  const yTicks = showAxes ? scale.ticks : undefined;
+  const yWidth = useMemo(
+    () => (yTicks ? Math.ceil(Math.max(...yTicks.map((v) => textWidth(yFormatter(v))))) + 16 : 0),
+    [yTicks, yFormatter],
+  );
 
   const xTickIndexes = useMemo(() => {
     if (!showAxes || points.length === 0) return undefined;
-    const m = Math.max(2, tickCountX);
+    const label = textWidth(points[points.length - 1].label) + 14;
+    const fit = plot > 0 ? Math.floor((plot - yWidth - 28) / label) + 1 : tickCountX;
+    const m = Math.max(2, Math.min(tickCountX, fit));
     return Array.from({ length: m }, (_, i) => Math.round((i * (points.length - 1)) / (m - 1)));
-  }, [showAxes, tickCountX, points.length]);
+  }, [showAxes, tickCountX, points, plot, yWidth]);
 
   const xTicks = useMemo(() => {
     if (!xTickIndexes) return undefined;
@@ -163,6 +222,8 @@ export default function Sparkline({
     }
     return out.length ? out : undefined;
   }, [xTickIndexes, points]);
+
+  const xRight = xTicks ? Math.max(12, Math.ceil(textWidth(xTicks[xTicks.length - 1]) / 2) + 4) : 6;
 
   const fmtTooltip = tooltipFormatter ?? yFormatter;
 
@@ -211,12 +272,13 @@ export default function Sparkline({
           ))}
         </div>
       )}
-      <ResponsiveContainer width="100%" height={height} className="sparkline-svg">
+      <ResponsiveContainer width="100%" height={height} className="sparkline-svg" onResize={(w) => setPlot(w)}>
         <AreaChart
           data={points}
+          accessibilityLayer={false}
           margin={{
             top: showAxes ? 14 : 6,
-            right: showAxes ? 12 : 6,
+            right: xRight,
             bottom: showAxes ? 26 : 4,
             left: 4,
           }}
@@ -236,12 +298,12 @@ export default function Sparkline({
             </linearGradient>
           </defs>
           {showGrid && (
-            <CartesianGrid stroke="rgba(128, 128, 140, 0.35)" strokeDasharray="3 4" vertical={false} />
+            <CartesianGrid stroke="rgba(128, 128, 140, 0.35)" strokeDasharray="3 4" vertical={false} verticalCoordinatesGenerator={NO_LINES} />
           )}
           <XAxis
             dataKey="label"
             hide={!showAxes}
-            tick={{ fontSize: 10, fill: 'var(--text)' }}
+            tick={Tick}
             axisLine={false}
             tickLine={false}
             tickMargin={14}
@@ -251,13 +313,14 @@ export default function Sparkline({
           <YAxis
             domain={yDomain}
             hide={!showAxes}
-            tick={{ fontSize: 10, fill: 'var(--text)', dx: -4 }}
+            tick={TickLeft}
             axisLine={false}
             tickLine={false}
             tickMargin={8}
             tickFormatter={yFormatter}
             ticks={yTicks}
-            width={56}
+            interval={0}
+            width={yWidth}
           />
           {showTooltip && (
             <Tooltip
@@ -358,3 +421,5 @@ export default function Sparkline({
     </div>
   );
 }
+
+export default memo(Sparkline);

@@ -17,14 +17,13 @@ export interface AlertPrefs {
   xray: boolean;
 }
 
-export type SensorKey = 'cpu' | 'mem' | 'disk' | 'sockets' | 'udpSockets' | 'uptimeDays' | 'clientOffline';
+export type SensorKey = 'cpu' | 'mem' | 'disk' | 'sockets' | 'udpSockets' | 'clientOffline';
 export interface SensorConfig { enabled: boolean; threshold: number }
 export type SensorPrefs = Record<SensorKey, SensorConfig>;
 
 export interface LogWatchPrefs { enabled: boolean; level: string }
 
 export interface MaintenancePrefs {
-  updateCheck: boolean;
   backupReminder: boolean;
   backupIntervalDays: number;
   lastBackupAt: number;
@@ -54,7 +53,6 @@ const ACTIVE_CAP = 50;
 
 const DEFAULT_LOGWATCH: LogWatchPrefs = { enabled: false, level: 'warning' };
 const DEFAULT_MAINTENANCE: MaintenancePrefs = {
-  updateCheck: true,
   backupReminder: true,
   backupIntervalDays: 7,
   lastBackupAt: 0,
@@ -68,7 +66,6 @@ const DEFAULT_SENSORS: SensorPrefs = {
   disk: { enabled: true, threshold: 30 },
   sockets: { enabled: true, threshold: 1000 },
   udpSockets: { enabled: true, threshold: 1000 },
-  uptimeDays: { enabled: true, threshold: 7 },
   clientOffline: { enabled: true, threshold: 12 },
 };
 
@@ -264,9 +261,6 @@ export function setSensorThreshold(key: SensorKey, threshold: number): void {
   commit({ ...state, sensors: { ...state.sensors, [key]: { ...state.sensors[key], threshold } } });
 }
 
-export function setUpdateCheckEnabled(enabled: boolean): void {
-  commit({ ...state, maintenance: { ...state.maintenance, updateCheck: enabled } });
-}
 export function setBackupReminderEnabled(enabled: boolean): void {
   commit({ ...state, maintenance: { ...state.maintenance, backupReminder: enabled } });
 }

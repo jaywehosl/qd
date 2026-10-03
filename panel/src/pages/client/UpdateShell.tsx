@@ -3,6 +3,7 @@ import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 interface UpdateShellProps {
   progress: number;
   busy: boolean;
+  sweep?: number;
   className?: string;
   children: ReactNode;
 }
@@ -17,7 +18,7 @@ function outline(x: number, y: number, w: number, h: number, r: number): string 
     + `V ${y + r} A ${r} ${r} 0 0 1 ${x + r} ${y} H ${mid}`;
 }
 
-export default function UpdateShell({ progress, busy, className = '', children }: UpdateShellProps) {
+export default function UpdateShell({ progress, busy, sweep, className = '', children }: UpdateShellProps) {
   const shell = useRef<HTMLElement>(null);
   const glow = useId();
   const [box, setBox] = useState({ w: 0, h: 0, x: 0, y: 0, pw: 0, ph: 0, r: 0 });
@@ -62,6 +63,7 @@ export default function UpdateShell({ progress, busy, className = '', children }
             strokeWidth={STROKE}
             strokeDasharray={perimeter}
             strokeDashoffset={perimeter * (1 - progress)}
+            style={sweep ? { transitionDuration: `${sweep}ms` } : undefined}
           />
         </svg>
       )}

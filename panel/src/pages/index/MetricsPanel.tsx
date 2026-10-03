@@ -6,6 +6,7 @@ import {
 } from '@ant-design/icons';
 
 import { message } from '@/components/ui';
+import { Dialog } from '@/components/ds';
 import { LazyMount } from '@/components/utility';
 import { useMetricsPanel } from '@/layouts/MetricsPanelContext';
 import { useStatusQuery } from '@/api/queries/useStatusQuery';
@@ -16,12 +17,14 @@ const SystemHistoryPanel = lazy(() => import('./SystemHistoryModal'));
 
 export default function MetricsPanel() {
   const { t } = useTranslation();
-  const { open } = useMetricsPanel();
+  const { open, notifyOpen } = useMetricsPanel();
   const { status, refresh } = useStatusQuery();
   const [messageApi, messageContextHolder] = message.useMessage();
   useEffect(() => { setMessageInstance(messageApi); }, [messageApi]);
 
   const [backupOpen, setBackupOpen] = useState(false);
+  const [restartAsk, setRestartAsk] = useState(false);
+  const [restarting, setRestarting] = useState(false);
   const [chartsSeen, setChartsSeen] = useState(false);
   useEffect(() => {
     if (open) { setChartsSeen(true); return undefined; }
@@ -35,17 +38,20 @@ export default function MetricsPanel() {
   }, [open]);
 
   useEffect(() => {
-    if (!open) return undefined;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = prev; };
-  }, [open]);
+    if (open || notifyOpen) window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [open, notifyOpen]);
 
   const basePath = window.X_UI_BASE_PATH || '';
 
   const restartNetwork = useCallback(async () => {
-    await HttpUtil.post('/panel/api/nodes/restartAll');
-    await refresh();
+    setRestarting(true);
+    try {
+      await HttpUtil.post('/panel/api/nodes/restartAll');
+      await refresh();
+    } finally {
+      setRestarting(false);
+      setRestartAsk(false);
+    }
   }, [refresh]);
 
   return (
@@ -56,7 +62,7 @@ export default function MetricsPanel() {
         <div className="mb-container">
           <div className="mb-center">
             <div className="vertical-tabs-container mb-controls">
-              <button type="button" className="vtab-btn" style={{ '--i': 0 } as React.CSSProperties} onClick={restartNetwork}>
+              <button type="button" className="vtab-btn" style={{ '--i': 0 } as React.CSSProperties} onClick={() => setRestartAsk(true)}>
                 <span className="vtab-icon"><ReloadOutlined /></span>
                 {t('pages.index.restartNetwork')}
               </button>
@@ -69,7 +75,7 @@ export default function MetricsPanel() {
 
           <div className="mb-history">
             <Suspense fallback={null}>
-              {chartsSeen && <SystemHistoryPanel status={status} />}
+              {chartsSeen && <SystemHistoryPanel tint={status?.cpu?.color} live={open} />}
             </Suspense>
           </div>
         </div>
@@ -78,6 +84,17 @@ export default function MetricsPanel() {
       <LazyMount when={backupOpen}>
         <BackupModal open={backupOpen} basePath={basePath} onClose={() => setBackupOpen(false)} />
       </LazyMount>
+      <Dialog
+        open={restartAsk}
+        onOpenChange={(o) => { if (!o && !restarting) setRestartAsk(false); }}
+        title={t('pages.index.restartNetworkTitle')}
+        okText={t('pages.index.restartNetwork')}
+        okDanger
+        confirmLoading={restarting}
+        onOk={() => void restartNetwork()}
+      >
+        <p className="ds-confirm__text">{t('pages.index.restartNetworkText')}</p>
+      </Dialog>
     </>
   );
 }

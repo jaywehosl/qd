@@ -2,6 +2,7 @@ import axios from 'axios';
 import type { AxiosError, AxiosRequestConfig, AxiosResponse } from 'axios';
 import i18next from 'i18next';
 import { getMessage } from './messageBus';
+import { saveOnPhone } from '@/lib/phone';
 
 type RespEnvelope = { success?: unknown; msg?: unknown; obj?: unknown };
 
@@ -481,6 +482,8 @@ export class LanguageManager {
 
 export class FileManager {
   static downloadTextFile(content: BlobPart, filename: string = 'file.txt', options: BlobPropertyBag = { type: 'text/plain' }): void {
+    const blob = new Blob([content], options);
+    if (saveOnPhone(filename, blob)) return;
     const link = window.document.createElement('a');
     link.download = filename;
     link.style.border = '0';
@@ -489,7 +492,7 @@ export class FileManager {
     link.style.position = 'absolute';
     link.style.left = '-9999px';
     link.style.top = `${window.pageYOffset || window.document.documentElement.scrollTop}px`;
-    link.href = URL.createObjectURL(new Blob([content], options));
+    link.href = URL.createObjectURL(blob);
     link.click();
     URL.revokeObjectURL(link.href);
     link.remove();

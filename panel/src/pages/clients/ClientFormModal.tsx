@@ -10,6 +10,7 @@ import { RandomUtil } from '@/utils';
 import { DateTimePicker } from '@/components/form';
 import type { ClientRecord, InboundOption } from '@/hooks/useClients';
 import { ClientFormSchema, ClientCreateFormSchema } from '@/schemas/client';
+import { useMediaQuery } from '@/hooks/useMediaQuery';
 
 
 interface ApiMsg<T = unknown> { success?: boolean; obj?: T }
@@ -68,9 +69,9 @@ export default function ClientFormModal({
   const { t } = useTranslation();
   const message = getMessage();
   const isEdit = mode === 'edit';
+  const { isMobile } = useMediaQuery();
 
   const [form, setForm] = useState<FormState>(emptyForm);
-  const [groupDraft, setGroupDraft] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
@@ -96,7 +97,6 @@ export default function ClientFormModal({
       if (et < 0) { next.delayedStart = true; next.delayedDays = Math.round(et / -86400000); next.expiryDate = null; }
       else { next.delayedStart = false; next.delayedDays = 0; next.expiryDate = et > 0 ? dayjs(et) : null; }
       setForm(next);
-      setGroupDraft(next.group);
     } else {
       setForm({
         ...emptyForm(),
@@ -104,7 +104,6 @@ export default function ClientFormModal({
         uuid: RandomUtil.randomUUID(),
         subId: RandomUtil.randomUUID(),
       });
-      setGroupDraft('');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, isEdit]);
@@ -168,6 +167,94 @@ export default function ClientFormModal({
     </div>
   );
 
+  const groupPick = (
+    <Select
+      value={form.group}
+      onChange={(v) => update('group', v)}
+      options={[
+        { value: '', label: t('pages.clients.noGroup', { defaultValue: 'No group' }) },
+        ...groups.map((g) => ({ value: g, label: g })),
+      ]}
+    />
+  );
+
+  const exitPick = (
+    <Select
+      value={String(form.allowExit)}
+      onChange={(v) => update('allowExit', Number(v))}
+      options={[
+        { value: '0', label: t('pages.clients.exitInherit', { defaultValue: 'As the group allows' }) },
+        { value: '1', label: t('pages.clients.exitAllow', { defaultValue: 'Always allowed' }) },
+        { value: '2', label: t('pages.clients.exitDeny', { defaultValue: 'Never allowed' }) },
+      ]}
+    />
+  );
+
+  const commentField = (
+    <Input
+      value={form.comment}
+      disabled={!form.expiryDate}
+      placeholder={form.expiryDate
+        ? t('pages.clients.commentPlaceholder', { defaultValue: 'Why this date' })
+        : t('pages.clients.commentDisabled', { defaultValue: 'Set an expiry date first' })}
+      onChange={(e) => update('comment', e.target.value)}
+    />
+  );
+
+  const limitField = (
+    <Input
+      type="number"
+      min={0}
+      value={form.limitIp}
+      onChange={(e) => update('limitIp', Math.max(0, Number(e.target.value) || 0))}
+    />
+  );
+
+  const adminLabel = t('pages.clients.admin', { defaultValue: 'Administrator' });
+
+  if (isMobile) {
+    return (
+      <Dialog
+        open={open}
+        onOpenChange={(o) => { if (!o && !submitting) onOpenChange(false); }}
+        title={isEdit ? (
+          <span className="ms-title">
+            <small>{t('pages.clients.editClient', { defaultValue: 'Edit client' })}</small>
+            <span>{client?.email || form.email}</span>
+          </span>
+        ) : t('pages.clients.addClient')}
+        confirmLoading={submitting}
+        autoHeight
+        footer={(
+          <div className="ms-actions">
+            <Button onClick={() => onOpenChange(false)}>{t('cancel')}</Button>
+            <Button variant="primary" loading={submitting} onClick={onSubmit}>{isEdit ? t('save') : t('create')}</Button>
+          </div>
+        )}
+      >
+        <div className="mf">
+          <Field label={t('pages.clients.tag', { defaultValue: 'Tag' })}>
+            <Input value={form.email} onChange={(e) => update('email', e.target.value)} />
+          </Field>
+          <Field label={t('pages.clients.uuid', { defaultValue: 'UUID' })}>
+            {reloadInput(form.subId, (v) => update('subId', v), () => RandomUtil.randomUUID())}
+          </Field>
+          <Field label={t('pages.clients.group')}>{groupPick}</Field>
+          <Field label={t('pages.clients.allowExit', { defaultValue: 'Exit nodes' })}>{exitPick}</Field>
+          <Field label={t('pages.clients.deviceLimit', { defaultValue: 'Device limit' })}>{limitField}</Field>
+          <Field label={t('pages.clients.expiryTime')}>
+            <DateTimePicker value={form.expiryDate} onChange={(d) => update('expiryDate', d || null)} />
+          </Field>
+          <Field label={t('pages.clients.comment')}>{commentField}</Field>
+          <label className="mf-switch" htmlFor="cf-admin-m">
+            <span>{adminLabel}</span>
+            <Switch id="cf-admin-m" checked={form.admin} onChange={(v) => update('admin', v)} aria-label={adminLabel} />
+          </label>
+        </div>
+      </Dialog>
+    );
+  }
+
   return (
     <>
       <Dialog
@@ -200,32 +287,7 @@ export default function ClientFormModal({
         autoHeight
         footer={
           <div className="cf-foot">
-            <div className="cf-foot__group">
-              <Select
-                value={groupDraft}
-                onChange={(v) => setGroupDraft(v)}
-                options={[
-                  { value: '', label: t('pages.clients.noGroup', { defaultValue: 'No group' }) },
-                  ...groups.map((g) => ({ value: g, label: g })),
-                ]}
-              />
-            </div>
-            {groupDraft !== form.group && (
-              <Tag
-                tone="primary"
-                style={{ cursor: 'pointer' }}
-                onClick={() => update('group', groupDraft)}
-              >
-                {groupDraft
-                  ? t('pages.clients.confirmGroup', {
-                      defaultValue: 'confirm {name} assignment',
-                      name: groupDraft,
-                    })
-                  : t('pages.clients.confirmGroupRemoval', {
-                      defaultValue: 'confirm group removal',
-                    })}
-              </Tag>
-            )}
+            <div className="cf-foot__group">{groupPick}</div>
             <span className="cf-foot__actions">
               <Button onClick={() => onOpenChange(false)}>{t('cancel')}</Button>
               <Button variant="primary" loading={submitting} onClick={onSubmit}>

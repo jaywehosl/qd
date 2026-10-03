@@ -45,6 +45,7 @@ export function LanguageSelector() {
     })),
     [lang],
   );
+  if (LanguageManager.supportedLanguages.length < 2) return null;
   return (
     <DropdownMenu
       align="end"

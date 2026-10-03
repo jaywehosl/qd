@@ -19,7 +19,7 @@ const STATE_KEY = ['client', 'state'];
 
 async function fetchState(): Promise<ClientState | null> {
   const msg = await HttpUtil.get('/client/api/state', undefined, { silent: true });
-  if (!msg?.success) return null;
+  if (!msg?.success) throw new Error('the client did not answer');
   return parseMsg(msg, ClientStateSchema, 'client/state').obj ?? null;
 }
 

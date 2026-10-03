@@ -44,6 +44,9 @@ func Handler(basePath string) (http.Handler, error) {
 			return
 		}
 
+		if strings.HasPrefix(name, "assets/") {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		}
 		r2 := r.Clone(r.Context())
 		r2.URL.Path = "/" + name
 		files.ServeHTTP(w, r2)

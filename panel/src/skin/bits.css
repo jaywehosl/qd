@@ -47,7 +47,7 @@
   gap: var(--step-1);
 }
 
-.sparkline-svg { width: 100%; display: block; }
+.sparkline-svg { width: 100%; display: block; touch-action: pan-y; }
 
 .sparkline-legend,
 .sparkline-extrema {
@@ -61,13 +61,6 @@
 
 .extrema-item { white-space: nowrap; }
 
-.json-editor-host {
-  border: 1px solid var(--edge);
-  border-radius: var(--radius-control);
-  overflow: hidden;
-  background: var(--ink);
-}
-
 .notif-container {
   display: flex;
   flex-direction: column;
@@ -80,6 +73,8 @@
   max-height: 320px;
   overflow: auto;
 }
+
+.notif-list > * { flex-shrink: 0; }
 
 .notif-actions {
   display: flex;
@@ -141,76 +136,6 @@
   gap: var(--step-2);
 }
 
-.guide-backdrop,
-.telemetry-guide-overlay-root {
-  position: fixed;
-  inset: 0;
-  z-index: 250;
-}
-
-.guide-backdrop { background: rgba(0, 0, 0, 0.5); }
-
-.guide-callout-card {
-  position: absolute;
-  width: min(360px, 90vw);
-  background: var(--ink);
-  border-radius: var(--radius-card);
-  overflow: hidden;
-}
-
-html.is-dark .guide-callout-card { border: 1px solid var(--edge); }
-
-.guide-card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--step-2);
-  padding: var(--step-3) var(--step-3) var(--step-2);
-}
-
-.guide-card-body { padding: 0 var(--step-3) var(--step-3); color: var(--text); }
-
-.guide-card-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--step-2);
-  padding: var(--step-2) var(--step-3) var(--step-3);
-}
-
-.guide-step-title { font-weight: 700; color: var(--bold); }
-.guide-step-description { font-size: var(--size-note); color: var(--text); }
-
-.guide-step-indicator {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--text);
-}
-
-.guide-dots { display: flex; gap: 5px; }
-
-.guide-nav-btn,
-.guide-finish-btn {
-  padding: 7px var(--step-3);
-  border: none;
-  border-radius: var(--radius-control);
-  background: var(--card);
-  color: var(--bold);
-  font-size: var(--size-note);
-  cursor: pointer;
-}
-
-.guide-finish-btn { background: var(--good); color: #fff; }
-
-.guide-connector-svg { position: absolute; pointer-events: none; }
-
-.guide-target-glow {
-  position: absolute;
-  border-radius: var(--radius-card);
-  outline: 2px solid var(--good);
-  pointer-events: none;
-}
-
 .notif-bar {
   display: grid;
   grid-template-rows: 0fr;
@@ -221,6 +146,8 @@ html.is-dark .guide-callout-card { border: 1px solid var(--edge); }
 }
 
 .notif-bar > * { overflow: hidden; min-height: 0; }
+.notif-bar .notif-container,
+.metrics-bar .mb-container { contain: layout paint style; }
 .notif-bar:not(.is-open) { border-bottom-width: 0; }
 
 .notif-bar.is-open {
@@ -239,7 +166,7 @@ html.is-dark .guide-callout-card { border: 1px solid var(--edge); }
 
 .notif-bar.is-open .notif-container { padding: var(--step-3) var(--step-4); }
 
-.notif-bar .notif-list { max-height: 50vh; }
+.notif-bar .notif-list { max-height: none; overflow: visible; }
 
 .notif-row {
   display: flex;
@@ -258,6 +185,15 @@ html.is-dark .guide-callout-card { border: 1px solid var(--edge); }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+html.in-phone .notif-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  column-gap: var(--step-2);
+  align-items: center;
+}
+html.in-phone .notif-row__text { white-space: normal; overflow-wrap: anywhere; }
+html.in-phone .notif-row__ts { min-width: 78px; box-sizing: border-box; text-align: center; }
 
 .notif-row--error .notif-row__icon { color: #e03a2f; }
 .notif-row--warning .notif-row__icon { color: #f0a020; }
@@ -320,8 +256,6 @@ html.is-dark .guide-callout-card { border: 1px solid var(--edge); }
   box-sizing: border-box;
 }
 
-html.is-dark .chp { border: 1px solid var(--edge); }
-
 .chp-head {
   position: relative;
   display: flex;
@@ -359,7 +293,6 @@ html.is-dark .chp { border: 1px solid var(--edge); }
   padding-block: 0;
   box-sizing: border-box;
 }
-
 
 .chp-tabs {
   display: block;
@@ -497,8 +430,6 @@ html.is-dark .chp { border: 1px solid var(--edge); }
   z-index: -1;
 }
 
-
-
 .metrics-bar .recharts-cartesian-grid,
 .metrics-bar .recharts-area,
 .metrics-bar .recharts-reference-line,
@@ -608,3 +539,47 @@ html.is-dark .chp { border: 1px solid var(--edge); }
 .metrics-bar:not(.is-open):has(.node-select) .mb-container {
   transition: padding 0.26s ease 0.72s;
 }
+
+html.in-phone .metrics-bar .mb-container { padding: 0 var(--step-3); }
+html.in-phone .metrics-bar.is-open .mb-container { padding: var(--step-3); }
+html.in-phone .chp { padding: var(--step-3); }
+html.in-phone .chp-tabs .ds-tabs__list { margin: 0 0 var(--step-2); }
+html.in-phone .chp-window {
+  position: static;
+  flex-direction: row;
+  justify-content: space-between;
+  margin-top: var(--step-2);
+}
+html.in-phone .chp-win { flex: 1; }
+.chp .sparkline-container { min-height: 231px; justify-content: flex-end; }
+.chp-void {
+  height: 231px;
+  display: grid;
+  place-items: center;
+  padding: 0 var(--step-4);
+  text-align: center;
+  font-size: var(--size-note);
+  color: var(--text);
+}
+
+html.in-phone .metrics-bar:not(.is-client) .chp { height: auto; }
+html.in-phone .metrics-bar:not(.is-client) .chp-chart { height: 240px; }
+html.in-phone .metrics-bar:not(.is-client) .chp > .log-container { overflow: visible; }
+html.in-phone .chp-head { flex-direction: column; align-items: stretch; gap: var(--step-2); }
+html.in-phone .chp-head .node-select { flex: 0 0 auto; justify-content: center; }
+html.in-phone .chp-mode { position: static; transform: none; align-self: center; }
+html.in-phone .chp-head__actions { flex-wrap: wrap; justify-content: center; }
+html.in-phone .log-card .log-body { max-height: none; padding: var(--step-2) var(--step-3); }
+html.in-phone .mb-controls { flex-wrap: wrap; justify-content: center; }
+html.in-phone .chp-head { flex-direction: row; flex-wrap: wrap; justify-content: center; }
+html.in-phone .chp-head .node-select { flex: 1 1 100%; }
+html.in-phone .chp-mode { align-self: auto; }
+html.in-phone .chp-head__actions { flex: 1 1 100%; flex-wrap: nowrap; justify-content: center; }
+html.in-phone .chp-head__actions .ds-btn:has(.anticon-download) {
+  width: 34px;
+  padding: 0;
+  gap: 0;
+  justify-content: center;
+  font-size: 0;
+}
+html.in-phone .chp-head__actions .ds-btn:has(.anticon-download) .anticon { font-size: 14px; }

@@ -3,6 +3,8 @@ package ru.qd.client;
 import android.annotation.SuppressLint;
 import android.content.ComponentName;
 import android.content.Context;
+import android.content.Intent;
+import android.net.VpnService;
 import android.os.Build;
 import android.provider.Settings;
 
@@ -21,8 +23,6 @@ public final class Core {
     private static volatile Context app;
     private static volatile boolean up;
     private static volatile String where = "";
-    private static volatile long since;
-    private static volatile String woe = "";
     private static volatile boolean exit;
     private static volatile boolean mayExit;
     private static volatile boolean turning;
@@ -69,7 +69,55 @@ public final class Core {
             Context context = app;
             return context != null && Updater.install(context, path);
         }
+
+        @Override
+        public boolean raise() {
+            Context context = app;
+            if (context == null) {
+                return false;
+            }
+            if (VpnService.prepare(context) != null) {
+                MainActivity face = MainActivity.live;
+                return face != null && face.consent();
+            }
+            return turn(context, TunnelService.ACTION_START);
+        }
+
+        @Override
+        public void lower() {
+            Context context = app;
+            if (context != null) {
+                turn(context, TunnelService.ACTION_STOP);
+            }
+        }
+
+        @Override
+        public String apps() {
+            return Apps.json(app);
+        }
+
+        @Override
+        public void changed() {
+            Context context = app;
+            if (context != null) {
+                readExit(context);
+                TunnelService.refreshNote(context);
+                TileService.refresh();
+                Widget.refresh(context);
+            }
+        }
     };
+
+    private static boolean turn(Context context, String action) {
+        Intent ask = new Intent(context, TunnelService.class);
+        ask.setAction(action);
+        try {
+            context.startService(ask);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
 
     private static final Protector PROTECTOR = new Protector() {
         @Override
@@ -101,6 +149,7 @@ public final class Core {
             app = context.getApplicationContext();
             String id = Settings.Secure.getString(
                     context.getContentResolver(), Settings.Secure.ANDROID_ID);
+            Qdmobile.setZone(java.util.TimeZone.getDefault().getID());
             client = Qdmobile.open(
                     context.getFilesDir().getAbsolutePath(),
                     HOST, PROTECTOR,
@@ -145,10 +194,6 @@ public final class Core {
         return where;
     }
 
-    public static long since() {
-        return since;
-    }
-
     public static String plain(String raw) {
         String why = raw == null ? "" : raw.toLowerCase(java.util.Locale.ROOT);
         if (why.contains("stopped before the tunnel came up")) {
@@ -186,16 +231,6 @@ public final class Core {
         return "Не удалось подключиться. Подробности в журнале.";
     }
 
-    public static void gaveUp(String why) {
-        woe = why == null ? "" : why;
-    }
-
-    public static String tookIt() {
-        String said = woe;
-        woe = "";
-        return said;
-    }
-
     public static boolean turning() {
         return turning;
     }
@@ -209,15 +244,10 @@ public final class Core {
         TunnelService.refreshNote(context);
         TileService.refresh();
         Widget.refresh(context);
+        MainActivity.poke();
     }
 
     public static void mark(Context context, boolean running, String label) {
-        if (running && !up) {
-            since = System.currentTimeMillis();
-        }
-        if (!running) {
-            since = 0;
-        }
         up = running;
         where = label == null ? "" : label;
 

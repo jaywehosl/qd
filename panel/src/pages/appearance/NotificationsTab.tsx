@@ -15,7 +15,6 @@ import {
   setAlertPref,
   setSensorEnabled,
   setSensorThreshold,
-  setUpdateCheckEnabled,
   setBackupReminderEnabled,
   setBackupReminderInterval,
   type AlertCategory,
@@ -28,7 +27,6 @@ const SENSOR_LABELS: { key: SensorKey; label: string; hint: string; unit: string
   { key: 'disk', label: 'Disk usage', hint: 'Alert when disk usage exceeds the threshold', unit: '%' },
   { key: 'sockets', label: 'Open TCP sockets', hint: 'Alert on an abnormal number of open TCP sockets', unit: '' },
   { key: 'udpSockets', label: 'Open UDP sockets', hint: 'Alert on an abnormal number of open UDP sockets', unit: '' },
-  { key: 'uptimeDays', label: 'Uptime reminder', hint: 'Remind to check OS / panel updates after N days up', unit: 'd' },
   { key: 'clientOffline', label: 'Client offline', hint: 'Alert when a client that was online goes silent for N hours', unit: 'h' },
 ];
 
@@ -104,13 +102,6 @@ export default function NotificationsTab() {
       </Card>
 
       <Card title="Maintenance">
-        <div className="notif-tab__source">
-          <div className="notif-tab__source-label">
-            <span>Panel update check</span>
-            <span className="notif-tab__source-hint">Notify when a newer Community Panel release is published on GitHub</span>
-          </div>
-          <Switch checked={maintenance.updateCheck} onChange={setUpdateCheckEnabled} />
-        </div>
         <div className="notif-tab__source">
           <div className="notif-tab__source-label">
             <span>Backup reminder</span>

@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Dialog, Input, Tag } from '@/components/ds';
 import { Spin } from '@/components/ui';
 import { fetchProcesses } from '@/hooks/useClientRouting';
+import { phone, worded } from '@/lib/phone';
 
 interface ProcessPickerDialogProps {
   open: boolean;
@@ -31,6 +32,7 @@ export default function ProcessPickerDialog({
   const shown = useMemo(() => {
     const list = needle
       ? processes.filter((p) => p.name.toLowerCase().includes(needle)
+        || (p.title ?? '').toLowerCase().includes(needle)
         || (p.path ?? '').toLowerCase().includes(needle))
       : processes;
 
@@ -47,7 +49,7 @@ export default function ProcessPickerDialog({
     }
 
     return [...folded.values()].sort((a, b) => (b.connections ?? 0) - (a.connections ?? 0)
-      || a.name.localeCompare(b.name));
+      || (a.title || a.name).localeCompare(b.title || b.name));
   }, [processes, needle]);
 
   const exactListed = processes.some((p) => p.name.toLowerCase() === needle);
@@ -68,9 +70,9 @@ export default function ProcessPickerDialog({
     >
       <div className="rt-picker">
         <Input
-          autoFocus
+          autoFocus={!phone()}
           value={term}
-          placeholder={t('client.routing.searchProcess')}
+          placeholder={t('client.routing.searchProcess', worded())}
           onChange={(e) => setTerm(e.target.value)}
         />
 
@@ -78,7 +80,7 @@ export default function ProcessPickerDialog({
           {isPending ? (
             <div className="rt-empty"><Spin spinning size="large" /></div>
           ) : shown.length === 0 && !needle ? (
-            <div className="rt-empty">{t('client.routing.noProcesses')}</div>
+            <div className="rt-empty">{t('client.routing.noProcesses', worded())}</div>
           ) : shown.map((p) => {
             const ruled = existing.has((p.path || p.name).toLowerCase());
             return (
@@ -92,8 +94,8 @@ export default function ProcessPickerDialog({
                 {p.icon
                   ? <img className="rt-proc__icon" src={p.icon} alt="" aria-hidden="true" />
                   : <span className="rt-proc__icon rt-proc__icon--blank" aria-hidden="true" />}
-                <span className="rt-proc__name">{p.name}</span>
-                {p.path && <span className="rt-proc__path">{p.path}</span>}
+                <span className="rt-proc__name">{p.title || p.name}</span>
+                {(p.path || p.title) && <span className="rt-proc__path">{p.path || p.name}</span>}
                 {p.instances > 1 && <span className="rt-proc__count">×{p.instances}</span>}
                 {ruled
                   ? <Tag>{t('client.routing.alreadyRuled')}</Tag>
@@ -112,7 +114,7 @@ export default function ProcessPickerDialog({
               onClick={() => take({ process: term.trim() })}
             >
               <span className="rt-proc__name">{term.trim()}</span>
-              <span className="rt-proc__path">{t('client.routing.byNameHint')}</span>
+              <span className="rt-proc__path">{t('client.routing.byNameHint', worded())}</span>
               <Tag tone="warning">{t('client.routing.notRunning')}</Tag>
             </button>
           )}

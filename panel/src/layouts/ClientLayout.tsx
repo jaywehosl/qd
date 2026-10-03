@@ -1,15 +1,18 @@
 import { useCallback, useEffect, useMemo, lazy, Suspense, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   ApiOutlined,
   ControlOutlined,
+  CrownOutlined,
   SettingOutlined,
 } from '@ant-design/icons';
 
 import { Button } from '@/components/ds';
 import { useTheme } from '@/hooks/useTheme';
 import { useClientState } from '@/hooks/useClientState';
+import { useSetup } from '@/hooks/useSetup';
 import { HeaderActionsProvider, useHeaderActions } from '@/layouts/header-actions-context';
 import { ClientSettingsControllerProvider } from '@/layouts/ClientSettingsController';
 import { MetricsPanelProvider } from '@/layouts/MetricsPanelContext';
@@ -22,6 +25,8 @@ import { prefetchRoute } from '@/routes';
 const ClientHistoryPanel = lazy(() => import('@/pages/client/ClientHistoryPanel'));
 import ClientNotificationsBar from '@/layouts/ClientNotificationsBar';
 import FpsMeter from '@/components/ui/FpsMeter';
+import { HOST_EVENT, phone } from '@/lib/phone';
+import { warmModules } from '@/lib/warmup';
 const NAV = [
   { key: '/client', icon: ApiOutlined, label: 'client.menu.connect' },
   { key: '/client/routing', icon: ControlOutlined, label: 'client.menu.routing' },
@@ -30,7 +35,10 @@ const NAV = [
 
 function ClientShell() {
   const { t } = useTranslation();
-  const { open: metricsOpen, toggle: toggleMetrics } = useMetricsPanel();
+  const { open: metricsOpen, toggle: toggleMetrics, notifyOpen } = useMetricsPanel();
+  useEffect(() => {
+    if (metricsOpen || notifyOpen) window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [metricsOpen, notifyOpen]);
   const [chartsSeen, setChartsSeen] = useState(false);
   useEffect(() => {
     if (metricsOpen) { setChartsSeen(true); return undefined; }
@@ -42,11 +50,31 @@ function ClientShell() {
     const id = idle(() => setChartsSeen(true), { timeout: 4000 });
     return () => window.cancelIdleCallback?.(id);
   }, [metricsOpen]);
-  const { isDark, isUltra, cycleTheme } = useTheme();
+  const { isDark, isUltra, cycleTheme, follow } = useTheme();
+  const queryClient = useQueryClient();
+  const onPhone = !!phone();
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { state } = useClientState();
+  const { setup, loading: setupLoading } = useSetup();
+  const [staging, setStaging] = useState(false);
   const headerActions = useHeaderActions();
+
+  useEffect(() => {
+    const fresh = () => void queryClient.invalidateQueries({ queryKey: ['client'] });
+    window.addEventListener(HOST_EVENT, fresh);
+    return () => window.removeEventListener(HOST_EVENT, fresh);
+  }, [queryClient]);
+
+  useEffect(() => {
+    warmModules('client');
+    if (state?.admin) warmModules('admin');
+  }, [state?.admin]);
+
+  const drawn = !setupLoading && !!state;
+  useEffect(() => {
+    if (drawn) phone()?.ready?.();
+  }, [drawn]);
 
   const activeKey = useMemo(() => {
     if (pathname.startsWith('/client/settings')) return '/client/settings';
@@ -63,7 +91,10 @@ function ClientShell() {
   const shellClass = ['client-shell', isDark && 'is-dark', isUltra && 'is-ultra']
     .filter(Boolean).join(' ');
 
-  if (!state?.imported) return <Outlet />;
+  if (setupLoading) return null;
+  if (!state) return <Outlet context={{ ready: false, setStaging }} />;
+  const ready = state.imported && !setup?.offered && !staging;
+  if (!ready && pathname !== '/client') return <Navigate to="/client" replace />;
 
   return (
     <div className={shellClass}>
@@ -73,16 +104,21 @@ function ClientShell() {
         <header className="antigravity-header client-header">
         <div className="header-container">
           <div className="header-left">
-            <div className="brand-block" data-drag="off" style={{ cursor: 'pointer' }} onClick={toggleMetrics}>
+            <div
+              className="brand-block"
+              data-drag="off"
+              style={ready ? { cursor: 'pointer' } : undefined}
+              onClick={ready ? toggleMetrics : undefined}
+            >
               <BrandMark
-                state={state.connected ? 'on' : state.nodes.reachable === 0 ? 'error' : 'off'}
+                state={state.connected ? 'on' : ready && state.nodes.reachable === 0 ? 'error' : 'off'}
                 exit={!!state.egress && state.allowExit !== false}
               />
             </div>
           </div>
 
           <div className="header-center">
-            <nav className="header-nav-list-container">
+            {ready && <nav className="header-nav-list-container">
               <ul className="header-nav-list">
                 {NAV.map((item) => {
                   const Icon = item.icon;
@@ -100,8 +136,20 @@ function ClientShell() {
                     </li>
                   );
                 })}
+                {onPhone && state.admin && (
+                  <li className="header-nav-item-wrapper">
+                    <button
+                      type="button"
+                      className="nav-menu-item"
+                      aria-label={t('client.menu.admin')}
+                      onClick={() => navigate('/panel', { viewTransition: true })}
+                    >
+                      <CrownOutlined />
+                    </button>
+                  </li>
+                )}
               </ul>
-            </nav>
+            </nav>}
           </div>
 
           <div className="header-right">
@@ -118,41 +166,44 @@ function ClientShell() {
               </div>
             )}
             <div className="win-tray" data-drag="off">
-              {state.admin && (
+              {ready && state.admin && (
                 <Button
                   className="client-admin-btn"
-                  onPointerEnter={() => prefetchRoute('/panel/inbounds')}
+                  onPointerEnter={() => prefetchRoute('/panel/clients')}
                   onClick={() => navigate('/panel', { viewTransition: true })}
                 >
                   {t('client.menu.admin')}
                 </Button>
               )}
-              <ClientBell />
-              <ThemeCycleButton
-                id="client-theme-cycle"
-                isDark={isDark}
-                isUltra={isUltra}
-                onCycle={() => cycleTheme('client-theme-cycle')}
-                ariaLabel={t('menu.theme')}
-              />
-              <LanguageSelector />
+              {ready && <ClientBell />}
+              {!follow && (
+                <ThemeCycleButton
+                  id="client-theme-cycle"
+                  isDark={isDark}
+                  isUltra={isUltra}
+                  onCycle={() => cycleTheme('client-theme-cycle')}
+                  ariaLabel={t('menu.theme')}
+                />
+              )}
+              {ready && <LanguageSelector />}
               <WindowButtons />
             </div>
           </div>
         </div>
         </header>
-        <div className={`metrics-bar is-client ${metricsOpen ? 'is-open' : ''}`} aria-hidden={!metricsOpen}>
-          <div className="mb-container">
-            <Suspense fallback={null}>
-              {chartsSeen && <ClientHistoryPanel />}
-            </Suspense>
-          </div>
-        </div>
-        <ClientNotificationsBar />
       </div>
 
+      <div className={`metrics-bar is-client ${metricsOpen && ready ? 'is-open' : ''}`} aria-hidden={!metricsOpen || !ready}>
+        <div className="mb-container">
+          <Suspense fallback={null}>
+            {chartsSeen && <ClientHistoryPanel live={metricsOpen && ready} />}
+          </Suspense>
+        </div>
+      </div>
+      <ClientNotificationsBar />
+
       <div className="client-main">
-        <Outlet />
+        <Outlet context={{ ready, setStaging }} />
       </div>
     </div>
   );

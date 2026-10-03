@@ -1,6 +1,12 @@
 package qdmobile
 
-import "time"
+import (
+	"time"
+
+	"github.com/jaywehosl/qd/internal/clientdns"
+	"github.com/jaywehosl/qd/internal/clientstate"
+	"github.com/jaywehosl/qd/internal/qcli"
+)
 
 func (c *Client) upkeep() {
 	go c.meter()
@@ -13,7 +19,8 @@ func (c *Client) meter() {
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
 
-	var prevIn, prevOut uint64
+	var prev qcli.Counters
+	var prevDNS clientdns.Stats
 
 	for {
 		select {
@@ -23,21 +30,41 @@ func (c *Client) meter() {
 		}
 
 		c.mu.Lock()
-		live := c.live
+		live, warm := c.live, c.dns
 		c.mu.Unlock()
 		if live == nil {
-			prevIn, prevOut = 0, 0
+			prev, prevDNS = qcli.Counters{}, clientdns.Stats{}
 			continue
 		}
 
 		got := live.Stats()
-		if got.BytesIn >= prevIn && got.BytesOut >= prevOut {
-			up := int64(got.BytesOut - prevOut)
-			down := int64(got.BytesIn - prevIn)
-			if up > 0 || down > 0 {
-				c.db.AddTraffic(up, down)
-			}
+		var dns clientdns.Stats
+		if warm != nil {
+			dns = warm.Stats()
 		}
-		prevIn, prevOut = got.BytesIn, got.BytesOut
+
+		up, down := gap(got.BytesOut, prev.BytesOut), gap(got.BytesIn, prev.BytesIn)
+		if up > 0 || down > 0 {
+			c.db.AddTraffic(up, down)
+		}
+		c.db.AddSample(clientstate.Sample{
+			T:           time.Now().Unix(),
+			Up:          up,
+			Down:        down,
+			PktOut:      gap(got.Out, prev.Out),
+			PktIn:       gap(got.In, prev.In),
+			DNSQueries:  gap(dns.Queries, prevDNS.Queries),
+			DNSCached:   gap(dns.Hits, prevDNS.Hits),
+			DNSUpstream: gap(dns.Upstream, prevDNS.Upstream),
+			Adblock:     gap(dns.Blocked, prevDNS.Blocked),
+		})
+		prev, prevDNS = got, dns
 	}
+}
+
+func gap(now, before uint64) int64 {
+	if now < before {
+		return 0
+	}
+	return int64(now - before)
 }

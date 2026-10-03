@@ -48,6 +48,10 @@
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
+@keyframes qd-fold-in {
+  from { opacity: 0; transform: translateY(-4px); }
+}
+
 @keyframes qd-page-in {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
@@ -64,22 +68,6 @@
 .ds-dialog__content { animation: qd-modal-in 0.2s cubic-bezier(0.2, 0.8, 0.2, 1); }
 .ds-dialog__content.is-closing { animation: qd-modal-out 0.15s ease both; }
 
-.ds-drawer__content--right {
-  animation: qd-drawer-in-right 0.24s cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-
-.ds-drawer__content--right.is-closing {
-  animation: qd-drawer-out-right 0.15s ease both;
-}
-
-.ds-drawer__content--left {
-  animation: qd-drawer-in-left 0.24s cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-
-.ds-drawer__content--left.is-closing {
-  animation: qd-drawer-out-left 0.15s ease both;
-}
-
 .ds-menu[data-state='open'],
 .ds-popover[data-state='open'],
 .ds-select__content[data-state='open'],
@@ -88,8 +76,6 @@
   animation: qd-pop-in 0.14s cubic-bezier(0.2, 0.8, 0.2, 1);
   transform-origin: var(--radix-popper-transform-origin, center);
 }
-
-.ds-toast { animation: qd-toast-in 0.18s cubic-bezier(0.2, 0.8, 0.2, 1); }
 
 .ds-tabs__content[data-state='active'] { animation: qd-fade-in 0.18s ease; }
 
@@ -121,13 +107,10 @@
 @media (prefers-reduced-motion: reduce) {
   .ds-dialog__overlay[data-state],
   .ds-dialog__content[data-state],
-  .ds-drawer__content--right[data-state],
-  .ds-drawer__content--left[data-state],
   .ds-menu[data-state],
   .ds-popover[data-state],
   .ds-select__content[data-state],
   .ds-tooltip[data-state],
-  .ds-toast,
   .ds-tabs__content[data-state='active'],
   .qd-page-swap,
   ::view-transition-old(root),

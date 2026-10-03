@@ -7,7 +7,7 @@ import {
   DeleteOutlined,
   EditOutlined,
   InfoCircleOutlined,
-  MoreOutlined,
+  LockOutlined,
   PlusOutlined,
   RetweetOutlined,
   SearchOutlined,
@@ -22,7 +22,6 @@ import {
   Card,
   DataTable,
   Dialog,
-  DropdownMenu,
   Input,
   Pagination,
   Popover,
@@ -39,7 +38,9 @@ import {
 import { Spin } from '@/components/ui';
 import { useTheme } from '@/hooks/useTheme';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
+import { useHold } from '@/hooks/useHold';
 import { useWebSocket } from '@/hooks/useWebSocket';
+import { cellOf } from '@/components/ui';
 import { useClients } from '@/hooks/useClients';
 import { useDatepicker } from '@/hooks/useDatepicker';
 import type { ClientRecord, InboundOption } from '@/hooks/useClients';
@@ -48,6 +49,7 @@ import { getMessage } from '@/utils/messageBus';
 import { LazyMount } from '@/components/utility';
 const ClientFormModal = lazy(() => import('./ClientFormModal'));
 const ClientInfoModal = lazy(() => import('./ClientInfoModal'));
+const BlockedDevicesModal = lazy(() => import('./BlockedDevicesModal'));
 import { emptyFilters, activeFilterCount } from './filters';
 import type { ClientFilters } from './filters';
 const FILTER_STATE_KEY = 'clientsFilterState';
@@ -161,6 +163,9 @@ export default function ClientsPage() {
   const [editingClient, setEditingClient] = useState<ClientRecord | null>(null);
   const [editingAttachedIds, setEditingAttachedIds] = useState<number[]>([]);
   const [infoOpen, setInfoOpen] = useState(false);
+  const hold = useHold();
+  const [statsOpen, setStatsOpen] = useState(false);
+  const [blockedOpen, setBlockedOpen] = useState(false);
   const [infoClient, setInfoClient] = useState<ClientRecord | null>(null);
   const liveInfoClient = useMemo(
     () => (infoClient ? clients.find((c) => c.email === infoClient.email) ?? infoClient : null),
@@ -246,15 +251,6 @@ export default function ClientsPage() {
     if (nearExpiry) return 'expiring';
     return 'active';
   }, [expireDiff, trafficDiff]);
-
-  function bucketDotClass(bucket: Bucket | null): string {
-    switch (bucket) {
-      case 'depleted': return 'dot dot-red';
-      case 'expiring': return 'dot dot-orange';
-      case 'active': return 'dot dot-green';
-      default: return 'dot dot-gray';
-    }
-  }
 
   const filteredClients = clients;
   const summary = serverSummary;
@@ -486,6 +482,15 @@ export default function ClientsPage() {
     onChange: (p: number, s: number) => { setCurrentPage(p); if (s !== tablePageSize) setTablePageSize(s); },
   };
 
+  function presence(record: ClientRecord) {
+    const bucket = clientBucket(record);
+    if (bucket === 'depleted') return 'depleted';
+    if (record.enable && isOnline(record.email)) return 'online';
+    if (!record.enable) return 'disabled';
+    if (bucket === 'expiring') return 'expiring';
+    return 'offline';
+  }
+
   function statWithList(title: string, value: number, icon: React.ReactNode, emails: string[]) {
     const stat = <Stat title={title} value={String(value)} prefix={icon} />;
     if (emails.length === 0) return stat;
@@ -512,29 +517,46 @@ export default function ClientsPage() {
             </div>
           </Card>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? 8 : 12 }}>
+          <div className="page-stack">
             <Card>
-              <div className="ds-stats-grid">
-                <Stat title={t('clients')} value={String(summary.total)} prefix={<TeamOutlined />} />
-                {statWithList(t('online'), summary.online.length, <WifiOutlined />, summary.online)}
-                {statWithList(t('depleted'), summary.depleted.length, <CloseCircleOutlined />, summary.depleted)}
-                {statWithList(t('depletingSoon'), summary.expiring.length, <WarningOutlined />, summary.expiring)}
-                {statWithList(t('disabled'), summary.deactive.length, <StopOutlined />, summary.deactive)}
-                <Stat title={t('subscription.active')} value={String(summary.active)} prefix={<CheckCircleOutlined />} />
-              </div>
+              {isMobile ? (
+                <button type="button" className={`ds-stats-grid is-fold${statsOpen ? ' is-open' : ''}`} aria-expanded={statsOpen} onClick={() => setStatsOpen(!statsOpen)}>
+                  <Stat title={t('online')} value={String(summary.online.length)} prefix={<WifiOutlined />} />
+                  <Stat title={t('clients')} value={String(summary.total)} prefix={<TeamOutlined />} />
+                  <Stat title={t('disabled')} value={String(summary.deactive.length)} prefix={<StopOutlined />} />
+                  <Stat title={t('depleted')} value={String(summary.depleted.length)} prefix={<CloseCircleOutlined />} />
+                  <Stat title={t('depletingSoon')} value={String(summary.expiring.length)} prefix={<WarningOutlined />} />
+                  <Stat title={t('subscription.active')} value={String(summary.active)} prefix={<CheckCircleOutlined />} />
+                </button>
+              ) : (
+                <div className="ds-stats-grid">
+                  <Stat title={t('clients')} value={String(summary.total)} prefix={<TeamOutlined />} />
+                  {statWithList(t('online'), summary.online.length, <WifiOutlined />, summary.online)}
+                  {statWithList(t('depleted'), summary.depleted.length, <CloseCircleOutlined />, summary.depleted)}
+                  {statWithList(t('depletingSoon'), summary.expiring.length, <WarningOutlined />, summary.expiring)}
+                  {statWithList(t('disabled'), summary.deactive.length, <StopOutlined />, summary.deactive)}
+                  <Stat title={t('subscription.active')} value={String(summary.active)} prefix={<CheckCircleOutlined />} />
+                </div>
+              )}
             </Card>
 
-            <div className="clients-add">
-              <div className="vertical-tabs-container">
-                <button type="button" className="vtab-btn is-active" onClick={onAdd}>
-                  <span className="vtab-icon"><PlusOutlined /></span>
-                  {t('pages.clients.addClients')}
-                </button>
+            {!isMobile && (
+              <div className="clients-add">
+                <div className="vertical-tabs-container">
+                  <button type="button" className="vtab-btn is-active" onClick={onAdd}>
+                    <span className="vtab-icon"><PlusOutlined /></span>
+                    {t('pages.clients.addClients')}
+                  </button>
+                  <button type="button" className="vtab-btn" onClick={() => setBlockedOpen(true)}>
+                    <span className="vtab-icon"><LockOutlined /></span>
+                    {t('pages.clients.blockedDevices')}
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
 
             <Card flush>
-              <div className={`card-toolbar${isMobile ? ' is-stacked' : ''}`}>
+              <div className={isMobile ? 'mc-tools' : 'card-toolbar'}>
                 <div className="toolbar-search">
                   <SearchOutlined className="toolbar-search__icon" />
                   <Input value={searchKey} onChange={(e) => setSearchKey(e.target.value)} placeholder={t('pages.clients.searchPlaceholder')} />
@@ -549,9 +571,20 @@ export default function ClientsPage() {
                   />
                 </div>
 
-                <div className="toolbar-pages">
-                  <Pagination {...pagination} />
-                </div>
+                {isMobile && (
+                  <button type="button" className="mc-icon" aria-label={t('pages.clients.blockedDevices')} onClick={() => setBlockedOpen(true)}>
+                    <LockOutlined />
+                  </button>
+                )}
+                {isMobile ? (
+                  <button type="button" className="mc-add" aria-label={t('pages.clients.addClients')} onClick={onAdd}>
+                    <PlusOutlined />
+                  </button>
+                ) : (
+                  <div className="toolbar-pages">
+                    <Pagination {...pagination} />
+                  </div>
+                )}
               </div>
 
               {(activeCount > 0 || debouncedSearch.trim().length > 0) && (
@@ -589,37 +622,31 @@ export default function ClientsPage() {
                 </div>
               ) : (
                 <Spin spinning={loading}>
-                  <div className="client-cards" style={{ padding: '0 12px 12px' }}>
+                  <div className="mc-list">
                     {filteredClients.length === 0 && (
                       <div className="card-empty"><TeamOutlined style={{ fontSize: 28, opacity: 0.5 }} /><div>{t('noData')}</div></div>
                     )}
-                    {filteredClients.map((row) => {
-                      const bucket = clientBucket(row);
-                      return (
-                        <div key={row.email} className="client-card">
-                          <div className="card-head">
-                            <span className={bucketDotClass(bucket)} />
-                            <span className="tag-name">{row.email}</span>
-                            {bucket === 'depleted' && <Tag tone="danger" className="status-tag">{t('depleted')}</Tag>}
-                            {bucket === 'expiring' && <Tag tone="warning" className="status-tag">{t('depletingSoon')}</Tag>}
-                            <div className="card-actions" onClick={(e) => e.stopPropagation()}>
-                              <Tooltip title={t('pages.clients.clientInfo')}>
-                                <button type="button" className="row-action-trigger" onClick={() => onShowInfo(row)}><InfoCircleOutlined /></button>
-                              </Tooltip>
-                              <Switch checked={!!row.enable} onChange={(next) => onToggleEnable(row, next)} />
-                              <DropdownMenu
-                                items={[
-                                  { key: 'reset', icon: <RetweetOutlined />, label: t('pages.inbounds.resetTraffic'), onSelect: () => onResetTraffic(row) },
-                                  { key: 'edit', icon: <EditOutlined />, label: t('edit'), onSelect: () => onEdit(row) },
-                                  { key: 'delete', icon: <DeleteOutlined />, label: t('delete'), danger: true, onSelect: () => onDelete(row) },
-                                ]}
-                                trigger={<button type="button" className="row-action-trigger"><MoreOutlined /></button>}
-                              />
-                            </div>
-                          </div>
+                    {filteredClients.map((row) => (
+                      <div key={row.email} className="mc is-tap" {...hold(() => onShowInfo(row), () => void onEdit(row))}>
+                        <span className={`mc__dot is-${presence(row)}`} />
+                        <div className="mc__body">
+                          <span className="mc__name">{row.email}</span>
+                          <span className="mc__sub">
+                            {row.group && <span className="is-group">{row.group}</span>}
+                            <span>
+                              {SizeFormatter.sizeFormat((row.traffic?.up || 0) + (row.traffic?.down || 0))}
+                              {(row.totalGB || 0) > 0 && ` / ${SizeFormatter.sizeFormat(row.totalGB || 0)}`}
+                            </span>
+                            <span className={`is-${tone(expiryColor(row))}`}>{row.expiryTime ? expiryRelative(row) : '∞'}</span>
+                          </span>
+                          {row.comment && <span className="mc__note">{row.comment}</span>}
                         </div>
-                      );
-                    })}
+                        <span className="mc__end" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>{cellOf(columns, 'enable', row)}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="cards-pages">
+                    <Pagination {...pagination} />
                   </div>
                 </Spin>
               )}
@@ -641,6 +668,9 @@ export default function ClientsPage() {
 
         <LazyMount when={formOpen}>
           <ClientFormModal open={formOpen} mode={formMode} client={editingClient} attachedIds={editingAttachedIds} inbounds={inbounds} tgBotEnable={tgBotEnable} groups={allGroups} save={onSave} onOpenChange={setFormOpen} />
+        </LazyMount>
+        <LazyMount when={blockedOpen}>
+          <BlockedDevicesModal open={blockedOpen} onOpenChange={setBlockedOpen} onChanged={refresh} />
         </LazyMount>
         <LazyMount when={infoOpen}>
           <ClientInfoModal
@@ -669,6 +699,11 @@ export default function ClientsPage() {
               await refresh();
             }}
             onOpenChange={setInfoOpen}
+            actions={isMobile && infoClient ? {
+              edit: () => { setInfoOpen(false); void onEdit(infoClient); },
+              reset: () => { setInfoOpen(false); onResetTraffic(infoClient); },
+              remove: () => { setInfoOpen(false); onDelete(infoClient); },
+            } : undefined}
           />
         </LazyMount>
       </div>

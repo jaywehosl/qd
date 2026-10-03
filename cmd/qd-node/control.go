@@ -32,7 +32,6 @@ type nodeInfo struct {
 	Version   string  `json:"version"`
 	CPUPct    float64 `json:"cpuPct"`
 	MemPct    float64 `json:"memPct"`
-	Carrying  int     `json:"carrying"`
 }
 
 type controlState struct {
@@ -115,7 +114,6 @@ func handleControl(state *controlState, req request) response {
 		return reply(req, nodeInfo{
 			CPUPct:    latest.CPU,
 			MemPct:    latest.Mem,
-			Carrying:  int(latest.Online),
 			ID:        state.id,
 			Tag:       state.tag,
 			Role:      state.role,
@@ -395,10 +393,6 @@ func handleControl(state *controlState, req request) response {
 		if err != nil {
 			return response{OK: false, Error: err.Error()}
 		}
-		carried, err := state.db.PeerTraffic()
-		if err != nil {
-			return response{OK: false, Error: err.Error()}
-		}
 		mine, err := state.db.TrafficFrom(state.id)
 		if err != nil {
 			return response{OK: false, Error: err.Error()}
@@ -409,7 +403,7 @@ func handleControl(state *controlState, req request) response {
 		}
 		return reply(req, map[string]any{
 			"traffic": traffic, "mine": mine, "addresses": addresses, "devices": devices,
-			"carried": carried, "exits": exits,
+			"exits": exits,
 		})
 
 	case "sessions":

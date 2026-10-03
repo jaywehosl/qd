@@ -8,6 +8,7 @@ import { LazyMount } from '@/components/utility';
 import { ROUTING_ROLES, type RoutingRole } from '@/schemas/client-routing';
 import { useClientRouting } from '@/hooks/useClientRouting';
 import { HttpUtil } from '@/utils';
+import { phone, worded } from '@/lib/phone';
 const ProcessPickerDialog = lazy(() => import('./ProcessPickerDialog'));
 
 interface RoutingSectionProps {
@@ -62,6 +63,11 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
   const doExport = useCallback(async () => {
     const msg = await HttpUtil.get<{ code: string; name: string }>('/client/api/routing/export');
     if (!msg?.success || !msg.obj) return;
+    const host = phone();
+    if (host?.save) {
+      toast.success(host.save(msg.obj.name, msg.obj.code));
+      return;
+    }
     const url = URL.createObjectURL(new Blob([msg.obj.code], { type: 'application/octet-stream' }));
     const link = document.createElement('a');
     link.href = url;
@@ -120,9 +126,10 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
         <div className="rt-default">
           <div className="rt-default__text">
             <b>{t('client.routing.everythingElse')}</b>
-            <span>{t('client.routing.everythingElseDesc')}</span>
+            <span>{t('client.routing.everythingElseDesc', worded())}</span>
           </div>
           <Select
+            className={`rt-role rt-role--${defaultRole}`}
             value={defaultRole}
             options={baseOptions}
             onChange={(v) => void setDefaultRole(v as RoutingRole)}
@@ -141,7 +148,7 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
       >
         <div className="rt-rules">
           {rules.length === 0 ? (
-            <div className="rt-empty">{t('client.routing.noRules')}</div>
+            <div className="rt-empty">{t('client.routing.noRules', worded())}</div>
           ) : rules.map((r) => (
             <div key={r.id} className="rt-rule">
               <span className={`rt-dot${r.running ? ' is-up' : ''}`} />
@@ -149,12 +156,13 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
                 ? <img className="rt-proc__icon" src={r.icon} alt="" aria-hidden="true" />
                 : <span className="rt-proc__icon rt-proc__icon--blank" aria-hidden="true" />}
               <div className="rt-rule__id">
-                <span className="rt-rule__name">{r.process}</span>
-                {r.path && <span className="rt-rule__path">{r.path}</span>}
+                <span className="rt-rule__name">{r.title || r.process}</span>
+                {(r.path || r.title) && <span className="rt-rule__path">{r.path || r.process}</span>}
               </div>
               {r.matched ? <Tag>{t('client.routing.flows', { count: r.matched })}</Tag> : null}
               {!allowExit && !plain(r.role) && <Tag tone="warning">{t('client.routing.noExit')}</Tag>}
               <Select
+                className={`rt-role rt-role--${r.role}`}
                 value={r.role}
                 options={roleOptions.filter((o) => allowExit || plain(o.value) || o.value === r.role)}
                 onChange={(v) => void setRole(r.id, v as RoutingRole)}
@@ -209,13 +217,13 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
             <div className="rt-legend">
               {shownRoles.map((r) => (
                 <div key={r} className="rt-legend__row">
-                  <Tag tone={r === 'direct' ? 'warning' : 'primary'}>{t(`client.routing.role.${r}`)}</Tag>
-                  <span>{t(`client.routing.roleDesc.${r}`)}</span>
+                  <Tag className={`rt-role rt-role--${r}`}>{t(`client.routing.role.${r}`)}</Tag>
+                  <span>{t(`client.routing.roleDesc.${r}`, worded())}</span>
                 </div>
               ))}
             </div>
             <p className="rt-note">{t('client.routing.newFlowsNote')}</p>
-            <p className="rt-note">{t('client.routing.matchNote')}</p>
+            <p className="rt-note">{t('client.routing.matchNote', worded())}</p>
           </div>
         </div>
       </Card>

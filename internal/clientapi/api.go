@@ -26,6 +26,8 @@ type API struct {
 	seen     *Visits
 
 	OnImport func()
+	Raise    func() error
+	Lower    func() error
 
 	mu     sync.Mutex
 	netKey *qdcrypt.Key
@@ -117,6 +119,7 @@ func (a *API) statePayload() (map[string]any, error) {
 		"imported":  sub.Imported,
 		"admin":     sub.Admin,
 		"connected": running,
+		"road":      a.platform.Road(),
 		"node":      current,
 		"nodes":     map[string]any{"total": len(nodes), "reachable": reachable},
 		"egress":    settings.Egress,
@@ -247,11 +250,7 @@ func (a *API) check(verb string) (int, error) {
 		return 0, fmt.Errorf("no entrypoint answered")
 	}
 
-	if fresh, err := a.db.Subscription(); err == nil {
-		sub = fresh
-	}
-	sub.LastRefresh = now
-	a.db.SaveSubscription(sub)
+	a.db.SetLastRefresh(now)
 
 	nodes, _ := a.db.Nodes()
 	a.db.Notify("info",
@@ -342,7 +341,7 @@ func (a *API) Greet() {
 		return
 	}
 	if reached > 0 {
-		fmt.Printf("device   %s recognised by the network\n", a.platform.Identify().ID[:12])
+		fmt.Printf("device   %s recognized by the network\n", a.platform.Identify().ID[:12])
 	}
 }
 
@@ -393,8 +392,7 @@ func (a *API) adoptAdmin(answer Standing) {
 	if err != nil || !sub.Imported || sub.Admin == answer.Admin {
 		return
 	}
-	sub.Admin = answer.Admin
-	a.db.SaveSubscription(sub)
+	a.db.SetAdmin(answer.Admin)
 }
 
 func (a *API) adoptPeers(answer Standing) {
@@ -493,8 +491,7 @@ func (a *API) adoptExit(answer Standing) {
 	if err != nil || !sub.Imported || sub.AllowExit == answer.AllowExit {
 		return
 	}
-	sub.AllowExit = answer.AllowExit
-	a.db.SaveSubscription(sub)
+	a.db.SetAllowExit(answer.AllowExit)
 	a.platform.RulesChanged()
 
 	if !answer.AllowExit {
@@ -515,15 +512,11 @@ func (a *API) adoptCarriage(mbit int, profile string) {
 		a.platform.SetCarriage(mbit, profile)
 		return
 	}
-	if settings.RatePinned {
-		mbit = settings.FixedRate
-	}
-
 	a.platform.SetCarriage(mbit, profile)
-	if settings.FixedRate == mbit && settings.BBRProfile == profile {
+	if settings.FixedRate == mbit && settings.BBRProfile == profile && !settings.RatePinned {
 		return
 	}
-	settings.FixedRate, settings.BBRProfile = mbit, profile
+	settings.FixedRate, settings.BBRProfile, settings.RatePinned = mbit, profile, false
 	a.db.SaveSettings(settings)
 }
 
@@ -560,7 +553,11 @@ func (a *API) adoptNetworkKey(text string) error {
 }
 
 func (a *API) connect(w http.ResponseWriter, r *http.Request) {
-	if err := a.Connect(); err != nil {
+	bring := a.Connect
+	if a.Raise != nil {
+		bring = a.Raise
+	}
+	if err := bring(); err != nil {
 		fail(w, err)
 		return
 	}
@@ -622,7 +619,11 @@ func (a *API) Connect() error {
 }
 
 func (a *API) disconnect(w http.ResponseWriter, r *http.Request) {
-	if err := a.Disconnect(); err != nil {
+	drop := a.Disconnect
+	if a.Lower != nil {
+		drop = a.Lower
+	}
+	if err := drop(); err != nil {
 		fail(w, err)
 		return
 	}
@@ -769,10 +770,7 @@ func (a *API) SaveSettingsJSON(raw string) error {
 	if next.RefreshMinutes != current.RefreshMinutes {
 		next.RefreshPinned = true
 	}
-	if next.FixedRate != current.FixedRate {
-		next.RatePinned = true
-	}
-	next.FixedRate = min(max(next.FixedRate, 0), 10000)
+	next.FixedRate, next.RatePinned = current.FixedRate, false
 	next.RefreshMinutes = min(max(next.RefreshMinutes, 1), 1440)
 
 	if next.Autostart != current.Autostart {
@@ -794,24 +792,37 @@ func (a *API) Reset(subscription bool) error {
 		return err
 	}
 
+	fresh, _ := a.db.Settings()
 	if !subscription {
-		if held.NetworkKey != "" {
-			if fresh, err := a.db.Settings(); err == nil {
-				fresh.NetworkKey = held.NetworkKey
-				a.db.SaveSettings(fresh)
-			}
-		}
+		fresh.NetworkKey, fresh.FixedRate, fresh.BBRProfile = held.NetworkKey, held.FixedRate, held.BBRProfile
+		a.db.SaveSettings(fresh)
+	}
+	if held.Autostart != fresh.Autostart {
+		a.platform.HoldAutostart(fresh.Autostart)
+	}
+	a.platform.SetExit(fresh.Egress)
+	a.seen.SetAdblock(fresh.Adblock)
+	a.platform.RulesChanged()
+
+	if !subscription {
 		return nil
 	}
 
-	a.platform.Stop()
+	if a.Lower != nil {
+		a.Lower()
+	} else {
+		a.platform.Stop()
+	}
 	if err := a.db.ClearSubscription(); err != nil {
 		return err
 	}
 
 	a.mu.Lock()
-	a.netKey = nil
+	a.netKey, a.peers, a.relays = nil, nil, nil
 	a.mu.Unlock()
+	a.upMu.Lock()
+	a.offer, a.upFailed, a.upErr = nil, "", ""
+	a.upMu.Unlock()
 	a.platform.SetKey(nil)
 	return nil
 }
@@ -988,9 +999,13 @@ func (a *API) routing(w http.ResponseWriter, r *http.Request) {
 	live := map[string]bool{}
 	iconByPath := map[string]string{}
 	iconByName := map[string]string{}
+	titles := map[string]string{}
 	for _, p := range a.platform.Processes() {
 		name := strings.ToLower(p.Name)
 		live[name] = true
+		if p.Title != "" {
+			titles[name] = p.Title
+		}
 		if p.Icon == "" {
 			continue
 		}
@@ -1004,6 +1019,7 @@ func (a *API) routing(w http.ResponseWriter, r *http.Request) {
 	onDisk, _ := a.platform.(interface{ IconOf(path string) string })
 	for i := range rules {
 		rules[i].Running = live[strings.ToLower(rules[i].Process)]
+		rules[i].Title = titles[strings.ToLower(rules[i].Process)]
 		if icon, known := iconByPath[strings.ToLower(rules[i].Path)]; known && rules[i].Path != "" {
 			rules[i].Icon = icon
 			continue

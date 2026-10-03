@@ -4,7 +4,8 @@ import { CopyOutlined, DownOutlined } from '@ant-design/icons';
 
 import { Button, Dialog, Tag, Tooltip, TooltipProvider } from '@/components/ds';
 import { getMessage } from '@/utils/messageBus';
-import { ClipboardManager, IntlUtil } from '@/utils';
+import { ClipboardManager, IntlUtil, SizeFormatter } from '@/utils';
+import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { useDatepicker } from '@/hooks/useDatepicker';
 import { useNodesQuery } from '@/api/queries/useNodesQuery';
 import type { ClientRecord } from '@/hooks/useClients';
@@ -16,6 +17,7 @@ interface ClientInfoModalProps {
   onAddress?: (ip: string) => void;
   onExit?: (nodeId: number) => void;
   onOpenChange: (open: boolean) => void;
+  actions?: { edit: () => void; reset: () => void; remove: () => void };
 }
 
 export default function ClientInfoModal({
@@ -26,11 +28,13 @@ export default function ClientInfoModal({
   onAddress,
   onExit,
   onOpenChange,
+  actions,
 }: ClientInfoModalProps) {
   const { datepicker } = useDatepicker();
   const { t } = useTranslation();
   const message = getMessage();
   const { nodes } = useNodesQuery();
+  const { isMobile } = useMediaQuery();
 
   const nodeName = useMemo(() => {
     const byId = new Map<number, string>();
@@ -103,6 +107,14 @@ export default function ClientInfoModal({
   const [shown, setShown] = useState<'devices' | 'ips' | 'exits' | null>(null);
 
   const [asking, setAsking] = useState<string | null>(null);
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) {
+      setShown(null);
+      setAsking(null);
+    }
+  }
 
   const confirmDevice = (action: 'block' | 'forget', print: string, blocked: boolean) => {
     const key = `${action}:${print}`;
@@ -137,6 +149,165 @@ export default function ClientInfoModal({
     onExit?.(nodeId);
   };
 
+  const fold = (key: 'devices' | 'ips' | 'exits', label: string, count: number) => (
+    <button
+      type="button"
+      className={`ms-fold${shown === key ? ' is-open' : ''}`}
+      aria-expanded={shown === key}
+      onClick={() => setShown(shown === key ? null : key)}
+    >
+      {label}
+      <span className="ms-fold__count">{count}</span>
+      <DownOutlined className="ms-fold__caret" />
+    </button>
+  );
+
+  const row = (key: string, value: ReactNode, cls = '') => (
+    <div className="ms-row">
+      <span className="ms-row__key">{key}</span>
+      <span className={`ms-row__val${cls}`}>{value}</span>
+    </div>
+  );
+
+  const copyRow = (key: string, value?: string) => (
+    <div className="ms-copy">
+      <span className="ms-copy__key">{key}</span>
+      <span className="ms-copy__val">{value || '—'}</span>
+      {value ? (
+        <Button size="sm" variant="text" icon={<CopyOutlined />} aria-label={t('copy')} onClick={() => copyValue(value)} />
+      ) : <span />}
+    </div>
+  );
+
+  const ask = (key: string, label: string) => (asking === key ? t('pages.clients.confirmShort', { defaultValue: 'Sure?' }) : label);
+
+  const phoneBody = (c: ClientRecord) => {
+    const used = (c.traffic?.up ?? 0) + (c.traffic?.down ?? 0);
+    const p = presenceTag(c);
+    const state = !c.enable ? 'disabled' : isOnline ? 'online' : 'offline';
+    return (
+      <div className="ms">
+        <div className="ms-status">
+          <span className={`mc__dot is-${state}`} />
+          <span>{p.label}</span>
+          <span className="ms-status__state">{c.enable ? t('enabled') : t('disabled')}</span>
+        </div>
+
+        <section className="ms-sec">
+          <h4 className="ms-sec__title">{t('pages.clients.traffic')}</h4>
+          {row(t('pages.clients.used'), (
+            <>
+              {SizeFormatter.sizeFormat(used)}
+              <span className="ms-row__hint">↑ {SizeFormatter.sizeFormat(c.traffic?.up ?? 0)} ↓ {SizeFormatter.sizeFormat(c.traffic?.down ?? 0)}</span>
+            </>
+          ))}
+          {row(t('pages.clients.limit'), (c.totalGB ?? 0) > 0 ? SizeFormatter.sizeFormat(c.totalGB ?? 0) : '∞')}
+          {row(t('pages.clients.duration'), (
+            <>
+              {expiryLabel(c.expiryTime)}
+              {(c.expiryTime ?? 0) > 0 && <span className="ms-row__hint">{IntlUtil.formatRelativeTime(c.expiryTime)}</span>}
+            </>
+          ))}
+          {row(t('pages.clients.group'), c.group || '—')}
+        </section>
+
+        <section className="ms-sec">
+          <h4 className="ms-sec__title">{t('pages.clients.connection')}</h4>
+          {copyRow(t('pages.clients.connectionUri'), c.uri)}
+          {copyRow(t('pages.clients.uuid'), c.uuid)}
+        </section>
+
+        <section className="ms-sec">
+          <h4 className="ms-sec__title">{t('pages.clients.details')}</h4>
+          {row(t('pages.clients.comment'), c.comment || '—', ' is-wrap')}
+          {row(t('pages.clients.createdAt', { defaultValue: 'Created' }), dateLabel(c.createdAt))}
+          {row(t('pages.clients.updatedAt', { defaultValue: 'Updated' }), dateLabel(c.updatedAt))}
+        </section>
+
+        <section className="ms-sec">
+          {fold('devices', t('pages.clients.devices'), devices.length)}
+          {shown === 'devices' && (devices.length === 0 ? (
+            <div className="ms-empty">{t('pages.clients.noDevices')}</div>
+          ) : (
+            <div className="ms-items">
+              {devices.map((d) => {
+                const extra = d as { blocked?: boolean; model?: string; kind?: string; ip?: string };
+                return (
+                  <div key={d.fingerprint} className="ms-item">
+                    <div className="ms-item__top">
+                      <span className="ms-item__name">{extra.model || d.platform || (d.fingerprint || '').slice(0, 12)}</span>
+                      {extra.blocked && <span className="ms-item__flag">{t('pages.clients.deviceBlocked', { defaultValue: 'blocked' })}</span>}
+                    </div>
+                    <span className="ms-item__line">
+                      {[d.platform, extra.kind, d.version || t('pages.clients.noVersion', { defaultValue: 'no version' })].filter(Boolean).join(' · ')}
+                    </span>
+                    <span className="ms-item__line is-mono">{[nodeName(d.nodeId), extra.ip].filter(Boolean).join(' · ')}</span>
+                    <span className="ms-item__line">{t('pages.clients.lastSeen')}: {dateLabel(d.lastSeen)}</span>
+                    <div className="ms-item__acts">
+                      <Button size="sm" onClick={() => confirmDevice('block', d.fingerprint, !extra.blocked)}>
+                        {ask(`block:${d.fingerprint}`, extra.blocked
+                          ? t('pages.clients.unblockDevice', { defaultValue: 'Unblock' })
+                          : t('pages.clients.blockDevice', { defaultValue: 'Block' }))}
+                      </Button>
+                      <Button size="sm" danger onClick={() => confirmDevice('forget', d.fingerprint, false)}>
+                        {ask(`forget:${d.fingerprint}`, t('delete'))}
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+
+          {fold('ips', t('pages.clients.ipAddressLog'), ipLog.length)}
+          {shown === 'ips' && (ipLog.length === 0 ? (
+            <div className="ms-empty">{t('pages.clients.noIpAddresses')}</div>
+          ) : (
+            <div className="ms-items">
+              <div className="ms-item__acts">
+                <Button size="sm" danger onClick={() => confirmAddress('')}>
+                  {ask('ip:', t('pages.clients.clearIpLog', { defaultValue: 'Clear the log' }))}
+                </Button>
+              </div>
+              {ipLog.map((e, idx) => (
+                <div key={`${e.ip}-${idx}`} className="ms-item">
+                  <div className="ms-item__top">
+                    <span className="ms-item__name is-mono">{e.ip}</span>
+                    <Button size="sm" variant="text" danger onClick={() => confirmAddress(e.ip)}>
+                      {ask(`ip:${e.ip}`, t('delete'))}
+                    </Button>
+                  </div>
+                  <span className="ms-item__line">{[nodeName(e.nodeId), deviceLabel(e.fingerprint)].join(' · ')}</span>
+                  <span className="ms-item__line">{t('pages.clients.lastSeen')}: {dateLabel(e.lastOnline)}</span>
+                </div>
+              ))}
+            </div>
+          ))}
+
+          {fold('exits', t('pages.clients.exitLog', { defaultValue: 'Exit nodes used' }), exitLog.length)}
+          {shown === 'exits' && (exitLog.length === 0 ? (
+            <div className="ms-empty">{t('pages.clients.noExits', { defaultValue: 'This client has not taken an exit yet' })}</div>
+          ) : (
+            <div className="ms-items">
+              {exitLog.map((e) => (
+                <div key={e.nodeId} className="ms-item">
+                  <div className="ms-item__top">
+                    <span className="ms-item__name">{nodeName(e.nodeId)}</span>
+                    <Button size="sm" variant="text" danger onClick={() => confirmExit(e.nodeId)}>
+                      {ask(`exit:${e.nodeId}`, t('delete'))}
+                    </Button>
+                  </div>
+                  <span className="ms-item__line">{t('pages.clients.firstSeen')}: {dateLabel(e.firstSeen)}</span>
+                  <span className="ms-item__line">{t('pages.clients.lastSeen')}: {dateLabel(e.lastOnline)}</span>
+                </div>
+              ))}
+            </div>
+          ))}
+        </section>
+      </div>
+    );
+  };
+
   const sectionTitle = (key: 'devices' | 'ips' | 'exits', label: string, count: number) => (
     <button
       type="button"
@@ -155,12 +326,19 @@ export default function ClientInfoModal({
       <Dialog
         open={open}
         onOpenChange={(o) => !o && onOpenChange(false)}
-        title={client ? `${t('pages.clients.clientInfo')} — ${client.email}` : t('pages.clients.clientInfo')}
+        title={client ? (isMobile ? client.email : `${t('pages.clients.clientInfo')} — ${client.email}`) : t('pages.clients.clientInfo')}
         width={760}
         autoHeight
-        footer={null}
+        footer={actions ? (
+          <div className={isMobile ? 'ms-foot' : 'ci-foot'}>
+            <Button danger onClick={actions.remove}>{t('delete')}</Button>
+            <Button onClick={actions.reset}>{t('pages.inbounds.resetTraffic')}</Button>
+            <Button variant="primary" onClick={actions.edit}>{t('edit')}</Button>
+          </div>
+        ) : null}
       >
-        {client && (
+        {client && isMobile && phoneBody(client)}
+        {client && !isMobile && (
           <div className="ci">
             <div className="ci-pair">
               {field(t('pages.clients.connectionUri'), (

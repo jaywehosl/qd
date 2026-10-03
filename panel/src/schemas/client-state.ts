@@ -15,6 +15,7 @@ export const ClientStateSchema = z.object({
   imported: z.boolean(),
   admin: z.boolean(),
   connected: z.boolean(),
+  road: z.string().optional(),
   node: ClientNodeSchema.nullable().optional(),
   nodes: z.object({
     total: z.number(),

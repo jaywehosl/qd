@@ -4,33 +4,6 @@ export interface IconProps extends React.SVGProps<SVGSVGElement> {
   size?: number;
 }
 
-export function InboundsIcon({ size = 20, ...props }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 32 32"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      {...props}
-    >
-      <path
-        d="M22 6H10C7.8 6 6 7.8 6 10V22C6 24.2 7.8 26 10 26H22C24.2 26 26 24.2 26 22V10C26 7.8 24.2 6 22 6Z"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeMiterlimit="10"
-      />
-      <path
-        d="M16 11V21M16 21L12 17M16 21L20 17"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
 export function ClientsIcon({ size = 20, ...props }: IconProps) {
   return (
     <svg

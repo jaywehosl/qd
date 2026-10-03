@@ -8,6 +8,7 @@ import {
 } from '@ant-design/icons';
 import type { ReactNode } from 'react';
 
+import { Button } from '@/components/ds';
 import { useMetricsPanel } from '@/layouts/MetricsPanelContext';
 import { useNotifications, type Severity } from '@/pages/index/useNotifications';
 import { dismissAlert, dismissEvent, ackSensor, subscribe, getSnapshot } from '@/stores/notificationStore';
@@ -26,6 +27,14 @@ export default function NotificationsBar() {
   const total = rows.length + active.length;
   const dismissLabel = t('common.delete', { defaultValue: 'Dismiss' });
 
+  const clearAll = () => {
+    for (const r of rows) {
+      if (r.category === 'sensor') ackSensor(r.id.replace(/^sensor-/, ''));
+      else dismissAlert(r.id, r.severity, r.text);
+    }
+    for (const r of active) dismissEvent(r.id);
+  };
+
   return (
     <div className={`notif-bar ${notifyOpen ? 'is-open' : ''}`} aria-hidden={!notifyOpen}>
       <div className="notif-container">
@@ -34,6 +43,10 @@ export default function NotificationsBar() {
             {t('pages.index.notifyEmpty', { defaultValue: 'All clear — no notifications.' })}
           </div>
         ) : (
+          <>
+          <div className="notif-actions">
+            <Button size="sm" onClick={clearAll}>{t('client.notify.clear')}</Button>
+          </div>
           <ul className="notif-list">
             {rows.map((r) => (
               <li key={r.id} className={`notif-row notif-row--${r.severity}`}>
@@ -68,6 +81,7 @@ export default function NotificationsBar() {
               </li>
             ))}
           </ul>
+          </>
         )}
       </div>
     </div>

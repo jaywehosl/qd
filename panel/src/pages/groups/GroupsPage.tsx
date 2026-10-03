@@ -38,6 +38,7 @@ import {
   type GroupSummary,
 } from '@/schemas/client';
 import { parseMsg } from '@/utils/zodValidate';
+import { phone } from '@/lib/phone';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 const ClientRecordListSchema = z.array(ClientRecordSchema).nullable().transform((v) => v ?? []);
 
@@ -83,7 +84,6 @@ export default function GroupsPage() {
     onSuccess: (msg) => { if (msg?.success) invalidate(); },
   });
 
-  const { isMobile } = useMediaQuery();
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState('');
@@ -201,6 +201,8 @@ export default function GroupsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   ], [t, groups, inboundLabel]);
 
+  const { isMobile } = useMediaQuery();
+
   const pageClass = ['groups-page', isDark && 'is-dark', isUltra && 'is-ultra'].filter(Boolean).join(' ');
 
   return (
@@ -217,7 +219,7 @@ export default function GroupsPage() {
             </div>
           </Card>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? 8 : 12 }}>
+          <div className="page-stack">
             <Card>
               <div className="ds-stats-grid">
                 <Stat title={t('pages.groups.totalGroups')} value={totalGroups} prefix={<TagsOutlined />} />
@@ -226,15 +228,51 @@ export default function GroupsPage() {
               </div>
             </Card>
 
-            <div className="clients-add">
-              <div className="vertical-tabs-container">
-                <button type="button" className="vtab-btn is-active" onClick={openCreate}>
-                  <span className="vtab-icon"><PlusOutlined /></span>
-                  {t('pages.groups.addGroup')}
-                </button>
+            {!isMobile && (
+              <div className="clients-add">
+                <div className="vertical-tabs-container">
+                  <button type="button" className="vtab-btn is-active" onClick={openCreate}>
+                    <span className="vtab-icon"><PlusOutlined /></span>
+                    {t('pages.groups.addGroup')}
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
 
+            {isMobile ? (
+              <Card flush>
+                <div className="mc-head">
+                  <span>{t('pages.groups.totalGroups')}: {totalGroups}</span>
+                  <button type="button" className="mc-add" aria-label={t('pages.groups.addGroup')} onClick={openCreate}>
+                    <PlusOutlined />
+                  </button>
+                </div>
+                <div className="mc-list">
+                  {groups.length === 0 && (
+                    <div className="card-empty"><TagsOutlined style={{ fontSize: 28, opacity: 0.5 }} /><div>{t('noData')}</div></div>
+                  )}
+                  {groups.map((g) => {
+                    const ids = g.entrypointIds ?? [];
+                    return (
+                      <div key={g.name} className="mc is-tap is-plain" onClick={() => openEdit(g)}>
+                        <div className="mc__body">
+                          <span className="mc__name">{g.name}</span>
+                          <span className="mc__sub">
+                            <span className={ids.length ? 'is-group' : ''}>{ids.length ? ids.map(inboundLabel).join(', ') : t('pages.groups.noInbounds', { defaultValue: 'No inbounds' })}</span>
+                            <span>{t('pages.groups.clientCount')}: {g.clientCount || 0}</span>
+                          </span>
+                        </div>
+                        <span className="mc__end" onClick={(e) => e.stopPropagation()}>
+                          <button type="button" className="mc-icon is-danger" aria-label={t('pages.groups.deleteGroupOnly')} onClick={() => onDelete(g)}>
+                            <DeleteOutlined />
+                          </button>
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </Card>
+            ) : (
             <Card flush>
               <div className="group-table" style={{ padding: '0 4px 4px' }}>
                 <DataTable
@@ -250,6 +288,7 @@ export default function GroupsPage() {
                 />
               </div>
             </Card>
+            )}
           </div>
         )}
 
@@ -267,7 +306,7 @@ export default function GroupsPage() {
               onChange={(e) => setCreateName(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && confirmCreate()}
               placeholder={t('pages.clients.groupPlaceholder')}
-              autoFocus
+              autoFocus={!phone()}
             />
           </Field>
         </Dialog>

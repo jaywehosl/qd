@@ -42,8 +42,12 @@ func (p platform) Stop() error {
 func (p platform) SetKey(key *qdcrypt.Key) {
 	p.c.mu.Lock()
 	p.c.key = key
+	seat := p.c.seat
 	p.c.mu.Unlock()
 	p.c.tellWire()
+	if seat != nil {
+		seat.SetKey(key)
+	}
 }
 
 func (p platform) SetExit(egress bool) { p.c.applyExit(egress) }
@@ -82,9 +86,18 @@ func (p platform) ServerName() string {
 	return p.c.server
 }
 
+func (p platform) Road() string {
+	p.c.mu.Lock()
+	defer p.c.mu.Unlock()
+	if !p.c.running || p.c.live == nil {
+		return ""
+	}
+	return p.c.live.Path().Short()
+}
+
 func (p platform) Identify() clientapi.Device { return p.c.device }
 
-func (p platform) Processes() []clientapi.Process { return []clientapi.Process{} }
+func (p platform) Processes() []clientapi.Process { return p.c.installed() }
 
 func (p platform) RulesChanged() {
 	if p.c.marks != nil {

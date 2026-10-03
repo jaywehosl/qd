@@ -3,9 +3,11 @@ import { flushSync } from 'react-dom';
 import type { ReactNode } from 'react';
 import { loadTheme, saveTheme } from '@/theme/themeStorage';
 import { applyThemeMode, type ThemeMode } from '@/theme/themeApply';
+import { HOST_EVENT, systemDark } from '@/lib/phone';
 
 const STORAGE_DARK = 'dark-mode';
 const STORAGE_ULTRA = 'isUltraDarkThemeEnabled';
+const STORAGE_FOLLOW = 'qd.theme.system';
 
 function applyDom(isDark: boolean) {
   const root = document.documentElement;
@@ -27,6 +29,7 @@ if (localStorage.getItem(CACHE_RESET_KEY) !== 'true') {
 
 const getInitialMode = () => {
   if (typeof window === 'undefined') return { dark: false, ultra: false };
+  if (localStorage.getItem(STORAGE_FOLLOW) === 'true') return { dark: systemDark(), ultra: false };
   const injected = (window as any).X_UI_THEME;
   const local = loadTheme();
   const mode = local.mode ?? injected?.mode ?? 'light';
@@ -70,6 +73,8 @@ interface ThemeContextValue {
   toggleTheme: () => void;
   toggleUltra: () => void;
   cycleTheme: (elementId?: string) => void;
+  follow: boolean;
+  setFollow: (on: boolean) => void;
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -77,6 +82,34 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [isDark, setIsDark] = useState<boolean>(initialMode.dark);
   const [isUltra, setIsUltra] = useState<boolean>(initialMode.ultra);
+  const [follow, setFollowState] = useState<boolean>(() => localStorage.getItem(STORAGE_FOLLOW) === 'true');
+
+  const setFollow = useCallback((on: boolean) => {
+    localStorage.setItem(STORAGE_FOLLOW, String(on));
+    setFollowState(on);
+  }, []);
+
+  useEffect(() => {
+    if (!follow) return undefined;
+    const match = () => {
+      const nextMode: ThemeMode = systemDark() ? 'dark' : 'light';
+      setIsDark(nextMode === 'dark');
+      setIsUltra(false);
+      const theme = loadTheme();
+      if (theme.mode === nextMode) return;
+      theme.mode = nextMode;
+      applyThemeMode(nextMode);
+      void saveTheme(theme);
+    };
+    match();
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    media.addEventListener('change', match);
+    window.addEventListener(HOST_EVENT, match);
+    return () => {
+      media.removeEventListener('change', match);
+      window.removeEventListener(HOST_EVENT, match);
+    };
+  }, [follow]);
 
   useEffect(() => {
     applyDom(isDark);
@@ -145,8 +178,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, [isDark, isUltra]);
 
   const value = useMemo<ThemeContextValue>(
-    () => ({ isDark, isUltra, toggleTheme, toggleUltra, cycleTheme }),
-    [isDark, isUltra, toggleTheme, toggleUltra, cycleTheme],
+    () => ({ isDark, isUltra, toggleTheme, toggleUltra, cycleTheme, follow, setFollow }),
+    [isDark, isUltra, toggleTheme, toggleUltra, cycleTheme, follow, setFollow],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;

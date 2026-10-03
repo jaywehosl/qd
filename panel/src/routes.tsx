@@ -5,7 +5,6 @@ import PanelLayout from '@/layouts/PanelLayout';
 import ClientLayout from '@/layouts/ClientLayout';
 import { looksLikeClientGone, showClientClosed } from '@/lib/client-closed';
 
-const loadInbounds = () => import('@/pages/index/InboundsSection');
 const loadClients = () => import('@/pages/index/ClientsSection');
 const loadGroups = () => import('@/pages/index/GroupsSection');
 const loadNodes = () => import('@/pages/index/NodesSection');
@@ -16,7 +15,6 @@ const loadClientRouting = () => import('@/pages/client/RoutingPage');
 const loadClientSettings = () => import('@/pages/client/ClientSettingsPage');
 
 const ROUTE_LOADERS: Record<string, () => Promise<unknown>> = {
-  '/panel/inbounds': loadInbounds,
   '/panel/clients': loadClients,
   '/panel/groups': loadGroups,
   '/panel/nodes': loadNodes,
@@ -31,11 +29,6 @@ export function prefetchRoute(key: string) {
   void ROUTE_LOADERS[key.split('#')[0]]?.();
 }
 
-export function prefetchRoutes() {
-  for (const load of Object.values(ROUTE_LOADERS)) void load();
-}
-
-const InboundsSection = lazy(loadInbounds);
 const ClientsSection = lazy(loadClients);
 const GroupsSection = lazy(loadGroups);
 const NodesSection = lazy(loadNodes);
@@ -85,14 +78,14 @@ const routes: RouteObject[] = [
     element: <PanelLayout />,
     errorElement: <RouteError />,
     children: [
-      { index: true, element: <Navigate to="/panel/inbounds" replace /> },
-      { path: 'inbounds', element: withSuspense(<InboundsSection />) },
+      { index: true, element: <Navigate to="/panel/clients" replace /> },
       { path: 'clients', element: withSuspense(<ClientsSection />) },
       { path: 'groups', element: withSuspense(<GroupsSection />) },
       { path: 'nodes', element: withSuspense(<NodesSection />) },
       { path: 'settings', element: withSuspense(<SettingsPage />) },
       { path: 'appearance', element: <Navigate to="/client/settings#preferences" replace /> },
       { path: 'api-docs', element: withSuspense(<ApiDocsPage />) },
+      { path: '*', element: <Navigate to="/panel/clients" replace /> },
     ],
   },
   { path: '/', element: <Navigate to="/client" replace /> },

@@ -14,12 +14,18 @@ import MaintenanceWatcher from '@/pages/index/MaintenanceWatcher';
 import { useWebSocketBridge } from '@/api/websocketBridge';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { useTheme } from '@/hooks/useTheme';
+import { warmModules } from '@/lib/warmup';
 
 export default function PanelLayout() {
   useWebSocketBridge();
   usePageTitle();
   const { isDark, isUltra } = useTheme();
   const { pathname } = useLocation();
+
+  useEffect(() => {
+    warmModules('admin');
+    warmModules('client');
+  }, []);
 
   useEffect(() => {
     const reset = () => {
@@ -43,9 +49,9 @@ export default function PanelLayout() {
               
                 <div className="topbar-shell">
                   <AppSidebar />
-                  <MetricsPanel />
-                  <NotificationsBar />
                 </div>
+                <MetricsPanel />
+                <NotificationsBar />
                 <SensorWatcher />
                 <ClientOfflineWatcher />
                 <MaintenanceWatcher />

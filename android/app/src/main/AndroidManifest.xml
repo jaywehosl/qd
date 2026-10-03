@@ -15,12 +15,15 @@
         android:allowBackup="false"
         android:icon="@drawable/ic_launcher"
         android:label="qd"
+        android:networkSecurityConfig="@xml/net"
         android:theme="@style/AppTheme">
 
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:launchMode="singleTask">
+            android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

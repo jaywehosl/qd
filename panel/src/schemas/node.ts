@@ -15,7 +15,6 @@ export const NodeRecordSchema = z.object({
   memPct: z.number().optional(),
   panelVersion: z.string().optional(),
   uptimeSecs: z.number().optional(),
-  inboundCount: z.number().optional(),
   clientCount: z.number().optional(),
   onlineCount: z.number().optional(),
   depletedCount: z.number().optional(),

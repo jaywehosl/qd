@@ -1,5 +1,5 @@
---- a/connection.go	2026-10-02 02:05:30.378748700 +0300
-+++ b/connection.go	2026-10-02 02:05:30.966305900 +0300
+--- a/connection.go	2026-10-02 13:14:41.950672400 +0300
++++ b/connection.go	2026-10-02 13:14:42.955716400 +0300
 @@ -8,6 +8,7 @@
  	"fmt"
  	"io"
@@ -8,7 +8,18 @@
  	"reflect"
  	"slices"
  	"sync"
-@@ -210,6 +211,9 @@
+@@ -123,6 +124,10 @@
+ //   - [StatelessResetError]: when we receive a stateless reset
+ //   - [VersionNegotiationError]: returned by the client, when there's no version overlap between the peers
+ type Conn struct {
++	qdResetMu     sync.Mutex
++	qdResetTokens map[protocol.StatelessResetToken]struct{}
++	qdRunners     []qdResetRunner
++
+ 	// Destination connection ID used during the handshake.
+ 	// Used to check source connection ID on incoming packets.
+ 	handshakeDestConnID protocol.ConnectionID
+@@ -210,6 +215,9 @@
  	// pacingDeadline is the time when the next packet should be sent
  	pacingDeadline monotime.Time
  
@@ -18,7 +29,21 @@
  	peerParams *wire.TransportParameters
  
  	timer *time.Timer
-@@ -346,6 +350,8 @@
+@@ -289,10 +297,11 @@
+ 	} else {
+ 		s.logID = destConnID.String()
+ 	}
++	s.qdRunners = []qdResetRunner{runner}
+ 	s.connIDManager = newConnIDManager(
+ 		destConnID,
+-		func(token protocol.StatelessResetToken) { runner.AddResetToken(token, s) },
+-		runner.RemoveResetToken,
++		s.qdAddResetToken,
++		s.qdRemoveResetToken,
+ 		s.queueControlFrame,
+ 	)
+ 	s.connIDGenerator = newConnIDGenerator(
+@@ -346,6 +355,8 @@
  		InitialSourceConnectionID: srcConnID,
  		RetrySourceConnectionID:   retrySrcConnID,
  		EnableResetStreamAt:       conf.EnableStreamResetPartialDelivery,
@@ -27,7 +52,21 @@
  	}
  	if s.config.EnableDatagrams {
  		params.MaxDatagramFrameSize = wire.MaxDatagramSize
-@@ -472,6 +478,8 @@
+@@ -418,10 +429,11 @@
+ 		}
+ 		s.qlogger.RecordEvent(startedConnectionEvent(srcAddr, destAddr))
+ 	}
++	s.qdRunners = []qdResetRunner{runner}
+ 	s.connIDManager = newConnIDManager(
+ 		destConnID,
+-		func(token protocol.StatelessResetToken) { runner.AddResetToken(token, s) },
+-		runner.RemoveResetToken,
++		s.qdAddResetToken,
++		s.qdRemoveResetToken,
+ 		s.queueControlFrame,
+ 	)
+ 	s.connIDGenerator = newConnIDGenerator(
+@@ -472,6 +484,8 @@
  		ActiveConnectionIDLimit:   protocol.MaxActiveConnectionIDs,
  		InitialSourceConnectionID: srcConnID,
  		EnableResetStreamAt:       conf.EnableStreamResetPartialDelivery,
@@ -36,7 +75,7 @@
  	}
  	if s.config.EnableDatagrams {
  		params.MaxDatagramFrameSize = wire.MaxDatagramSize
-@@ -518,7 +526,7 @@
+@@ -518,7 +532,7 @@
  	c.frameParser = *wire.NewFrameParser(
  		c.config.EnableDatagrams,
  		c.config.EnableStreamResetPartialDelivery,
@@ -45,7 +84,7 @@
  	)
  	c.rttStats = utils.NewRTTStats()
  	c.connFlowController = flowcontrol.NewConnectionFlowController(
-@@ -1943,6 +1951,10 @@
+@@ -1943,6 +1957,10 @@
  		err = c.connIDGenerator.Retire(frame.SequenceNumber, destConnID, rcvTime.Add(3*c.rttStats.PTO(false)))
  	case *wire.HandshakeDoneFrame:
  		err = c.handleHandshakeDoneFrame(rcvTime)
@@ -56,7 +95,7 @@
  	default:
  		err = fmt.Errorf("unexpected frame type: %s", reflect.ValueOf(&frame).Elem().Type().Name())
  	}
-@@ -2135,6 +2147,7 @@
+@@ -2135,6 +2153,7 @@
  			c.sentPacketHandler.SetMaxDatagramSize(mtu)
  		}
  	}
@@ -64,7 +103,7 @@
  	return c.cryptoStreamHandler.SetLargest1RTTAcked(frame.LargestAcked())
  }
  
-@@ -2423,6 +2436,9 @@
+@@ -2423,6 +2442,9 @@
  	c.keepAliveInterval = min(c.config.KeepAlivePeriod, c.idleTimeout/2)
  	c.streamsMap.HandleTransportParameters(params)
  	c.frameParser.SetAckDelayExponent(params.AckDelayExponent)
@@ -74,7 +113,57 @@
  	c.connFlowController.UpdateSendWindow(params.InitialMaxData)
  	c.rttStats.SetMaxAckDelay(params.MaxAckDelay)
  	c.connIDGenerator.SetMaxActiveConnIDs(params.ActiveConnectionIDLimit)
-@@ -3147,3 +3163,33 @@
+@@ -3095,6 +3117,7 @@
+ 		200*time.Millisecond, // initial RTT estimate
+ 		func() {
+ 			runner := (*packetHandlerMap)(t)
++			c.qdAdoptRunner(runner)
+ 			c.connIDGenerator.AddConnRunner(
+ 				runner,
+ 				connRunnerCallbacks{
+@@ -3107,6 +3130,41 @@
+ 	), nil
+ }
+ 
++type qdResetRunner interface {
++	AddResetToken(protocol.StatelessResetToken, packetHandler)
++	RemoveResetToken(protocol.StatelessResetToken)
++}
++
++func (c *Conn) qdAddResetToken(token protocol.StatelessResetToken) {
++	c.qdResetMu.Lock()
++	defer c.qdResetMu.Unlock()
++	if c.qdResetTokens == nil {
++		c.qdResetTokens = map[protocol.StatelessResetToken]struct{}{}
++	}
++	c.qdResetTokens[token] = struct{}{}
++	for _, runner := range c.qdRunners {
++		runner.AddResetToken(token, c)
++	}
++}
++
++func (c *Conn) qdRemoveResetToken(token protocol.StatelessResetToken) {
++	c.qdResetMu.Lock()
++	defer c.qdResetMu.Unlock()
++	delete(c.qdResetTokens, token)
++	for _, runner := range c.qdRunners {
++		runner.RemoveResetToken(token)
++	}
++}
++
++func (c *Conn) qdAdoptRunner(runner qdResetRunner) {
++	c.qdResetMu.Lock()
++	defer c.qdResetMu.Unlock()
++	c.qdRunners = append(c.qdRunners, runner)
++	for token := range c.qdResetTokens {
++		runner.AddResetToken(token, c)
++	}
++}
++
+ // HandshakeComplete blocks until the handshake completes (or fails).
+ // For the client, data sent before completion of the handshake is encrypted with 0-RTT keys.
+ // For the server, data sent before completion of the handshake is encrypted with 1-RTT keys,
+@@ -3147,3 +3205,33 @@
  func estimateMaxPayloadSize(mtu protocol.ByteCount) protocol.ByteCount {
  	return mtu - 1 /* type byte */ - 20 /* maximum connection ID length */ - 16 /* tag size */
  }
@@ -108,8 +197,8 @@
 +	})
 +	c.qdFreqSeq++
 +}
---- a/datagram_queue.go	2026-10-02 02:05:30.258888300 +0300
-+++ b/datagram_queue.go	2026-10-02 02:05:30.966305900 +0300
+--- a/datagram_queue.go	2026-10-02 13:14:41.648334900 +0300
++++ b/datagram_queue.go	2026-10-02 13:14:42.955716400 +0300
 @@ -3,15 +3,38 @@
  import (
  	"context"
@@ -167,8 +256,8 @@
  	}
  }
  
---- a/interface.go	2026-10-02 02:05:30.359201500 +0300
-+++ b/interface.go	2026-10-02 02:05:30.699105600 +0300
+--- a/interface.go	2026-10-02 13:14:41.851121000 +0300
++++ b/interface.go	2026-10-02 13:14:42.649113500 +0300
 @@ -39,6 +39,14 @@
  	rtt  time.Duration
  }
@@ -184,8 +273,8 @@
  type TokenStore interface {
  	// Pop searches for a ClientToken associated with the given key.
  	// Since tokens are not supposed to be reused, it must remove the token from the cache.
---- a/internal/ackhandler/received_packet_handler.go	2026-10-02 02:05:30.406270900 +0300
-+++ b/internal/ackhandler/received_packet_handler.go	2026-10-02 02:05:30.929583300 +0300
+--- a/internal/ackhandler/received_packet_handler.go	2026-10-02 13:14:42.083297100 +0300
++++ b/internal/ackhandler/received_packet_handler.go	2026-10-02 13:14:42.920842300 +0300
 @@ -77,6 +77,14 @@
  	}
  }
@@ -201,8 +290,8 @@
  func (h *ReceivedPacketHandler) GetAlarmTimeout() monotime.Time {
  	return h.appDataPackets.GetAlarmTimeout()
  }
---- a/internal/ackhandler/received_packet_tracker.go	2026-10-02 02:05:30.399250900 +0300
-+++ b/internal/ackhandler/received_packet_tracker.go	2026-10-02 02:05:30.928032300 +0300
+--- a/internal/ackhandler/received_packet_tracker.go	2026-10-02 13:14:42.029742000 +0300
++++ b/internal/ackhandler/received_packet_tracker.go	2026-10-02 13:14:42.917527800 +0300
 @@ -91,6 +91,10 @@
  	maxAckDelay time.Duration
  	ackQueued   bool // true if we need send a new ACK
@@ -249,8 +338,8 @@
 +	h.ackQueued = true
 +	h.ackAlarm = 0
 +}
---- a/internal/ackhandler/sent_packet_handler.go	2026-10-02 02:05:30.401755500 +0300
-+++ b/internal/ackhandler/sent_packet_handler.go	2026-10-02 02:05:30.934789900 +0300
+--- a/internal/ackhandler/sent_packet_handler.go	2026-10-02 13:14:42.050421900 +0300
++++ b/internal/ackhandler/sent_packet_handler.go	2026-10-02 13:14:42.929856800 +0300
 @@ -3,9 +3,13 @@
  import (
  	"errors"
@@ -441,7 +530,7 @@
 +	return s
  }
 --- a/internal/congestion/bbr/LICENSE.md	1970-01-01 03:00:00.000000000 +0300
-+++ b/internal/congestion/bbr/LICENSE.md	2026-10-02 02:05:30.949115800 +0300
++++ b/internal/congestion/bbr/LICENSE.md	2026-10-02 13:14:42.944620900 +0300
 @@ -0,0 +1,7 @@
 +Copyright 2023 Toby
 +
@@ -451,7 +540,7 @@
 +
 +THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 --- a/internal/congestion/bbr/bandwidth.go	1970-01-01 03:00:00.000000000 +0300
-+++ b/internal/congestion/bbr/bandwidth.go	2026-10-02 02:05:30.948598300 +0300
++++ b/internal/congestion/bbr/bandwidth.go	2026-10-02 13:14:42.943622100 +0300
 @@ -0,0 +1,27 @@
 +package bbr
 +
@@ -481,7 +570,7 @@
 +	return Bandwidth(bytes) * Bandwidth(time.Second) / Bandwidth(delta) * BytesPerSecond
 +}
 --- a/internal/congestion/bbr/bandwidth_sampler.go	1970-01-01 03:00:00.000000000 +0300
-+++ b/internal/congestion/bbr/bandwidth_sampler.go	2026-10-02 02:05:30.948598300 +0300
++++ b/internal/congestion/bbr/bandwidth_sampler.go	2026-10-02 13:14:42.943622100 +0300
 @@ -0,0 +1,878 @@
 +package bbr
 +
@@ -1362,7 +1451,7 @@
 +	return time.Duration(bytes*8) * time.Second / time.Duration(bandwidth)
 +}
 --- a/internal/congestion/bbr/bbr_sender.go	1970-01-01 03:00:00.000000000 +0300
-+++ b/internal/congestion/bbr/bbr_sender.go	2026-10-02 02:05:30.947045300 +0300
++++ b/internal/congestion/bbr/bbr_sender.go	2026-10-02 13:14:42.942622800 +0300
 @@ -0,0 +1,1088 @@
 +package bbr
 +
@@ -2453,7 +2542,7 @@
 +	return fmt.Sprintf("%.2f %s", bwf, units[unitIndex])
 +}
 --- a/internal/congestion/bbr/clock.go	1970-01-01 03:00:00.000000000 +0300
-+++ b/internal/congestion/bbr/clock.go	2026-10-02 02:05:30.947560800 +0300
++++ b/internal/congestion/bbr/clock.go	2026-10-02 13:14:42.942622800 +0300
 @@ -0,0 +1,18 @@
 +package bbr
 +
@@ -2474,7 +2563,7 @@
 +	return monotime.Now()
 +}
 --- a/internal/congestion/bbr/pacer.go	1970-01-01 03:00:00.000000000 +0300
-+++ b/internal/congestion/bbr/pacer.go	2026-10-02 02:05:30.949637700 +0300
++++ b/internal/congestion/bbr/pacer.go	2026-10-02 13:14:42.945620900 +0300
 @@ -0,0 +1,80 @@
 +package bbr
 +
@@ -2557,7 +2646,7 @@
 +	p.maxDatagramSize = s
 +}
 --- a/internal/congestion/bbr/packet_number_indexed_queue.go	1970-01-01 03:00:00.000000000 +0300
-+++ b/internal/congestion/bbr/packet_number_indexed_queue.go	2026-10-02 02:05:30.947560800 +0300
++++ b/internal/congestion/bbr/packet_number_indexed_queue.go	2026-10-02 13:14:42.942622800 +0300
 @@ -0,0 +1,199 @@
 +package bbr
 +
@@ -2759,7 +2848,7 @@
 +	return ew
 +}
 --- a/internal/congestion/bbr/ringbuffer.go	1970-01-01 03:00:00.000000000 +0300
-+++ b/internal/congestion/bbr/ringbuffer.go	2026-10-02 02:05:30.948077800 +0300
++++ b/internal/congestion/bbr/ringbuffer.go	2026-10-02 13:14:42.943622100 +0300
 @@ -0,0 +1,118 @@
 +package bbr
 +
@@ -2880,7 +2969,7 @@
 +	r.headPos, r.tailPos, r.full = 0, 0, false
 +}
 --- a/internal/congestion/bbr/windowed_filter.go	1970-01-01 03:00:00.000000000 +0300
-+++ b/internal/congestion/bbr/windowed_filter.go	2026-10-02 02:05:30.949637700 +0300
++++ b/internal/congestion/bbr/windowed_filter.go	2026-10-02 13:14:42.945620900 +0300
 @@ -0,0 +1,162 @@
 +package bbr
 +
@@ -3045,7 +3134,7 @@
 +	f.estimates = make([]entry[V, T], 3, 3)
 +}
 --- a/internal/congestion/brutal_sender.go	1970-01-01 03:00:00.000000000 +0300
-+++ b/internal/congestion/brutal_sender.go	2026-10-02 02:05:30.943288200 +0300
++++ b/internal/congestion/brutal_sender.go	2026-10-02 13:14:42.937601900 +0300
 @@ -0,0 +1,92 @@
 +package congestion
 +
@@ -3139,8 +3228,8 @@
 +func (b *brutalSender) InRecovery() bool                    { return false }
 +func (b *brutalSender) GetSlowStartThreshold() protocol.ByteCount { return 0 }
 +func (b *brutalSender) BandwidthEstimate() Bandwidth        { return b.bps }
---- a/internal/congestion/interface.go	2026-10-02 02:05:30.417563600 +0300
-+++ b/internal/congestion/interface.go	2026-10-02 02:05:30.946529700 +0300
+--- a/internal/congestion/interface.go	2026-10-02 13:14:42.257693000 +0300
++++ b/internal/congestion/interface.go	2026-10-02 13:14:42.941617400 +0300
 @@ -25,3 +25,18 @@
  	InRecovery() bool
  	GetCongestionWindow() protocol.ByteCount
@@ -3160,8 +3249,8 @@
 +type SendAlgorithmEx interface {
 +	OnCongestionEventEx(priorInFlight protocol.ByteCount, eventTime monotime.Time, ackedPackets []AckedPacketInfo, lostPackets []LostPacketInfo)
 +}
---- a/internal/protocol/params.go	2026-10-02 02:05:30.454238200 +0300
-+++ b/internal/protocol/params.go	2026-10-02 02:05:30.911511400 +0300
+--- a/internal/protocol/params.go	2026-10-02 13:14:42.319596200 +0300
++++ b/internal/protocol/params.go	2026-10-02 13:14:42.898472400 +0300
 @@ -78,7 +78,7 @@
  
  // MaxStreamFrameSorterGaps is the maximum number of gaps between received StreamFrames
@@ -3180,8 +3269,8 @@
  // MaxAckDelayInclGranularity is the max_ack_delay including the timer granularity.
  // This is the value that should be advertised to the peer.
  const MaxAckDelayInclGranularity = MaxAckDelay + TimerGranularity
---- a/internal/wire/short_header.go	2026-10-02 02:05:30.508475600 +0300
-+++ b/internal/wire/short_header.go	2026-10-02 02:05:30.894672200 +0300
+--- a/internal/wire/short_header.go	2026-10-02 13:14:42.395053800 +0300
++++ b/internal/wire/short_header.go	2026-10-02 13:14:42.875297700 +0300
 @@ -18,9 +18,6 @@
  	if data[0]&0x80 > 0 {
  		return 0, 0, 0, 0, errors.New("not a short header packet")
@@ -3192,8 +3281,8 @@
  	pnLen := protocol.PacketNumberLen(data[0]&0b11) + 1
  	if len(data) < 1+int(pnLen)+connIDLen {
  		return 0, 0, 0, 0, io.EOF
---- a/internal/wire/transport_parameters.go	2026-10-02 02:05:30.494658700 +0300
-+++ b/internal/wire/transport_parameters.go	2026-10-02 02:05:30.884342600 +0300
+--- a/internal/wire/transport_parameters.go	2026-10-02 13:14:42.380914600 +0300
++++ b/internal/wire/transport_parameters.go	2026-10-02 13:14:42.862867100 +0300
 @@ -50,6 +50,8 @@
  	resetStreamAtParameterID transportParameterID = 0x17f7586d2cb571
  	// https://datatracker.ietf.org/doc/draft-ietf-quic-ack-frequency/11/
@@ -3236,8 +3325,8 @@
  	if p.MinAckDelay != nil {
  		b = p.marshalVarintParam(b, minAckDelayParameterID, uint64(*p.MinAckDelay/time.Microsecond))
  	}
---- a/packet_packer.go	2026-10-02 02:05:30.532720100 +0300
-+++ b/packet_packer.go	2026-10-02 02:05:30.734934500 +0300
+--- a/packet_packer.go	2026-10-02 13:14:42.420498000 +0300
++++ b/packet_packer.go	2026-10-02 13:14:42.688917700 +0300
 @@ -116,6 +116,8 @@
  }
  
@@ -3257,8 +3346,8 @@
  	payloadOffset := protocol.ByteCount(len(raw))
  
  	raw, err = p.appendPacketPayload(raw, pl, paddingLen, v)
---- a/send_queue.go	2026-10-02 02:05:30.544996400 +0300
-+++ b/send_queue.go	2026-10-02 02:05:30.966305900 +0300
+--- a/send_queue.go	2026-10-02 13:14:42.437200100 +0300
++++ b/send_queue.go	2026-10-02 13:14:42.956715400 +0300
 @@ -87,12 +87,16 @@
  			// make sure that all queued packets are actually sent out
  			shouldClose = true
@@ -3279,7 +3368,7 @@
  				}
  			}
 --- a/send_transient_other.go	1970-01-01 03:00:00.000000000 +0300
-+++ b/send_transient_other.go	2026-10-02 02:05:30.835207100 +0300
++++ b/send_transient_other.go	2026-10-02 13:14:42.797876200 +0300
 @@ -0,0 +1,9 @@
 +//go:build !windows && !linux
 +
@@ -3291,7 +3380,7 @@
 +
 +func retrySend(_ func() error, err error) error { return err }
 --- a/send_transient_unix.go	1970-01-01 03:00:00.000000000 +0300
-+++ b/send_transient_unix.go	2026-10-02 02:05:30.825717600 +0300
++++ b/send_transient_unix.go	2026-10-02 13:14:42.780818400 +0300
 @@ -0,0 +1,49 @@
 +//go:build linux
 +
@@ -3343,7 +3432,7 @@
 +	return err
 +}
 --- a/send_transient_windows.go	1970-01-01 03:00:00.000000000 +0300
-+++ b/send_transient_windows.go	2026-10-02 02:05:30.819374500 +0300
++++ b/send_transient_windows.go	2026-10-02 13:14:42.778797500 +0300
 @@ -0,0 +1,38 @@
 +//go:build windows
 +
@@ -3384,7 +3473,7 @@
 +	return err
 +}
 --- a/sys_conn_uso_windows.go	1970-01-01 03:00:00.000000000 +0300
-+++ b/sys_conn_uso_windows.go	2026-10-02 02:05:30.831596900 +0300
++++ b/sys_conn_uso_windows.go	2026-10-02 13:14:42.792868600 +0300
 @@ -0,0 +1,126 @@
 +//go:build windows
 +
@@ -3512,8 +3601,8 @@
 +	}
 +	return int(sent), nil
 +}
---- a/sys_conn_windows.go	2026-10-02 02:05:30.359201500 +0300
-+++ b/sys_conn_windows.go	2026-10-02 02:05:30.826765400 +0300
+--- a/sys_conn_windows.go	2026-10-02 13:14:41.852171300 +0300
++++ b/sys_conn_windows.go	2026-10-02 13:14:42.783917100 +0300
 @@ -9,8 +9,8 @@
  	"golang.org/x/sys/windows"
  )
@@ -3525,8 +3614,8 @@
  }
  
  func inspectReadBuffer(c syscall.RawConn) (int, error) {
---- a/transport.go	2026-10-02 02:05:30.565623600 +0300
-+++ b/transport.go	2026-10-02 02:05:30.794733500 +0300
+--- a/transport.go	2026-10-02 13:14:42.462128600 +0300
++++ b/transport.go	2026-10-02 13:14:42.759634300 +0300
 @@ -563,10 +563,6 @@
  	if len(p.data) == 0 {
  		return

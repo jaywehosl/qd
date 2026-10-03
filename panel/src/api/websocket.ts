@@ -162,7 +162,7 @@ export class WebSocketClient {
   }
 
   #emit(event: string, ...args: unknown[]): void {
-    const throttledEvents = ['client_stats', 'outbounds', 'nodes', 'inbounds', 'traffic'];
+    const throttledEvents = ['client_stats', 'outbounds', 'nodes', 'traffic'];
     if (throttledEvents.includes(event)) {
       let state = this.throttledEmits.get(event);
       if (!state) {
@@ -224,4 +224,21 @@ export class WebSocketClient {
       this.reconnectTimer = null;
     }
   }
+}
+
+let shared: WebSocketClient | null = null;
+let holders = 0;
+
+export function holdSocket(handlers: Record<string, WebSocketListener>): () => void {
+  shared ??= new WebSocketClient((typeof window !== 'undefined' && window.X_UI_BASE_PATH) || '');
+  const client = shared;
+  const entries = Object.entries(handlers);
+  for (const [event, fn] of entries) client.on(event, fn);
+  holders++;
+  client.connect();
+  return () => {
+    for (const [event, fn] of entries) client.off(event, fn);
+    holders--;
+    if (holders === 0) client.disconnect();
+  };
 }

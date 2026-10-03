@@ -1,3 +1,5 @@
+import { HOST_EVENT } from '@/lib/phone';
+
 const HIDE_AFTER = 1400;
 const MIN_THUMB = 10;
 const THUMB_SHARE = 0.3;
@@ -171,7 +173,9 @@ export function mountScroller() {
 
   const held = new Map<HTMLElement, ReturnType<typeof scroller>>();
 
+  let queued = 0;
   const sweep = () => {
+    queued = 0;
     for (const el of document.querySelectorAll<HTMLElement>(AREAS)) {
       if (!held.has(el)) held.set(el, scroller(el, 'y'));
     }
@@ -180,16 +184,20 @@ export function mountScroller() {
     }
     for (const [el, own] of held) {
       if (own.alive()) {
-        own.draw();
+        if (own.rail.classList.contains('is-live')) own.draw();
         continue;
       }
       own.rail.remove();
       held.delete(el);
     }
     if (!page.rail.isConnected) document.body.appendChild(page.rail);
-    page.draw();
+    if (page.rail.classList.contains('is-live')) page.draw();
+  };
+  const soon = () => {
+    if (!queued) queued = window.requestAnimationFrame(sweep);
   };
 
-  new MutationObserver(sweep).observe(document.body, { childList: true, subtree: true });
+  new MutationObserver(soon).observe(document.body, { childList: true, subtree: true });
+  window.addEventListener(HOST_EVENT, () => window.setTimeout(soon, 260));
   sweep();
 }

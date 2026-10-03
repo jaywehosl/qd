@@ -30,12 +30,6 @@ func (a *API) restRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/panel/api/clients/groups/rename", a.groupRename)
 	mux.HandleFunc("/panel/api/clients/groups/entrypoints", a.groupEntrypoints)
 
-	mux.HandleFunc("/panel/api/inbounds/get/", a.entrypointGet)
-	mux.HandleFunc("/panel/api/inbounds/setEnable/", a.entrypointSetEnable)
-	mux.HandleFunc("/panel/api/inbounds/bulkDel", a.entrypointsBulkDelete)
-	mux.HandleFunc("/panel/api/inbounds/:id/resetTraffic", a.resetTraffic)
-	mux.HandleFunc("/panel/api/inbounds/resetAllTraffics", a.resetTraffic)
-
 	mux.HandleFunc("/panel/api/clients/devices/block", a.deviceBlock)
 	mux.HandleFunc("/panel/api/clients/devices/forget", a.deviceForget)
 	mux.HandleFunc("/panel/api/clients/addresses/forget", a.addressForget)
@@ -505,83 +499,6 @@ func (a *API) groupEntrypoints(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sendFail(w, fmt.Errorf("no group %d", body.ID))
-}
-
-func (a *API) entrypointGet(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.Atoi(lastPathSegment(r.URL.Path))
-	if err != nil {
-		sendFail(w, err)
-		return
-	}
-	rows, err := a.entrypoints()
-	if err != nil {
-		sendFail(w, err)
-		return
-	}
-	for _, row := range rows {
-		if int(numberOf(row["id"])) == id {
-			sendOK(w, row)
-			return
-		}
-	}
-	sendFail(w, fmt.Errorf("no entrypoint %d", id))
-}
-
-func (a *API) entrypointSetEnable(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.Atoi(lastPathSegment(r.URL.Path))
-	if err != nil {
-		sendFail(w, err)
-		return
-	}
-
-	var body struct {
-		Enable bool `json:"enable"`
-	}
-	bindBody(r, &body)
-
-	raw, err := a.fleet.Read("entrypoints.list", nil)
-	if err != nil {
-		sendFail(w, err)
-		return
-	}
-	var rows []map[string]any
-	if err := json.Unmarshal(raw, &rows); err != nil {
-		sendFail(w, err)
-		return
-	}
-
-	for _, row := range rows {
-		if int(numberOf(row["id"])) != id {
-			continue
-		}
-		row["enable"] = body.Enable
-		results, err := a.write("entrypoints.save", row)
-		if err != nil {
-			sendFailWith(w, err, results)
-			return
-		}
-		sendOK(w, map[string]any{"nodes": results})
-		return
-	}
-	sendFail(w, fmt.Errorf("no entrypoint %d", id))
-}
-
-func (a *API) entrypointsBulkDelete(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		IDs []int `json:"ids"`
-	}
-	if err := bindBody(r, &body); err != nil {
-		sendFail(w, err)
-		return
-	}
-
-	deleted := 0
-	for _, id := range body.IDs {
-		if _, err := a.write("entrypoints.delete", map[string]int{"id": id}); err == nil {
-			deleted++
-		}
-	}
-	sendOK(w, map[string]any{"deleted": deleted})
 }
 
 func (a *API) deviceBlock(w http.ResponseWriter, r *http.Request) {

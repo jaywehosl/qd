@@ -1,12 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
+import { SnippetsOutlined } from '@ant-design/icons';
 
 import { Switch, toast } from '@/components/ds';
 import { HttpUtil } from '@/utils';
 import { fetchClientNodes, type ClientState } from '@/hooks/useClientState';
-import { bitsPerSec } from '@/lib/rate';
+import { shortBits } from '@/lib/rate';
 import { progressOf, useUpdate } from '@/hooks/useUpdate';
+import { useSetup } from '@/hooks/useSetup';
+import { HOST_EVENT, phone } from '@/lib/phone';
 import FlowCanvas from './FlowCanvas';
 import UpdateShell from './UpdateShell';
 import { updateWord } from './UpdateButton';
@@ -19,12 +22,21 @@ const RISE = 1.3;
 const FINISH = 0.8;
 const SPLIT = 1.6;
 
+const RING = 2400;
+const BEAT = 1100;
+const GETTING = 1400;
+const SETTLE = 1740;
+const PULSE = 1600;
+
 const PERIODS = [
   { minutes: 30, label: '30m', when: 'client.update.when30m' },
   { minutes: 720, label: '12h', when: 'client.update.when12h' },
   { minutes: 1440, label: '1d', when: 'client.update.when1d' },
   { minutes: -1, label: '∞', when: '' },
 ];
+
+type Stage = 'idle' | 'installing' | 'installed' | 'getting';
+type Phase = 'wizard' | 'installing' | 'installed' | 'import' | 'getting' | 'main';
 
 interface ConnectScreenProps {
   state: ClientState;
@@ -33,6 +45,9 @@ interface ConnectScreenProps {
   onEgress: (v: boolean) => Promise<ClientState | null>;
   onAdblock: (v: boolean) => Promise<ClientState | null>;
   onRefresh: () => Promise<unknown>;
+  onImport: (uri: string) => Promise<ClientState | null>;
+  onSettle: () => Promise<unknown>;
+  onStage: (busy: boolean) => void;
   refreshing: boolean;
 }
 
@@ -46,36 +61,105 @@ function dip(spread: number, gone: number, back: number) {
   return Math.max(1 - span(spread, 0, gone), span(spread, back, 1));
 }
 
-const rate = bitsPerSec;
+const CURVES = [
+  'cubic-bezier(0.34, 1.56, 0.64, 1)',
+  'cubic-bezier(0.34, 1.46, 0.64, 1)',
+  'cubic-bezier(0.36, 1.64, 0.62, 1)',
+  'cubic-bezier(0.32, 1.5, 0.66, 1)',
+  'cubic-bezier(0.35, 1.7, 0.6, 1)',
+];
 
-function countdown(ms: number): string {
-  const total = Math.max(0, Math.floor(ms / 1000));
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  const pad = (v: number) => String(v).padStart(2, '0');
-  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+const anyCurve = () => CURVES[Math.floor(Math.random() * CURVES.length)];
+const eased = (curve: string) => ({ '--cx-ease': curve }) as CSSProperties;
+
+function useSlide(now: string) {
+  const track = useRef({ now, was: now, curve: CURVES[0] });
+  if (track.current.now !== now) track.current = { now, was: track.current.now, curve: anyCurve() };
+  const { was, curve } = track.current;
+  const cls = (name: string) => {
+    if (name === now) return was === now ? ' is-rest' : ' is-on';
+    return name === was ? ' is-off' : '';
+  };
+  return [cls, eased(curve)] as const;
 }
 
+function Roll({ text, tone: shade, inline }: { text: string; tone: string; inline?: boolean }) {
+  const tone = text ? shade : '';
+  const track = useRef({ faces: [{ text, tone }, { text: '', tone: '' }], top: 0, moved: false, curve: CURVES[0] });
+  const held = track.current;
+  if (held.faces[held.top].text !== text || held.faces[held.top].tone !== tone) {
+    const top = 1 - held.top;
+    const faces = [...held.faces];
+    faces[top] = { text, tone };
+    track.current = { faces, top, moved: true, curve: anyCurve() };
+  }
+  const { faces, top, moved, curve } = track.current;
+  return (
+    <span className={`cx-chips${inline ? ' is-inline' : ''}`} style={eased(curve)}>
+      {faces.map((f, i) => (
+        <span
+          key={i}
+          className={`cx-chip${f.tone}${f.text ? '' : ' is-void'}${i === top ? (moved ? ' is-on' : ' is-rest') : moved ? ' is-off' : ''}`}
+        >
+          {f.text}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+const rate = shortBits;
+
 export default function ConnectScreen({
-  state, onConnect, onDisconnect, onEgress, onAdblock, onRefresh, refreshing,
+  state, onConnect, onDisconnect, onEgress, onAdblock, onRefresh, onImport, onSettle, onStage, refreshing,
 }: ConnectScreenProps) {
   const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
   const { info: upd, run: runUpdate, postpone } = useUpdate();
+  const { setup, install } = useSetup();
   const [spot, setSpot] = useState(0);
   const [snap, setSnap] = useState(false);
   const period = spot % PERIODS.length;
   const [starting, setStarting] = useState(false);
+
+  const [stage, setStage] = useState<Stage>('idle');
+  const [autostart, setAutostart] = useState(setup?.autostart ?? true);
+  const [desktop, setDesktop] = useState(true);
+  const [ring, setRing] = useState(0);
+  const [uri, setUri] = useState('');
+  const [trouble, setTrouble] = useState('');
+  const field = useRef<HTMLInputElement>(null);
+  const root = useRef<HTMLDivElement>(null);
+  const tempo = useCallback(
+    () => (root.current ? parseFloat(getComputedStyle(root.current).getPropertyValue('--cx-t')) || 1 : 1),
+    [],
+  );
+  const wait = (ms: number) => new Promise<void>((done) => { window.setTimeout(done, ms * tempo()); });
+
+  const phase: Phase = stage !== 'idle' ? stage : setup?.offered ? 'wizard' : !state.imported ? 'import' : 'main';
+  const main = phase === 'main';
+  const [lag, setLag] = useState<Phase>(phase);
+  useEffect(() => {
+    if (phase === 'main' && (lag === 'import' || lag === 'getting')) {
+      const id = window.setTimeout(() => setLag('main'), SETTLE * tempo());
+      return () => window.clearTimeout(id);
+    }
+    setLag(phase);
+    return undefined;
+  }, [phase, lag, tempo]);
+  const settled = lag === 'main';
+  useEffect(() => onStage(!main), [main, onStage]);
+
   const offer = upd?.offer;
   const required = offer?.state === 'required';
-  const noticed = !!offer && (required || upd?.postponedUntil === undefined);
+  const noticed = main && !!offer && (required || upd?.postponedUntil === undefined);
   const updating = starting || !!upd?.status;
   const open = noticed && !required;
   const failed = noticed && upd?.failed === 'corrupt';
   const installing = noticed && upd?.status === 'installing';
   const leaving = failed || installing;
   const release = upd?.release ?? 'https://github.com/jaywehosl/qd/releases';
+  const version = (upd?.version ?? '').replace(/^v/, '');
 
   const openRelease = useCallback(() => {
     const shell = window as unknown as { qdOpenURL?: (url: string) => void };
@@ -88,7 +172,6 @@ export default function ConnectScreen({
   const [cheerKind, setCheerKind] = useState<'updated' | 'delayed'>('updated');
   const [delayed, setDelayed] = useState<number | null>(null);
   const [delayFor, setDelayFor] = useState(0);
-  const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!upd?.updatedFrom) {
       setSpent(false);
@@ -107,24 +190,34 @@ export default function ConnectScreen({
   }, [cheer]);
   useEffect(() => {
     if (delayed === null) return;
-    const pace = root.current ? parseFloat(getComputedStyle(root.current).getPropertyValue('--cx-t')) || 1 : 1;
     const id = window.setTimeout(() => {
       setDelayed(null);
       setCheerKind('delayed');
       setCheer(true);
-    }, 4000 * pace);
+    }, 4000 * tempo());
     return () => window.clearTimeout(id);
-  }, [delayed]);
+  }, [delayed, tempo]);
 
   const justUpdated = !!upd?.updatedFrom && !spent;
-  const headState = cheer || justUpdated ? 'cheer' : failed ? 'manual' : noticed || delayed !== null ? 'service' : 'normal';
-  const headTrack = useRef({ now: headState, was: headState });
-  if (headTrack.current.now !== headState) headTrack.current = { now: headState, was: headTrack.current.now };
-  const headWas = headTrack.current.was;
-  const slide = (name: string) => {
-    if (name === headState) return headWas === headState ? ' is-rest' : ' is-on';
-    return name === headWas ? ' is-off' : '';
-  };
+  const headState = !main
+    ? phase
+    : cheer || justUpdated ? 'cheer' : failed ? 'manual' : noticed || delayed !== null ? 'service' : 'normal';
+  const [slide, headEase] = useSlide(headState);
+
+  const stamp = state.subscription?.lastRefresh ?? 0;
+  const seen = useRef(stamp);
+  const [pulse, setPulse] = useState(false);
+  useEffect(() => {
+    if (stamp === seen.current) return;
+    const first = seen.current === 0;
+    seen.current = stamp;
+    if (main && !first) setPulse(true);
+  }, [stamp, main]);
+  useEffect(() => {
+    if (!pulse) return undefined;
+    const id = window.setTimeout(() => setPulse(false), PULSE * tempo());
+    return () => window.clearTimeout(id);
+  }, [pulse, tempo]);
 
   const [at, setAt] = useState(state.connected ? 1 : 0);
   const [spread, setSpread] = useState(state.egress && state.connected ? 1 : 0);
@@ -152,20 +245,10 @@ export default function ConnectScreen({
     enabled: state.connected,
   });
 
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const tick = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(tick);
-  }, []);
-
-  const untilRefresh = useMemo(() => {
-    const last = state.subscription?.lastRefresh ?? 0;
-    const every = (state.subscription?.intervalMinutes ?? 0) * 60_000;
-    if (!last || !every) return null;
-    return Math.max(0, last + every - now);
-  }, [state.subscription, now]);
-
   const exiting = state.egress && state.allowExit !== false;
+  const road = state.connected && state.road ? state.road + (exiting ? '+H3' : '') : '';
+  const lastNode = useRef('');
+  if (state.node?.name) lastNode.current = state.node.name;
 
   useEffect(() => {
     aim.current = state.connected ? 1 : 0;
@@ -206,14 +289,17 @@ export default function ConnectScreen({
     return () => cancelAnimationFrame(frame);
   }, []);
 
+  const [going, setGoing] = useState(false);
   const toggleTunnel = useCallback(async () => {
     setBusy(true);
+    setGoing(state.connected);
     if (!state.connected) held.current = true;
     try {
       await (state.connected ? onDisconnect() : onConnect());
     } finally {
       held.current = false;
       setBusy(false);
+      setGoing(false);
     }
   }, [state.connected, onConnect, onDisconnect]);
 
@@ -243,50 +329,179 @@ export default function ConnectScreen({
     await onRefresh();
   }, [onRefresh]);
 
+  const startInstall = async () => {
+    setTrouble('');
+    setStage('installing');
+    requestAnimationFrame(() => requestAnimationFrame(() => setRing(1)));
+    const [msg] = await Promise.all([install({ autostart, desktop }), wait(RING)]);
+    if (!msg?.success) {
+      setRing(0);
+      setStage('idle');
+      setTrouble(msg?.msg || t('client.setup.failed'));
+      return;
+    }
+    setStage('installed');
+    await wait(BEAT);
+    setRing(0);
+    setStage('idle');
+  };
+
+  const submit = async (value: string) => {
+    const link = value.trim();
+    if (!link || phase !== 'import') return;
+    setTrouble('');
+    setStage('getting');
+    const [next] = await Promise.all([onImport(link), wait(GETTING)]);
+    if (next) {
+      await onSettle();
+      setUri('');
+    } else {
+      setTrouble(t('client.import.failed'));
+    }
+    setStage('idle');
+  };
+  const submitRef = useRef(submit);
+  submitRef.current = submit;
+
+  const adopt = (link: string) => {
+    if (phase === 'import') {
+      setUri(link);
+      void submit(link);
+      return;
+    }
+    void onImport(link).then((next) => next && onSettle());
+  };
+  const adoptRef = useRef(adopt);
+  adoptRef.current = adopt;
+  useEffect(() => {
+    const take = () => {
+      const link = phone()?.pending?.();
+      if (link) adoptRef.current(link);
+    };
+    take();
+    window.addEventListener(HOST_EVENT, take);
+    return () => window.removeEventListener(HOST_EVENT, take);
+  }, []);
+
+  const fromClipboard = async () => {
+    try {
+      const host = phone();
+      const text = (host?.clipboard ? host.clipboard() : await navigator.clipboard.readText()).trim();
+      if (!text) return;
+      setUri(text);
+      void submit(text);
+    } catch {
+      setTrouble(t('client.import.clipboardDenied'));
+    }
+  };
+
+  useEffect(() => {
+    if (phase !== 'import') return undefined;
+    const onPaste = (e: ClipboardEvent) => {
+      const text = (e.clipboardData?.getData('text') ?? '').trim();
+      if (!text) return;
+      e.preventDefault();
+      setUri(text);
+      void submitRef.current(text);
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [phase]);
+
+  const mounted = useRef(false);
+  useEffect(() => {
+    const first = !mounted.current;
+    mounted.current = true;
+    if (phase !== 'import' || phone()) return undefined;
+    const id = window.setTimeout(() => field.current?.focus({ preventScroll: true }), first ? 0 : SETTLE * tempo());
+    return () => window.clearTimeout(id);
+  }, [phase, tempo]);
+
   const lift = span(at, 0, GATE);
   const rosterAlpha = span(at, 0.58, 0.86) * dip(spread, 0.3, 0.8);
   const splitAlpha = span(at, 0.88, 1) * span(spread, 0.88, 1);
   const pairAlpha = span(at, 0.88, 1) * (1 - span(spread, 0, 0.15));
   const wide = spread > 0.55;
 
-  const word = at <= 0.01
+  const peaked = useRef(state.connected);
+  if (at > GATE + 0.09) peaked.current = true;
+  if (at <= 0.01) peaked.current = false;
+  const parting = going || (!state.connected && peaked.current && at > 0.01);
+  const tunnel = parting ? 'disconnecting' : at <= 0.01 ? 'ready' : at < GATE + 0.09 ? 'connecting' : 'node';
+  const tag = (refreshing || pulse) && (tunnel === 'ready' || tunnel === 'node') ? 'updating' : tunnel;
+  const [slideTag, tagEase] = useSlide(tag);
+
+  const word = tunnel === 'ready'
     ? t('client.connect.connect')
-    : at < GATE + 0.09
-      ? t('client.connect.connecting')
-      : aim.current < at
-        ? t('client.connect.disconnecting')
-        : t('client.connect.connected');
+    : tunnel === 'node' ? t('client.connect.connected') : t(`client.connect.${tunnel}`);
+
+  const face = settled ? 'tunnel' : lag === 'import' || lag === 'getting' ? 'import' : 'install';
+  const [slideFace, faceEase] = useSlide(face);
+  const [, flipEase] = useSlide(noticed ? 'update' : 'tunnel');
+  const setting = phase === 'installing' || phase === 'installed';
+  const slotOpen = phase === 'import' || phase === 'getting' || (open && !leaving);
+  const noExit = noticed || !settled || state.allowExit === false;
+  const veiled = noticed || delayed !== null || phase === 'wizard' || (phase === 'import' && !!trouble);
+
+  const press = () => {
+    if (phase === 'wizard') void startInstall();
+    else if (phase === 'import') {
+      if (uri.trim()) void submit(uri);
+      else field.current?.focus({ preventScroll: true });
+    } else if (noticed) void (failed ? openRelease() : startUpdate());
+    else void toggleTunnel();
+  };
+  const idle = !settled || phase !== lag
+    ? phase !== 'wizard' && phase !== 'import'
+    : noticed ? !failed && updating : busy;
 
   return (
     <div className="cx" ref={root}>
-      <section className="cx-card cx-head">
+      <section className="cx-card cx-head" style={headEase}>
         <div className={`cx-head__row${slide('normal')}`} aria-hidden={headState !== 'normal'}>
-          <span className="cx-tag">{state.node?.name ?? ''}</span>
-          <span className="cx-refresh-line">
-            {untilRefresh !== null && (
-              <>
-                <span className="cx-refresh-line__label">{t('client.connect.nextRefresh')}</span>
-                <span className="cx-refresh-line__value">{countdown(untilRefresh)}</span>
-              </>
-            )}
+          <span className="cx-tag cx-reel" style={tagEase}>
+            <span className={slideTag('ready')}>{t('client.connect.ready')}</span>
+            <span className={slideTag('connecting')}>{t('client.connect.connecting')}</span>
+            <span className={slideTag('node')}>{lastNode.current}</span>
+            <span className={slideTag('disconnecting')}>{t('client.connect.disconnecting')}</span>
+            <span className={slideTag('updating')}>{t('client.connect.updating')}</span>
           </span>
-          <div className="cx-switch">
-            <Switch
-              id="cx-adblock"
-              checked={state.adblock}
-              onChange={(v) => void onAdblock(v)}
-              aria-label="+adblock"
-            />
-            <label htmlFor="cx-adblock">+adblock</label>
-          </div>
+          <Roll text={tag === 'node' ? road : ''} tone={road.startsWith('H3') ? '' : ' is-spare'} />
+          <button
+            type="button"
+            className="cx-ad"
+            aria-label="adblock"
+            aria-pressed={state.adblock}
+            onClick={() => void onAdblock(!state.adblock)}
+          >
+            <Roll text="Adblock" tone={state.adblock ? '' : ' is-idle'} inline />
+          </button>
           <button
             type="button"
             className={`cx-again${refreshing ? ' is-busy' : ''}`}
             aria-label={t('client.connect.refresh')}
             onClick={() => void refresh()}
           >
-            ⟳
+            <svg className="cx-again__icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M15.05 16.95A7 7 0 1 1 17.1 12" />
+              <path d="M12.34 10.46L16.4 14.1L20.9 10.04" />
+            </svg>
           </button>
+        </div>
+        <div className={`cx-head__say${slide('wizard')}`} aria-hidden={headState !== 'wizard'}>
+          {t('client.setup.wizardHead')}
+        </div>
+        <div className={`cx-head__say${slide('installing')}`} aria-hidden={headState !== 'installing'}>
+          {t('client.setup.installingHead')}
+        </div>
+        <div className={`cx-head__say${slide('installed')}`} aria-hidden={headState !== 'installed'}>
+          {t('client.setup.installedHead')}
+        </div>
+        <div className={`cx-head__say${slide('import')}`} aria-hidden={headState !== 'import'}>
+          {t('client.import.head')}
+        </div>
+        <div className={`cx-head__say${slide('getting')}`} aria-hidden={headState !== 'getting'}>
+          {t('client.import.gettingHead')}
         </div>
         <div className={`cx-head__say${slide('service')}`} aria-hidden={headState !== 'service'}>
           {t('client.update.serviceHead')}
@@ -301,7 +516,7 @@ export default function ConnectScreen({
         </div>
       </section>
 
-      <section className={`cx-card cx-stage${noticed || delayed !== null ? ' is-notice' : ''}`}>
+      <section className={`cx-card cx-stage${veiled ? ' is-notice' : ''}`}>
         <div className="cx-stage__live">
           <FlowCanvas
             lift={lift}
@@ -338,6 +553,33 @@ export default function ConnectScreen({
           </div>
         </div>
 
+        <div
+          className={`cx-notice cx-notice--wizard${phase === 'wizard' ? ' is-shown' : ''}`}
+          aria-hidden={phase !== 'wizard'}
+        >
+          <span className="cx-notice__title">{t('client.setup.welcomeTitle', { version })}</span>
+          <p className="cx-notice__text">{t('client.setup.welcomeText')}</p>
+          {phase === 'wizard' && trouble && <p className="cx-notice__error">{trouble}</p>}
+          <div className="cx-options">
+            <label className="cx-option">
+              <span>{t('client.setup.autostart')}</span>
+              <Switch checked={autostart} disabled={phase !== 'wizard'} onChange={setAutostart} />
+            </label>
+            <label className="cx-option">
+              <span>{t('client.setup.desktop')}</span>
+              <Switch checked={desktop} disabled={phase !== 'wizard'} onChange={setDesktop} />
+            </label>
+          </div>
+        </div>
+
+        <div
+          className={`cx-notice${phase === 'import' && trouble ? ' is-shown' : ''}`}
+          aria-hidden={phase !== 'import' || !trouble}
+        >
+          <span className="cx-notice__title">{t('client.import.failedTitle')}</span>
+          <p className="cx-notice__text">{trouble}</p>
+        </div>
+
         <div className={`cx-notice${noticed && !leaving ? ' is-shown' : ''}`} aria-hidden={!noticed || leaving}>
           <span className="cx-notice__title">
             {required ? t('client.update.requiredTitle') : t('client.update.availableTitle')}
@@ -372,60 +614,100 @@ export default function ConnectScreen({
       </section>
 
       <div className="cx-duo">
-        <div className={`cx-slot${open && !leaving ? ' is-open' : ''}${leaving ? ' is-leaving' : ''}`}>
+        <div className={`cx-slot${slotOpen ? ' is-open' : ''}${leaving ? ' is-leaving' : ''}`}>
           <div className="cx-slot__inner">
             <section className="cx-card cx-controls up-shell">
-            <div className="cx-power is-later">
-              <button
-                type="button"
-                className="cx-power__main"
-                disabled={!noticed || updating}
-                tabIndex={noticed ? 0 : -1}
-                onClick={() => void putOff()}
-              >
-                {t('client.update.later')}
-              </button>
-              <button
-                type="button"
-                className="cx-exit cx-period"
-                aria-label={t('client.update.period')}
-                disabled={!noticed || updating}
-                tabIndex={noticed ? 0 : -1}
-                onClick={() => {
-                  if (spot === PERIODS.length) return;
-                  setSnap(false);
-                  setSpot(spot + 1);
-                }}
-              >
-                <span
-                  className={`cx-period__strip${snap ? ' is-snap' : ''}`}
-                  style={{ transform: `translateX(${-spot * 60}px)` }}
-                  onTransitionEnd={() => {
-                    if (spot !== PERIODS.length) return;
-                    setSnap(true);
-                    setSpot(0);
-                  }}
-                >
-                  {[...PERIODS, PERIODS[0]].map((p, i) => (
-                    <span key={i} className="cx-period__face">{p.label}</span>
-                  ))}
-                </span>
-              </button>
-            </div>
+              {settled ? (
+                <div className="cx-power is-later">
+                  <button
+                    type="button"
+                    className="cx-power__main"
+                    disabled={!noticed || updating}
+                    tabIndex={noticed ? 0 : -1}
+                    onClick={() => void putOff()}
+                  >
+                    {t('client.update.later')}
+                  </button>
+                  <button
+                    type="button"
+                    className="cx-exit cx-period"
+                    aria-label={t('client.update.period')}
+                    disabled={!noticed || updating}
+                    tabIndex={noticed ? 0 : -1}
+                    onClick={() => {
+                      if (spot === PERIODS.length) return;
+                      setSnap(false);
+                      setSpot(spot + 1);
+                    }}
+                  >
+                    <span
+                      className={`cx-period__strip${snap ? ' is-snap' : ''}`}
+                      style={{ transform: `translateX(${-spot * 60}px)` }}
+                      onTransitionEnd={() => {
+                        if (spot !== PERIODS.length) return;
+                        setSnap(true);
+                        setSpot(0);
+                      }}
+                    >
+                      {[...PERIODS, PERIODS[0]].map((p, i) => (
+                        <span key={i} className="cx-period__face">{p.label}</span>
+                      ))}
+                    </span>
+                  </button>
+                </div>
+              ) : (
+                <div className="cx-power is-field">
+                  <input
+                    ref={field}
+                    className="cx-uri"
+                    value={uri}
+                    placeholder="qd://…"
+                    spellCheck={false}
+                    inputMode="url"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    autoComplete="off"
+                    enterKeyHint="go"
+                    disabled={phase !== 'import'}
+                    tabIndex={phase === 'import' ? 0 : -1}
+                    onChange={(e) => { setUri(e.target.value); setTrouble(''); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') void submit(uri); }}
+                  />
+                  <button
+                    type="button"
+                    className="cx-exit cx-paste"
+                    aria-label={t('client.import.fromClipboard')}
+                    title={t('client.import.fromClipboard')}
+                    disabled={phase !== 'import'}
+                    tabIndex={phase === 'import' ? 0 : -1}
+                    onClick={() => void fromClipboard()}
+                  >
+                    <SnippetsOutlined />
+                  </button>
+                </div>
+              )}
             </section>
           </div>
         </div>
 
-        <UpdateShell progress={progressOf(upd) ?? 0} busy={noticed && !leaving && updating}>
-        <div className={`cx-power${noticed && upd?.status ? ' is-on' : at > GATE ? ' is-on' : at > 0.12 ? ' is-working' : ''}`}>
+        <UpdateShell
+          progress={setting ? ring : progressOf(upd) ?? 0}
+          busy={setting || (noticed && !leaving && updating)}
+          sweep={setting ? RING * tempo() : undefined}
+        >
+        <div className={`cx-power${!settled || (noticed && upd?.status) ? ' is-on' : at > GATE ? ' is-on' : at > 0.12 ? ' is-working' : ''}`}>
           <button
             type="button"
             className="cx-power__main"
-            disabled={noticed ? !failed && updating : busy}
-            onClick={() => void (noticed ? (failed ? openRelease() : startUpdate()) : toggleTunnel())}
+            disabled={idle}
+            onClick={press}
           >
-            <span className={`cx-flip${noticed ? ' is-flipped' : ''}`}>
-              <span className="cx-flip__from" aria-hidden={noticed}>{word}</span>
+            <span className={`cx-flip${noticed ? ' is-flipped' : ''}`} style={flipEase}>
+              <span className="cx-flip__from cx-reel" style={faceEase} aria-hidden={noticed}>
+                <span className={slideFace('install')}>{t('client.setup.action')}</span>
+                <span className={slideFace('import')}>{t('client.import.action')}</span>
+                <span className={slideFace('tunnel')}>{word}</span>
+              </span>
               <span className="cx-flip__to" aria-hidden={!noticed}>
                 {failed
                   ? t('client.update.manual')
@@ -433,30 +715,28 @@ export default function ConnectScreen({
               </span>
             </span>
           </button>
-          {state.allowExit !== false && (
-            <button
-              type="button"
-              className={`cx-exit${exiting ? ' is-on' : ''}${noticed ? ' is-gone' : ''}`}
-              aria-label="+egress"
-              tabIndex={noticed ? -1 : 0}
-              onClick={() => void flipEgress()}
-            >
-              <svg viewBox="0 0 60 60" aria-hidden="true">
-                <g className="cx-exit__face cx-exit__face--off">
-                  <path d="M11.9 17.9 L16 15.9 L20 18.2 L24 16.1 L28 17.6" />
-                  <path d="M32 39.9 L36 39.9 M39 39.9 L43 39.9" className="cx-exit__dash" />
-                  <path d="M30.7 11.8 L30.7 50.7" className="cx-exit__rail" />
-                </g>
-                <g className="cx-exit__face cx-exit__face--on">
-                  <path d="M12 17.7 L15.3 15.6 L18.6 17.4 L21.4 16.9" />
-                  <path d="M21.4 33.3 L26 31.5 L30.6 33.6 L35.2 31.2 L39.7 33" />
-                  <path d="M41 38.7 L44 38.7 M46.5 38.7 L48.1 38.7" className="cx-exit__dash" />
-                  <path d="M21.4 11.8 L21.4 48.9" className="cx-exit__rail" />
-                  <path d="M39.7 11.8 L39.7 48.9" className="cx-exit__rail" />
-                </g>
-              </svg>
-            </button>
-          )}
+          <button
+            type="button"
+            className={`cx-exit${exiting ? ' is-on' : ''}${noExit ? ' is-gone' : ''}`}
+            aria-label="+egress"
+            tabIndex={noExit ? -1 : 0}
+            onClick={() => void flipEgress()}
+          >
+            <svg viewBox="0 0 60 60" aria-hidden="true">
+              <g className="cx-exit__face cx-exit__face--off">
+                <path d="M11.9 17.9 L16 15.9 L20 18.2 L24 16.1 L28 17.6" />
+                <path d="M32 39.9 L36 39.9 M39 39.9 L43 39.9" className="cx-exit__dash" />
+                <path d="M30.7 11.8 L30.7 50.7" className="cx-exit__rail" />
+              </g>
+              <g className="cx-exit__face cx-exit__face--on">
+                <path d="M12 17.7 L15.3 15.6 L18.6 17.4 L21.4 16.9" />
+                <path d="M21.4 33.3 L26 31.5 L30.6 33.6 L35.2 31.2 L39.7 33" />
+                <path d="M41 38.7 L44 38.7 M46.5 38.7 L48.1 38.7" className="cx-exit__dash" />
+                <path d="M21.4 11.8 L21.4 48.9" className="cx-exit__rail" />
+                <path d="M39.7 11.8 L39.7 48.9" className="cx-exit__rail" />
+              </g>
+            </svg>
+          </button>
         </div>
         </UpdateShell>
       </div>

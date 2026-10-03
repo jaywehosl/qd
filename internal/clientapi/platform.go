@@ -18,6 +18,7 @@ type Device struct {
 
 type Process struct {
 	Name        string `json:"name"`
+	Title       string `json:"title,omitempty"`
 	Path        string `json:"path,omitempty"`
 	Icon        string `json:"icon,omitempty"`
 	PID         int    `json:"pid"`
@@ -28,6 +29,7 @@ type Platform interface {
 	Running() bool
 	Start(servers []string, relays []relay.Link, session uint32) error
 	ServerName() string
+	Road() string
 	Stop() error
 	SetKey(key *qdcrypt.Key)
 	SetExit(egress bool)

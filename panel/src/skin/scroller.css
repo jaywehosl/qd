@@ -102,3 +102,5 @@ body::-webkit-scrollbar,
 .qd-scroll.is-held .qd-scroll__thumb { opacity: 1; }
 
 .qd-scroll.is-held .qd-scroll__thumb { cursor: grabbing; }
+
+body:has(.ds-dialog__overlay) > #qd-scroll { display: none; }

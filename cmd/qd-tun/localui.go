@@ -5,12 +5,19 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"os"
 
 	"github.com/jaywehosl/qd/internal/localapi"
 )
 
+const tokenEnv = "QD_UI_TOKEN"
+
+var inherited bool
+
 func startLocalUI(host string, port int, client http.Handler, admin *adminUI, isAdmin func() bool) (*localapi.Server, error) {
-	cfg := localapi.Config{Client: client, IsAdmin: isAdmin}
+	cfg := localapi.Config{Client: client, IsAdmin: isAdmin, Token: os.Getenv(tokenEnv)}
+	inherited = cfg.Token != ""
+	os.Unsetenv(tokenEnv)
 	if admin != nil {
 		cfg.Admin = admin
 	}

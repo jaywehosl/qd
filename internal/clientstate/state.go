@@ -99,6 +99,17 @@ func (d *DB) SaveSubscription(s Subscription) error {
 	return err
 }
 
+func (d *DB) mark(column string, value any) error {
+	_, err := d.sql.Exec("UPDATE subscription SET "+column+" = ? WHERE id = 1", value)
+	return err
+}
+
+func (d *DB) SetAdmin(on bool) error { return d.mark("admin", on) }
+
+func (d *DB) SetAllowExit(on bool) error { return d.mark("allow_exit", on) }
+
+func (d *DB) SetLastRefresh(ms int64) error { return d.mark("last_refresh", ms) }
+
 func (d *DB) ClearSubscription() error {
 	tx, err := d.sql.Begin()
 	if err != nil {
@@ -108,6 +119,9 @@ func (d *DB) ClearSubscription() error {
 	for _, q := range []string{
 		`DELETE FROM subscription`,
 		`DELETE FROM nodes`,
+		`DELETE FROM ech`,
+		`DELETE FROM tickets`,
+		`DELETE FROM tokens`,
 		`DELETE FROM notifications`,
 		`DELETE FROM samples`,
 		`DELETE FROM traffic`,

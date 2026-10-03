@@ -82,8 +82,7 @@ export default function FlowCanvas({ lift, apart, fade, alive }: FlowCanvasProps
     let clock = 0;
     let beat = 0;
     let slot = Number.NEGATIVE_INFINITY;
-    let holeLo = Number.NaN;
-    let holeHi = 0;
+    const holes: { lo: number; hi: number }[] = [];
     let cutting = false;
     let primed = false;
     let frame = 0;
@@ -92,13 +91,27 @@ export default function FlowCanvas({ lift, apart, fade, alive }: FlowCanvasProps
     const good = face.getPropertyValue('--color-primary').trim() || '#71d888';
     const muted = face.getPropertyValue('--text-2').trim() || '#585858';
 
+    let w = 0;
+    let h = 0;
+    const sizer = new ResizeObserver(([seen]) => {
+      w = Math.round(seen.contentRect.width);
+      h = Math.round(seen.contentRect.height);
+    });
+    sizer.observe(canvas);
+
+    let shown = true;
+    const eye = new IntersectionObserver(([seen]) => {
+      const was = shown;
+      shown = seen.isIntersecting;
+      if (shown && !was) frame = requestAnimationFrame(draw);
+    });
+    eye.observe(canvas);
+
     function draw(now: number) {
+      if (!shown) return;
       frame = requestAnimationFrame(draw);
 
-      const box = canvas!.getBoundingClientRect();
       const ratio = window.devicePixelRatio || 1;
-      const w = Math.round(box.width);
-      const h = Math.round(box.height);
       if (w <= 0 || h <= 0) return;
 
       if (canvas!.width !== w * ratio || canvas!.height !== h * ratio) {
@@ -123,13 +136,13 @@ export default function FlowCanvas({ lift, apart, fade, alive }: FlowCanvasProps
       const phase = clock % CELL;
 
       const cut = rise >= (1 - DASH_Y) / RAIL_H;
-      if (cut && !cutting) holeLo = Number.NaN;
+      if (cut && !cutting) holes.push({ lo: leftX + clock, hi: leftX + clock });
       cutting = cut;
+      while (holes.length > 0 && holes[0].hi - clock < -CELL) holes.shift();
 
       if (rise <= 0.001) {
         main.count = 0;
         link.count = 0;
-        holeLo = Number.NaN;
         primed = false;
       }
 
@@ -153,52 +166,38 @@ export default function FlowCanvas({ lift, apart, fade, alive }: FlowCanvasProps
         primed = true;
       }
 
-      if (cutting) {
-        if (Number.isNaN(holeLo)) holeLo = leftX + clock;
-        holeHi = leftX + clock;
-      }
+      if (cutting) holes[holes.length - 1].hi = leftX + clock;
 
       ink!.strokeStyle = good;
       ink!.globalAlpha = 0.47;
       ink!.lineWidth = 1.6;
       ink!.lineCap = 'round';
 
-      const lo = Number.isNaN(holeLo) ? 0 : holeLo - clock;
-      const hi = Number.isNaN(holeLo) ? 0 : holeHi - clock;
+      const dash = (from: number, to: number) => {
+        if (to - from <= 1.6) return;
+        ink!.beginPath();
+        ink!.moveTo(from, base);
+        ink!.lineTo(to, base);
+        ink!.stroke();
+      };
 
       for (let a = w + CELL * 2; a > -CELL * 2; a -= CELL) {
         const from = a - phase;
         const to = from + run;
 
-        if (to > rightX && from < w) {
-          ink!.beginPath();
-          ink!.moveTo(Math.max(from, rightX), base);
-          ink!.lineTo(Math.min(to, w), base);
-          ink!.stroke();
-        }
+        if (to > rightX && from < w) dash(Math.max(from, rightX), Math.min(to, w));
 
         if (to > 0 && from < leftX) {
-          const left = Math.max(from, 0);
+          let left = Math.max(from, 0);
           const right = Math.min(to, leftX);
-          if (!Number.isNaN(holeLo) && right > lo && left < hi) {
-            if (left < lo) {
-              ink!.beginPath();
-              ink!.moveTo(left, base);
-              ink!.lineTo(lo, base);
-              ink!.stroke();
-            }
-            if (right > hi) {
-              ink!.beginPath();
-              ink!.moveTo(hi, base);
-              ink!.lineTo(right, base);
-              ink!.stroke();
-            }
-          } else if (right - left > 1.6) {
-            ink!.beginPath();
-            ink!.moveTo(left, base);
-            ink!.lineTo(right, base);
-            ink!.stroke();
+          for (const hole of holes) {
+            const lo = hole.lo - clock;
+            const hi = hole.hi - clock;
+            if (hi <= left || lo >= right) continue;
+            dash(left, lo);
+            left = Math.max(left, hi);
           }
+          dash(left, right);
         }
       }
 
@@ -278,7 +277,11 @@ export default function FlowCanvas({ lift, apart, fade, alive }: FlowCanvasProps
     }
 
     frame = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(frame);
+    return () => {
+      cancelAnimationFrame(frame);
+      sizer.disconnect();
+      eye.disconnect();
+    };
   }, []);
 
   return <canvas ref={holder} className="cx-flow" />;

@@ -12,7 +12,6 @@ import { Card } from '@/components/ds';
 import { Spin, VerticalTabs } from '@/components/ui';
 import BackToTop from '@/components/ui/BackToTop';
 import { useTheme } from '@/hooks/useTheme';
-import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { useSettingsController } from '@/layouts/settings-controller-context';
 import PreferencesTab from './PreferencesTab';
 import DnsTab from './DnsTab';
@@ -27,7 +26,6 @@ function scrollTarget() {
 export default function SettingsPage() {
   const { t } = useTranslation();
   const { isDark, isUltra } = useTheme();
-  const { isMobile } = useMediaQuery();
   const navigate = useNavigate();
 
   const {
@@ -76,7 +74,7 @@ export default function SettingsPage() {
                   <h2>{t('menu.panelSettings', { defaultValue: 'Panel Settings' })}</h2>
                 </div>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? 8 : 12 }}>
+                <div className="page-stack">
                   <div className="inb-roles">
                     <VerticalTabs
                       items={tabItems}

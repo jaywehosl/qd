@@ -26,6 +26,7 @@ import (
 var (
 	updated  = make(chan struct{}, 1)
 	stateDir string
+	arrived  bool
 )
 
 func runClient(opts runOptions) error {
@@ -132,7 +133,7 @@ func runClient(opts runOptions) error {
 				out = append(out, api.Peers()...)
 			}
 			if admin != nil {
-				out = append(out, admin.peers()...)
+				out = append(out, admin.Peers()...)
 			}
 			return out
 		},
@@ -188,7 +189,7 @@ func runClient(opts runOptions) error {
 	syncRelays(db)
 	go api.Greet()
 
-	ui, err := startLocalUI(opts.UIHost, opts.UIPort, api.Routes(), admin, func() bool {
+	ui, err := startLocalUI(opts.UIHost, opts.UIPort, withSetup(api.Routes(), db, tun), admin, func() bool {
 		sub, err := db.Subscription()
 		return err == nil && sub.Admin
 	})
@@ -197,7 +198,7 @@ func runClient(opts runOptions) error {
 	}
 
 	if admin != nil {
-		ui.SetFeed(admin.live)
+		ui.SetFeed(admin.Feed)
 	}
 
 	pageURL := ui.URL()
@@ -262,7 +263,7 @@ func runClient(opts runOptions) error {
 			fmt.Printf("connect  %v\n", err)
 		}
 	}
-	if !embedded && (!trayed || behaviour == "open" || behaviour == "openConnect") {
+	if !embedded && (!trayed || arrived || behaviour == "open" || behaviour == "openConnect") {
 		openPage(pageURL)
 	}
 
@@ -276,11 +277,16 @@ func runClient(opts runOptions) error {
 		deadline = t.C
 	}
 
+	handing := false
 	select {
 	case <-sig:
 	case <-quit:
 	case <-updated:
+		handing = true
 	case <-deadline:
+	}
+	if !handing {
+		shutWindow()
 	}
 
 	go func() {

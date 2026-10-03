@@ -3,6 +3,7 @@ import type { AxiosError, AxiosResponse, InternalAxiosRequestConfig } from 'axio
 import qs from 'qs';
 
 import { showClientClosed, showSessionGone } from '@/lib/client-closed';
+import { restarting } from '@/lib/handover';
 import { readLocalToken } from './localToken';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS', 'TRACE']);
@@ -54,6 +55,7 @@ async function ensureCsrfToken(): Promise<string | null> {
 export function setupAxios(): void {
   axios.defaults.headers.post['Content-Type'] = 'application/x-www-form-urlencoded; charset=UTF-8';
   axios.defaults.headers.common['X-Requested-With'] = 'XMLHttpRequest';
+  axios.defaults.withXSRFToken = false;
 
   let basePath: string | null | undefined = window.X_UI_BASE_PATH;
   if (!basePath) {
@@ -100,7 +102,7 @@ export function setupAxios(): void {
       const status = error.response?.status;
 
       if (!error.response && error.code !== 'ERR_CANCELED') {
-        showClientClosed();
+        if (!restarting()) showClientClosed();
         return Promise.reject(error);
       }
       const skipAuthRedirect = Boolean((error.config as { skipAuthRedirect?: boolean } | undefined)?.skipAuthRedirect);

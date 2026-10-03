@@ -9,25 +9,12 @@
   gap: var(--gap-card);
 }
 
-.page__head {
-  display: flex;
-  flex-direction: column;
-  gap: var(--step-1);
-  padding: var(--step-5) 0 var(--step-3);
-}
-
 .card {
   background: var(--card);
   border-radius: var(--radius-card);
   padding: var(--pad-card);
   box-sizing: border-box;
 }
-
-html.is-dark .card {
-  border: 1px solid var(--edge);
-}
-
-.card--flush { padding: 0; }
 
 .card__head {
   display: flex;
@@ -51,8 +38,6 @@ html.is-dark .card {
 }
 
 .row + .row { border-top: 1px solid var(--edge); }
-.row__main { flex: 1; min-width: 0; }
-.row__side { color: var(--text); white-space: nowrap; }
 
 .dot {
   width: 8px;

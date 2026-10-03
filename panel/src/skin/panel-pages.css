@@ -58,15 +58,20 @@
 
 .ds-stats-grid .ds-stat__value { min-width: 3ch; }
 
-.stat-row {
+html.in-phone .ds-stats-grid {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--step-3);
-  min-height: 28px;
+  flex-wrap: wrap;
+  gap: var(--step-3) var(--step-2);
+  padding-inline: 0;
 }
-
-.stat-label { color: var(--text); }
+html.in-phone .ds-stats-grid > * { flex: 1 1 96px; min-width: min-content; }
+html.in-phone .ds-stats-grid .ds-stat__value { white-space: nowrap; }
+html.in-phone .ds-stats-grid > *,
+html.in-phone .ds-stats-grid > *:last-child,
+html.in-phone .ds-stats-grid > *:last-child > .ds-stat { align-items: flex-start; }
+html.in-phone .ds-stats-grid .ds-stat__title { align-items: flex-start; gap: 6px; line-height: 1.25; }
+html.in-phone .ds-stats-grid .ds-stat__title > .anticon { margin-top: 1px; }
+html.in-phone .ds-stats-grid .ds-stat__value { font-size: clamp(18px, 5.6vw, 24px); line-height: 1.15; }
 
 .online-dot,
 .state-dot {
@@ -80,16 +85,6 @@
 .online-dot { background: var(--good); }
 
 .state-dot { background: currentColor; opacity: 0.75; }
-
-.status-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px var(--step-2);
-  border-radius: var(--radius-chip);
-  background: var(--card);
-  font-size: 12px;
-}
 
 .name-cell {
   display: flex;
@@ -117,14 +112,12 @@
   gap: 6px;
 }
 
-.ip-toggle-icon,
-.reload-icon {
+.ip-toggle-icon {
   cursor: pointer;
   color: var(--text);
 }
 
-.ip-toggle-icon:hover,
-.reload-icon:hover { color: var(--bold); }
+.ip-toggle-icon:hover { color: var(--bold); }
 
 .address-visible { font-family: var(--mono); font-size: 12px; }
 .address-hidden {
@@ -133,20 +126,6 @@
   filter: blur(4px);
   user-select: none;
 }
-
-.row-action-trigger {
-  width: 28px;
-  height: 28px;
-  display: grid;
-  place-items: center;
-  border: none;
-  border-radius: 8px;
-  background: none;
-  color: var(--text);
-  cursor: pointer;
-}
-
-.row-action-trigger:hover { background: var(--card); color: var(--bold); }
 
 .ds-muted,
 .hint,
@@ -354,7 +333,6 @@
   padding: var(--step-3) 0;
 }
 
-
 .notif-tab__source-label {
   display: flex;
   flex-direction: column;
@@ -416,7 +394,6 @@
   padding: var(--step-2) 0;
 }
 
-
 .notif-tab__item-icon { flex: 0 0 auto; }
 
 .notif-tab__item-text {
@@ -439,8 +416,7 @@
   color: var(--text);
 }
 
-.ci-rows,
-.notif-rows {
+.ci-rows {
   display: flex;
   flex-direction: column;
 }
@@ -499,8 +475,6 @@
   gap: var(--step-2);
 }
 
-.series-title { color: var(--bold); font-weight: 500; }
-
 .panel-page {
   display: flex;
   flex-direction: column;
@@ -525,25 +499,46 @@
 
 .inb-roles .vertical-tabs-container { min-width: 260px; }
 
-.inbound-table .ds-table { table-layout: fixed; }
+html.in-phone .ds-card .ds-card {
+  padding: 0;
+  border: none;
+  background: none;
+  box-shadow: none;
+}
+html.in-phone:not(.is-dark) .ds-card:has(.ds-card) { box-shadow: 0 12px 32px rgba(0, 0, 0, 0.07), 0 2px 8px rgba(0, 0, 0, 0.05); }
+html.in-phone .ds-card .ds-card:has(.ds-card) { box-shadow: none; }
 
-.inbound-table .ds-table th:nth-child(1),
-.inbound-table .ds-table td:nth-child(1) { width: 17%; }
+html.in-phone .panel-page .setting-list-item:has(.ds-select, input:not([type='number']), .setting-pair) > .setting-list-grid {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--step-2);
+}
+html.in-phone .panel-page .setting-list-item:has(.ds-select, input:not([type='number']), .setting-pair) .setting-list-control {
+  width: 100%;
+  max-width: none;
+  flex: 0 0 auto;
+  justify-content: flex-start;
+}
+html.in-phone .panel-page .setting-list-control > .ds-switch { margin-left: auto; }
+html.in-phone .panel-page .setting-list-item:has(.ds-select, input:not([type='number'])) .setting-list-control > * {
+  width: 100%;
+  max-width: none;
+}
 
-.inbound-table .ds-table th:nth-child(2),
-.inbound-table .ds-table td:nth-child(2) { width: 14%; }
-
-.inbound-table .ds-table th:nth-child(3),
-.inbound-table .ds-table td:nth-child(3) { width: 16%; }
-
-.inbound-table .ds-table th:nth-child(4),
-.inbound-table .ds-table td:nth-child(4) { width: 10%; }
-
-.inbound-table .ds-table th:nth-child(5),
-.inbound-table .ds-table td:nth-child(5) { width: 25%; }
-
-.inbound-table .ds-table th:nth-child(6),
-.inbound-table .ds-table td:nth-child(6) { width: 18%; }
+html.in-phone .vertical-tabs-container:has(> .vtab-btn:nth-of-type(4)) {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  width: 100%;
+  min-width: 0;
+}
+html.in-phone .vertical-tabs-container:has(> .vtab-btn:nth-of-type(4)) > .vtab-btn {
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 7px 2px;
+  font-size: 11px;
+}
 
 .email-cell {
   display: flex;
@@ -565,7 +560,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
 
 .client-table .ds-table { table-layout: fixed; }
 
@@ -589,7 +583,6 @@
 
 .row-delete { color: #e03a2f; }
 .row-delete:hover { background: #e03a2f; color: #fff; }
-
 
 .client-table .ds-table td:nth-child(3) .ds-tag {
   min-width: 84px;
@@ -774,34 +767,80 @@
 
 .client-table .ds-table .ds-tag:not([class*='--']),
 .group-table .ds-table .ds-tag:not([class*='--']),
-.node-table .ds-table .ds-tag:not([class*='--']),
-.inbound-table .ds-table .ds-tag:not([class*='--']) {
+.node-table .ds-table .ds-tag:not([class*='--']) {
   background: var(--edge);
 }
 
 .client-table .ds-table tbody tr:hover .ds-tag:not([class*='--']),
 .group-table .ds-table tbody tr:hover .ds-tag:not([class*='--']),
-.node-table .ds-table tbody tr:hover .ds-tag:not([class*='--']),
-.inbound-table .ds-table tbody tr:hover .ds-tag:not([class*='--']) {
+.node-table .ds-table tbody tr:hover .ds-tag:not([class*='--']) {
   background: var(--press);
-}
-
-.inbound-table .ds-table td:nth-child(4) .ds-tag,
-.inbound-table .ds-table td:nth-child(5) .ds-tag,
-.inbound-table .ds-table td:nth-child(6) .ds-tag,
-.inbound-table .ds-table tbody tr:hover td:nth-child(4) .ds-tag,
-.inbound-table .ds-table tbody tr:hover td:nth-child(5) .ds-tag,
-.inbound-table .ds-table tbody tr:hover td:nth-child(6) .ds-tag {
-  background: var(--good);
-  color: #fff;
-}
-
-.inbound-table .ds-table td:nth-child(4) .ds-tag {
-  min-width: 54px;
-  justify-content: center;
 }
 
 .row-actions .row-delete:hover {
   background: #e03a2f;
   color: #fff;
 }
+
+html.in-phone .dns-stats__row { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--step-2); }
+html.in-phone .dns-stats__node { grid-column: 1 / -1; }
+html.in-phone .notif-tab__source { gap: var(--step-3); }
+html.in-phone .notif-tab__sensor-ctl { flex: 0 0 auto; }
+html.in-phone .notif-tab__sensor-thresh .ds-input { width: 72px; }
+html.in-phone .group-table .ds-table td:nth-child(4) .ds-tag { min-width: 0; }
+html.in-phone .ds-stats-grid .ds-stat { justify-content: space-between; }
+html.in-phone .dns-stats__cell {
+  display: flex;
+  flex-direction: column;
+  white-space: normal;
+  overflow: visible;
+  line-height: 1.25;
+}
+.ge-tabs { display: flex; justify-content: center; margin-bottom: var(--step-3); }
+html.in-phone .ge-head { grid-template-columns: minmax(0, 1fr); }
+html.in-phone .ge-toggles { grid-template-columns: minmax(0, 1fr); row-gap: 0; }
+html.in-phone .ge-toggle { min-height: 48px; }
+html.in-phone .ge-toggle + .ge-toggle { border-top: 1px solid var(--edge); }
+html.in-phone .group-edit .ge-picks { justify-content: flex-start; }
+html.in-phone .ge-relay-row .ds-btn { width: 40px; padding: 0; }
+html.in-phone .group-edit { min-height: 400px; }
+
+.page-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+html.in-phone .page-stack { gap: var(--step-3); }
+html.in-phone .panel-page { gap: var(--step-5); }
+
+html.in-phone .ds-stats-grid.is-fold {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  width: 100%;
+  padding: 0 0 14px;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+html.in-phone .ds-stats-grid.is-fold > * { min-width: 0; }
+html.in-phone .ds-stats-grid.is-fold:not(.is-open) > :nth-child(n + 4) { display: none; }
+html.in-phone .ds-stats-grid.is-fold.is-open > :nth-child(n + 4) { animation: qd-fold-in 0.2s cubic-bezier(0.2, 0.8, 0.2, 1); }
+html.in-phone .ds-stats-grid.is-fold::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 2px;
+  width: 6px;
+  height: 6px;
+  border: solid var(--text);
+  border-width: 0 1.5px 1.5px 0;
+  opacity: 0.6;
+  transform: translate(-50%, -2px) rotate(45deg);
+  transition: transform 0.2s ease;
+}
+html.in-phone .ds-stats-grid.is-fold.is-open::after { transform: translate(-50%, 2px) rotate(-135deg); }

@@ -122,20 +122,6 @@ CREATE TABLE IF NOT EXISTS client_traffic (
 
 CREATE INDEX IF NOT EXISTS idx_traffic_client ON client_traffic(client_id);
 
-CREATE TABLE IF NOT EXISTS peer_traffic (
-    peer_id     INTEGER NOT NULL,
-    node_id     INTEGER NOT NULL,
-    epoch       INTEGER NOT NULL DEFAULT 0,
-    last_up     INTEGER NOT NULL DEFAULT 0,
-    last_down   INTEGER NOT NULL DEFAULT 0,
-    up          INTEGER NOT NULL DEFAULT 0,
-    down        INTEGER NOT NULL DEFAULT 0,
-    at          INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (peer_id, node_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_traffic_peer ON peer_traffic(node_id);
-
 CREATE TABLE IF NOT EXISTS devices (
     client_id    INTEGER NOT NULL,
     fingerprint  TEXT    NOT NULL,

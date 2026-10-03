@@ -183,7 +183,7 @@ export default function DnsTab({ allSetting, updateSetting }: DnsTabProps) {
         title={t('pages.settings.dnsTtl')}
         description={t('pages.settings.dnsTtlDesc')}
       >
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div className="setting-pair">
           <Input
             type="number"
             min={0}

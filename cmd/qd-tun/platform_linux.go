@@ -120,6 +120,8 @@ const (
 	paneGroup = "qd-client"
 )
 
+func shutWindow() {}
+
 func bindPane(statePath, url, token string) {
 	if os.Geteuid() != 0 {
 		return

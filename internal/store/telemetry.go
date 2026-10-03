@@ -15,10 +15,6 @@ func (d *DB) RecordTraffic(readings []Reading) error {
 	return d.recordCounters("client_traffic", "client_id", readings)
 }
 
-func (d *DB) RecordPeerTraffic(readings []Reading) error {
-	return d.recordCounters("peer_traffic", "peer_id", readings)
-}
-
 func (d *DB) recordCounters(table, owner string, readings []Reading) error {
 	if len(readings) == 0 {
 		return nil
@@ -85,10 +81,6 @@ type Totals struct {
 	Up   uint64 `json:"up"`
 	Down uint64 `json:"down"`
 	At   int64  `json:"at"`
-}
-
-func (d *DB) PeerTraffic() (map[int]Totals, error) {
-	return d.totals(`SELECT node_id, SUM(up), SUM(down), MAX(at) FROM peer_traffic GROUP BY node_id`)
 }
 
 func (d *DB) TrafficFrom(nodeID int) (map[int]Totals, error) {

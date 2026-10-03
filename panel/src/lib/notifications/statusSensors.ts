@@ -17,7 +17,6 @@ export function evalStatusSensors(status: Status, sensors: SensorPrefs): StatusS
     { key: 'disk', value: pct(status.disk.current, status.disk.total), ready: status.disk.total > 0, unit: '%', label: 'Disk usage' },
     { key: 'sockets', value: status.tcpCount, ready: true, unit: '', label: 'TCP sockets' },
     { key: 'udpSockets', value: status.udpCount, ready: true, unit: '', label: 'UDP sockets' },
-    { key: 'uptimeDays', value: Math.floor(status.uptime / 86400), ready: status.uptime > 0, unit: 'd', label: 'System uptime' },
   ];
 
   const out: StatusSensorEval[] = [];

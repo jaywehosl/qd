@@ -8,11 +8,13 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/jaywehosl/qd/internal/adblock"
 	"github.com/jaywehosl/qd/internal/clientapi"
 	"github.com/jaywehosl/qd/internal/clientdns"
 	"github.com/jaywehosl/qd/internal/clientstate"
+	"github.com/jaywehosl/qd/internal/panel"
 	"github.com/jaywehosl/qd/internal/qcli"
 	"github.com/jaywehosl/qd/internal/qcli/packet"
 	"github.com/jaywehosl/qd/internal/qdcrypt"
@@ -42,6 +44,10 @@ type Host interface {
 	Note(text string)
 	Owner(proto int, source string, sourcePort int, target string, targetPort int) string
 	Install(path string) bool
+	Raise() bool
+	Lower()
+	Apps() string
+	Changed()
 }
 
 type Client struct {
@@ -78,6 +84,19 @@ type Client struct {
 	dns      *clientdns.Resolver
 	gone     chan struct{}
 	dir      string
+
+	page    string
+	waiting []chan error
+	apps    []clientapi.Process
+	appsAt  time.Time
+	listing bool
+	seat    *panel.Seat
+}
+
+func SetZone(name string) {
+	if zone, err := time.LoadLocation(name); err == nil {
+		time.Local = zone
+	}
 }
 
 func Open(stateDir string, host Host, protector Protector, deviceID, model, name string) (*Client, error) {
@@ -173,7 +192,12 @@ func (c *Client) Imported() bool {
 	return err == nil && sub.Imported
 }
 
-func (c *Client) Connect() error    { return c.api.Connect() }
+func (c *Client) Connect() error {
+	err := c.api.Connect()
+	c.settle(err)
+	return err
+}
+
 func (c *Client) Disconnect() error { return c.api.Disconnect() }
 
 func (c *Client) StateJSON() string {
@@ -224,9 +248,15 @@ func (c *Client) ExportRules() (string, error) { return c.api.ExportRules() }
 
 func (c *Client) ImportRules(code string) (int, error) { return c.api.ImportRules(code) }
 func (c *Client) SaveSettingsJSON(raw string) error    { return c.api.SaveSettingsJSON(raw) }
-func (c *Client) Reset(subscription bool) error        { return c.api.Reset(subscription) }
-func (c *Client) SetEgress(on bool) error              { return c.api.SetEgress(on) }
-func (c *Client) SetAdblock(on bool) error             { return c.api.SetAdblock(on) }
+func (c *Client) Reset(subscription bool) error {
+	err := c.api.Reset(subscription)
+	if err == nil && subscription {
+		forgetJournal()
+	}
+	return err
+}
+func (c *Client) SetEgress(on bool) error  { return c.api.SetEgress(on) }
+func (c *Client) SetAdblock(on bool) error { return c.api.SetAdblock(on) }
 
 func (c *Client) Refresh() error {
 	_, err := c.api.Refresh()

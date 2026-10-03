@@ -204,6 +204,22 @@ export const sections: readonly Section[] = [
         ],
         body: '{\n  "subscription": false\n}',
       },
+      {
+        method: 'GET',
+        path: '/client/api/setup',
+        summary: 'Windows only. Whether this copy of the client runs from Program Files. A copy that runs from anywhere else shows the install screen instead of the client.',
+        response: '{\n  "success": true,\n  "obj": {\n    "installed": false,\n    "offered": true,\n    "path": "C:\\\\Program Files\\\\qd",\n    "autostart": true\n  }\n}',
+      },
+      {
+        method: 'POST',
+        path: '/client/api/setup/install',
+        summary: 'Windows only. Copy the running client into Program Files, add it to the Start menu and to the list of installed apps, then restart from the installed copy; a tunnel that was up comes back. Removal is done from Windows settings and takes the subscription and settings with it.',
+        params: [
+          { name: 'autostart', in: 'body (json)', type: 'boolean', desc: 'Start with Windows.' },
+          { name: 'desktop', in: 'body (json)', type: 'boolean', desc: 'Put a shortcut on the desktop.' },
+        ],
+        body: '{\n  "autostart": true,\n  "desktop": true\n}',
+      },
     ],
   },
 
@@ -211,82 +227,14 @@ export const sections: readonly Section[] = [
     id: 'inbounds',
     title: 'Entrypoints',
     description:
-      'An entrypoint is a UDP port on one node that clients dial. It carries no protocol configuration — the datapath is the same everywhere — only where it listens, whether it is open, and how fast it is allowed to run. Which clients may use it is decided elsewhere: put the entrypoint in a group, give the group to a client. Every write here edits the draft; nothing reaches a node until the draft is published.',
+      'An entrypoint is a UDP port on one node that clients dial. It carries no protocol configuration — the datapath is the same everywhere — only where it listens, whether it is open, and how fast it is allowed to run. Which clients may use it is decided elsewhere: put the entrypoint in a group, give the group to a client.',
     endpoints: [
-      {
-        method: 'GET',
-        path: '/panel/api/inbounds/list',
-        summary: 'Every entrypoint with its node, port and traffic counters. The counters are telemetry collected from the nodes, not something the panel maintains.',
-        response:
-          '{\n  "success": true,\n  "obj": [\n    {\n      "id": 1,\n      "nodeId": 1,\n      "tag": "node-1-443",\n      "remark": "main 443",\n      "port": 443,\n      "listen": "0.0.0.0",\n      "protocol": "qd",\n      "enable": true,\n      "up": 41884672000,\n      "down": 318774112000,\n      "clientCount": 3\n    }\n  ]\n}',
-      },
       {
         method: 'GET',
         path: '/panel/api/inbounds/options',
         summary: 'Picker projection: id, node, tag, port and the enable flag, without counters or certificate state. Feeds the entrypoint chooser in the group editor.',
         response:
           '{\n  "success": true,\n  "obj": [\n    {\n      "id": 1,\n      "nodeId": 1,\n      "tag": "node-1-443",\n      "remark": "main 443",\n      "port": 443,\n      "protocol": "qd",\n      "enable": true\n    }\n  ]\n}',
-      },
-      {
-        method: 'GET',
-        path: '/panel/api/inbounds/get/:id',
-        summary: 'One entrypoint by id.',
-        params: [
-          { name: 'id', in: 'path', type: 'number', desc: 'Entrypoint ID.' },
-        ],
-      },
-      {
-        method: 'POST',
-        path: '/panel/api/inbounds/add',
-        summary: 'Open a new entrypoint on a node. The port must be free on that node — the check is per node, not global, since two nodes may both listen on 443. Draft edit.',
-        params: [
-          { name: 'nodeId', in: 'body (json)', type: 'number', desc: 'Node the port is opened on.' },
-          { name: 'port', in: 'body (json)', type: 'number', desc: 'UDP port clients dial.' },
-          { name: 'remark', in: 'body (json)', type: 'string', desc: 'Human-readable name.' },
-          { name: 'enable', in: 'body (json)', type: 'boolean', desc: 'Whether the port accepts connections.' },
-        ],
-        body: '{\n  "nodeId": 1,\n  "port": 8443,\n  "remark": "spare 8443",\n  "enable": true\n}',
-        errorResponse:
-          '{\n  "success": false,\n  "msg": "Port 8443 is already used on this node"\n}',
-      },
-      {
-        method: 'POST',
-        path: '/panel/api/inbounds/update/:id',
-        summary: 'Change an entrypoint: port, name and enable flag. Moving the port rewrites the connection URI of every client whose group holds this entrypoint — they need the new link once the draft is published.',
-        params: [
-          { name: 'id', in: 'path', type: 'number', desc: 'Entrypoint ID.' },
-        ],
-        body: '{\n  "port": 8443,\n  "remark": "spare 8443",\n  "enable": true\n}',
-      },
-      {
-        method: 'POST',
-        path: '/panel/api/inbounds/setEnable/:id',
-        summary: 'Flip only the enable flag. A disabled entrypoint stops accepting connections but stays in its groups, so re-enabling it does not require touching any client.',
-        params: [
-          { name: 'id', in: 'path', type: 'number', desc: 'Entrypoint ID.' },
-        ],
-        body: '{\n  "enable": false\n}',
-      },
-      {
-        method: 'POST',
-        path: '/panel/api/inbounds/del/:id',
-        summary: 'Close an entrypoint and drop it from every group holding it. Clients whose group is left with no entrypoints keep their records but lose their route — check the group before deleting. Draft edit.',
-        params: [
-          { name: 'id', in: 'path', type: 'number', desc: 'Entrypoint ID.' },
-        ],
-      },
-      {
-        method: 'POST',
-        path: '/panel/api/inbounds/:id/resetTraffic',
-        summary: 'Zero the accumulated traffic of one entrypoint. Panel-side baseline shift, like the client counterpart — the node keeps counting and is not told.',
-        params: [
-          { name: 'id', in: 'path', type: 'number', desc: 'Entrypoint ID.' },
-        ],
-      },
-      {
-        method: 'POST',
-        path: '/panel/api/inbounds/resetAllTraffics',
-        summary: 'Zero the accumulated traffic of every entrypoint. Collected history is discarded and cannot be recovered from the nodes — their own counters restarted at their last datapath start, not at yours.',
       },
     ],
   },
@@ -462,7 +410,7 @@ export const sections: readonly Section[] = [
       {
         method: 'POST',
         path: '/panel/api/clients/groups/rename',
-        summary: 'Rename a group and carry the new name to every client holding it, in one transaction. Returns how many clients were relabelled. Draft edit — the connection URIs handed out afterwards carry the new name.',
+        summary: 'Rename a group and carry the new name to every client holding it, in one transaction. Returns how many clients were relabeled. Draft edit — the connection URIs handed out afterwards carry the new name.',
         body: '{\n  "oldName": "customer-a",\n  "newName": "tier-1"\n}',
         response: '{\n  "success": true,\n  "obj": {\n    "affected": 5\n  }\n}',
       },
@@ -545,7 +493,7 @@ export const sections: readonly Section[] = [
         summary: 'Record a new node and mint the admin key only this node will accept. Nothing is contacted — the machine does not exist yet. The Add dialog turns the same values into a deploy script; running it on the new machine is what brings the node up, after which it reports in and leaves the "waiting" state.',
         params: [
           { name: 'name', in: 'body (json)', type: 'string', desc: 'Node tag.' },
-          { name: 'role', in: 'body (json)', type: 'string', desc: 'ingress (authorises clients, exits or forwards) or egress (authorises ingress peers only).' },
+          { name: 'role', in: 'body (json)', type: 'string', desc: 'ingress (authorizes clients, exits or forwards) or egress (authorizes ingress peers only).' },
           { name: 'address', in: 'body (json)', type: 'string', desc: 'The node address.' },
           { name: 'port', in: 'body (json)', type: 'number', desc: 'Port shared by the tunnel (UDP) and the control channel (TCP).' },
           
@@ -774,7 +722,7 @@ export const sections: readonly Section[] = [
         method: 'WS',
         path: '→ type: invalidate',
         summary: 'Tells the UI to re-fetch a resource whose cached copy is now stale — after a publish applies, or after a node reports a revision the panel did not expect.',
-        response: '{\n  "type": "invalidate",\n  "resource": "inbounds"\n}',
+        response: '{\n  "type": "invalidate",\n  "resource": "clients"\n}',
       },
     ],
   },

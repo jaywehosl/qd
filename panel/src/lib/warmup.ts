@@ -1,17 +1,28 @@
 type Load = () => Promise<unknown>;
 
-const HEAVY: Load[] = [
-  () => import('@/pages/index/SystemHistoryModal'),
-  () => import('@/pages/client/ClientHistoryPanel'),
+const CLIENT: Load[] = [
+  () => import('@/pages/client/ClientPage'),
+  () => import('@/pages/client/RoutingPage'),
+  () => import('@/pages/client/ClientSettingsPage'),
   () => import('@/pages/client/RoutingSection'),
-  () => import('@/pages/index/BackupModal'),
-  () => import('@/pages/clients/ClientFormModal'),
-  () => import('@/pages/clients/ClientInfoModal'),
-  () => import('@/pages/groups/GroupEditModal'),
-  () => import('@/pages/inbounds/EntryFormModal'),
-  () => import('@/pages/inbounds/info/InboundInfoModal'),
-  () => import('@/pages/publish/PublishModal'),
+  () => import('@/pages/client/ClientHistoryPanel'),
 ];
+
+const ADMIN: Load[] = [
+  () => import('@/pages/index/ClientsSection'),
+  () => import('@/pages/index/GroupsSection'),
+  () => import('@/pages/index/NodesSection'),
+  () => import('@/pages/settings/SettingsPage'),
+  () => import('@/pages/clients/ClientInfoModal'),
+  () => import('@/pages/clients/ClientFormModal'),
+  () => import('@/pages/groups/GroupEditModal'),
+  () => import('@/pages/index/SystemHistoryModal'),
+  () => import('@/pages/index/BackupModal'),
+];
+
+const queue: Load[] = [];
+const queued = new Set<Load[]>();
+let running = false;
 
 function whenIdle(fn: () => void): void {
   const idle = window.requestIdleCallback;
@@ -19,12 +30,21 @@ function whenIdle(fn: () => void): void {
   else window.setTimeout(fn, 200);
 }
 
-export function warmModules(): void {
-  let i = 0;
-  const step = () => {
-    if (i >= HEAVY.length) return;
-    const load = HEAVY[i++];
-    void load().catch(() => undefined).then(() => whenIdle(step));
-  };
+function step(): void {
+  const load = queue.shift();
+  if (!load) {
+    running = false;
+    return;
+  }
+  void load().catch(() => undefined).then(() => whenIdle(step));
+}
+
+export function warmModules(part: 'client' | 'admin'): void {
+  const list = part === 'admin' ? ADMIN : CLIENT;
+  if (queued.has(list)) return;
+  queued.add(list);
+  queue.push(...list);
+  if (running) return;
+  running = true;
   whenIdle(step);
 }

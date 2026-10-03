@@ -45,12 +45,6 @@ func (a *API) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("/panel/api/nodes/update/", a.updateNode)
 	mux.HandleFunc("/panel/api/nodes/del/", a.remove("nodes.delete"))
 
-	mux.HandleFunc("/panel/api/inbounds/list", a.entrypointsList)
-	mux.HandleFunc("/panel/api/inbounds/list/slim", a.entrypointsList)
-	mux.HandleFunc("/panel/api/inbounds/add", a.save("entrypoints.save"))
-	mux.HandleFunc("/panel/api/inbounds/update/", a.saveWithID("entrypoints.save"))
-	mux.HandleFunc("/panel/api/inbounds/del/", a.remove("entrypoints.delete"))
-
 	mux.HandleFunc("/panel/api/clients/groups", a.groupsList)
 	mux.HandleFunc("/panel/api/clients/groups/create", a.save("groups.save"))
 	mux.HandleFunc("/panel/api/clients/groups/delete", a.groupDelete)
@@ -274,12 +268,9 @@ func (a *API) countPerNode(rows []map[string]any) {
 		return
 	}
 
-	entriesOn := map[int]int{}
 	nodeOfEntry := map[int]int{}
 	for _, e := range entries {
-		node := int(numberOf(e["nodeId"]))
-		entriesOn[node]++
-		nodeOfEntry[int(numberOf(e["id"]))] = node
+		nodeOfEntry[int(numberOf(e["id"]))] = int(numberOf(e["nodeId"]))
 	}
 
 	groupExit := map[string]bool{}
@@ -322,7 +313,6 @@ func (a *API) countPerNode(rows []map[string]any) {
 
 	for _, row := range rows {
 		id := int(numberOf(row["id"]))
-		row["inboundCount"] = entriesOn[id]
 		row["clientCount"] = reach[id]
 		row["onlineCount"] = online[id]
 	}

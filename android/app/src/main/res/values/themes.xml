@@ -7,9 +7,7 @@
         <item name="android:windowLightNavigationBar">true</item>
         <item name="android:enforceStatusBarContrast">false</item>
         <item name="android:enforceNavigationBarContrast">false</item>
-        <item name="android:windowBackground">@color/ink</item>
-    </style>
-    <style name="RoundDialog" parent="@android:style/Theme.Material.Light.Dialog.Alert">
-        <item name="android:windowBackground">@drawable/dialog_bg</item>
+        <item name="android:windowBackground">@color/page</item>
+        <item name="android:windowSplashScreenBackground">@color/page</item>
     </style>
 </resources>

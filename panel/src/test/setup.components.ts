@@ -1,13 +1,9 @@
-import { afterEach, vi } from 'vitest';
+import { afterEach } from 'vitest';
 import { cleanup } from '@testing-library/react';
 import i18next from 'i18next';
 import { initReactI18next } from 'react-i18next';
 
 import enUS from '../../../web/translation/en-US.json';
-
-vi.mock('persian-calendar-suite', () => ({
-  PersianDateTimePicker: () => null,
-}));
 
 if (typeof globalThis.localStorage === 'undefined') {
   const store = new Map<string, string>();

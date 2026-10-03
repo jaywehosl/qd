@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -49,3 +50,5 @@ func settleUpdate(*clientstate.DB) {}
 func startGuard(*tunnel, <-chan struct{}) {}
 
 func tellUp() {}
+
+func withSetup(routes http.Handler, db *clientstate.DB, tun *tunnel) http.Handler { return routes }

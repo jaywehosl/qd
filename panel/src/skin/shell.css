@@ -372,3 +372,106 @@ html.in-window .win-button {
 }
 
 html.in-window .win-tray .sidebar-theme-cycle { position: relative; }
+
+html.in-phone {
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+html.in-phone input,
+html.in-phone textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+html.in-phone :focus,
+html.in-phone :focus-visible { outline: none; }
+
+html.in-phone .header-container {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  padding: 0 clamp(8px, 4vw - 4px, 12px);
+  gap: clamp(4px, 2.5vw - 2px, 8px);
+  min-height: 56px;
+}
+
+html.in-phone .header-right { justify-self: end; }
+
+html.in-phone .header-center,
+html.in-phone .antigravity-header:not(.client-header) .header-center {
+  position: static;
+  transform: none;
+}
+
+
+html.in-phone .nav-menu-item:disabled { opacity: 0.35; }
+
+html.in-phone .brand-block { height: 56px; padding: 0; }
+html.in-phone .nav-menu-item { padding: var(--step-2) clamp(5px, 4.4vw - 6px, 12px); }
+html.in-phone .header-nav-list { gap: clamp(2px, 1vw, 4px); }
+html.in-phone .nav-menu-item > span:not(.anticon) { display: none; }
+html.in-phone .nav-menu-item svg { width: 20px; height: 20px; }
+html.in-phone .client-admin-btn { display: none; }
+html.in-phone .client-main { padding: 0 var(--step-3) var(--step-3); }
+html.in-phone ::-webkit-scrollbar { width: 0; height: 0; }
+html.in-phone .win-tray { display: flex; align-items: center; flex-wrap: nowrap; gap: 0; }
+html.in-phone .win-tray .sidebar-theme-cycle {
+  position: relative;
+  width: clamp(30px, 3vw + 24px, 36px);
+  height: clamp(30px, 3vw + 24px, 36px);
+}
+html.in-phone .win-tray .sidebar-theme-cycle .anticon { font-size: 19px; }
+html.in-phone .win-tray .sidebar-bell .anticon { font-size: 22px; }
+html.in-phone .win-tray .notif-badge {
+  position: absolute;
+  top: 4px;
+  right: 2px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: var(--radius-round);
+  background: #e03a2f;
+  color: #fff;
+  font-size: 9px;
+  line-height: 14px;
+  text-align: center;
+}
+
+html.in-phone body {
+  min-height: 0;
+  padding: var(--inset-top, 0px) var(--inset-right, 0px) var(--inset-bottom, 0px) var(--inset-left, 0px);
+}
+
+html.in-phone body::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--inset-top, 0px);
+  background: var(--ink);
+  z-index: 30;
+}
+
+html.in-phone .topbar-shell { top: var(--inset-top, 0px); }
+html.in-phone .panel-main-content { padding-inline: var(--step-3); }
+
+html.in-phone .header-save-actions {
+  position: fixed;
+  left: calc(var(--inset-left, 0px) + var(--step-3));
+  right: calc(var(--inset-right, 0px) + var(--step-3));
+  bottom: calc(var(--inset-bottom, 0px) + var(--step-3));
+  z-index: 40;
+  display: flex;
+  gap: var(--step-2);
+  padding: var(--step-2);
+  border-radius: var(--radius-card);
+  background: var(--ink);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18), 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+html.in-phone .header-save-actions .ds-btn { flex: 1; height: 44px; }
+html.in-phone body:has(.header-save-actions) .panel-main-content,
+html.in-phone body:has(.header-save-actions) .client-main { padding-bottom: 96px; }
+html.in-phone body { transition: padding-bottom 0.22s ease; }

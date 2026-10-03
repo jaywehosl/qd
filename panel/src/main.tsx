@@ -14,6 +14,7 @@ import '@/skin/pages-rest.css';
 import '@/skin/widgets.css';
 import '@/skin/bits.css';
 import '@/skin/panel-detail.css';
+import '@/skin/phone-admin.css';
 import '@/skin/scroller.css';
 import '@/skin/motion.css';
 
@@ -22,16 +23,19 @@ import { readyI18n } from '@/i18n/react';
 import { ThemeProvider } from '@/hooks/useTheme';
 import { QueryProvider } from '@/api/QueryProvider';
 import { ToastViewport } from '@/components/ds';
-import { router, prefetchRoutes } from '@/routes';
+import { router } from '@/routes';
 import { bootstrapTheme } from '@/theme/themeStorage';
 import { mountScroller } from '@/skin/scroller';
-import { warmModules } from '@/lib/warmup';
 import { watchTitleBar } from '@/skin/titlebar';
+import { mountTips } from '@/lib/tips';
+import { mountPhone } from '@/lib/phone';
 
 setupAxios();
 bootstrapTheme();
 mountScroller();
 watchTitleBar();
+mountTips();
+mountPhone();
 
 readyI18n().then(() => {
   const root = document.getElementById('app');
@@ -46,9 +50,4 @@ readyI18n().then(() => {
     );
   }
 
-  const idle = window.requestIdleCallback ?? ((fn: () => void) => window.setTimeout(fn, 300));
-  idle(() => {
-    prefetchRoutes();
-    warmModules();
-  });
 });

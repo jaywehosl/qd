@@ -156,6 +156,14 @@ func (c *Client) ReadPacketMarked(b []byte) (int, uint64, error) {
 	return c.ip.ReadPacketMarked(b)
 }
 
+func (c *Client) Received() uint64 {
+	qc := c.qc.QUIC()
+	if qc == nil {
+		return 0
+	}
+	return qc.ConnectionStats().PacketsReceived
+}
+
 func (c *Client) Alive() bool {
 	qc := c.qc.QUIC()
 	return qc != nil && qc.Context().Err() == nil

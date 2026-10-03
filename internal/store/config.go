@@ -14,7 +14,7 @@ import (
 
 var ErrNotFound = errors.New("store: no such row")
 
-var ErrExitEntrypoint = errors.New("an exit node's entrypoint cannot be given to a group: clients would be handed its address and authorised on it")
+var ErrExitEntrypoint = errors.New("an exit node's entrypoint cannot be given to a group: clients would be handed its address and authorized on it")
 
 func (d *DB) SelfNode(want netstate.Node, address string, now int64) (netstate.Node, error) {
 	rows, err := d.Nodes()

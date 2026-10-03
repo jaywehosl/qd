@@ -298,6 +298,15 @@ func (t *tunnel) peerAddresses() []netip.Prefix {
 
 func (t *tunnel) Wanted() bool { return t.wanted.Load() }
 
+func (t *tunnel) Road() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !t.running || t.live == nil {
+		return ""
+	}
+	return t.live.Path().Short()
+}
+
 func (t *tunnel) Carried() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()

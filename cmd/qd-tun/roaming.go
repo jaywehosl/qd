@@ -111,7 +111,7 @@ func roamWatch(ctx context.Context, stop <-chan struct{}, live *qcli.Tunnel, los
 			}
 
 			now := live.Stats()
-			heard := now.In != was.In
+			heard := now.Heard != was.Heard
 			spoke := now.Out != was.Out
 			if now.Back != was.Back {
 				heardAt = time.Now()

@@ -14,7 +14,10 @@ import (
 	"sync"
 )
 
-const tokenHeader = "X-QD-Token"
+const (
+	tokenHeader = "X-QD-Token"
+	tokenSize   = 43
+)
 
 type Server struct {
 	mu      sync.RWMutex
@@ -45,12 +48,17 @@ type Config struct {
 	IsAdmin func() bool
 	Index   func(token string) ([]byte, error)
 	Guarded bool
+	Token   string
 }
 
 func New(cfg Config) (*Server, error) {
-	token, err := randomToken()
-	if err != nil {
-		return nil, err
+	token := cfg.Token
+	if len(token) != tokenSize {
+		fresh, err := randomToken()
+		if err != nil {
+			return nil, err
+		}
+		token = fresh
 	}
 
 	isAdmin := cfg.IsAdmin

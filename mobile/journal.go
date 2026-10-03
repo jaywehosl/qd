@@ -83,6 +83,22 @@ func (j *journal) roll() {
 	j.file, j.size = fresh, 0
 }
 
+func forgetJournal() {
+	kept := book.Load()
+	if kept == nil {
+		return
+	}
+	kept.mu.Lock()
+	defer kept.mu.Unlock()
+	if kept.file == nil {
+		return
+	}
+	os.Remove(kept.path + ".1")
+	if kept.file.Truncate(0) == nil {
+		kept.size = 0
+	}
+}
+
 func whoCalled() string {
 	var out []string
 	for depth := 2; depth < 8; depth++ {
@@ -116,7 +132,7 @@ func say(format string, args ...any) {
 	}
 
 	written, _ := fmt.Fprintf(kept.file, "%s %s\n",
-		time.Now().Format("02.01 15:04:05.000"), fmt.Sprintf(format, args...))
+		time.Now().UTC().Format("02.01 15:04:05.000"), fmt.Sprintf(format, args...))
 	kept.size += int64(written)
 }
 

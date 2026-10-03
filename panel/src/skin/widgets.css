@@ -22,7 +22,6 @@
 
 html.is-dark .custom-modal-container,
 html.is-dark .busy-overlay__card,
-html.is-dark .custom-card { border: 1px solid var(--edge); }
 
 .custom-modal-header {
   display: flex;
@@ -60,62 +59,6 @@ html.is-dark .custom-card { border: 1px solid var(--edge); }
   border-top: 1px solid var(--edge);
 }
 
-.custom-card {
-  background: var(--card);
-  border-radius: var(--radius-card);
-  box-sizing: border-box;
-}
-
-.custom-card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--step-3);
-  padding: var(--pad-card) var(--pad-card) var(--step-2);
-}
-
-.custom-card-title { font-weight: 700; color: var(--bold); }
-.custom-card-body { padding: 0 var(--pad-card) var(--pad-card); }
-
-.custom-card-actions {
-  display: flex;
-  gap: var(--step-2);
-  padding: var(--step-2) var(--pad-card) var(--pad-card);
-}
-
-.custom-card-action-item { flex: 1; }
-
-.custom-alert-title { color: var(--bold); font-weight: 500; }
-.custom-alert-desc { color: var(--text); font-size: var(--size-note); }
-
-.custom-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 7px;
-  border-radius: var(--radius-round);
-  background: var(--good);
-  color: #fff;
-  font-size: 11px;
-}
-
-.custom-badge-text { line-height: 1; }
-
-.custom-back-top {
-  position: fixed;
-  right: var(--step-4);
-  bottom: var(--step-4);
-  width: 40px;
-  height: 40px;
-  display: grid;
-  place-items: center;
-  border: none;
-  border-radius: var(--radius-round);
-  background: var(--card);
-  color: var(--bold);
-  cursor: pointer;
-  z-index: 50;
-}
-
 .busy-overlay {
   position: fixed;
   inset: 0;
@@ -147,36 +90,6 @@ html.is-dark .custom-card { border: 1px solid var(--edge); }
   border-top-color: var(--good);
   border-radius: var(--radius-round);
   animation: ds-spin 0.9s linear infinite;
-}
-
-.boot-loader-hud {
-  position: fixed;
-  inset: 0;
-  z-index: 300;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--step-3);
-  background: var(--ink);
-}
-
-.boot-loader-canvas { position: absolute; inset: 0; }
-.boot-loader-logo { font-weight: 700; color: var(--bold); }
-.boot-loader-sub { font-size: var(--size-note); color: var(--text); }
-
-.boot-progress-bar {
-  width: 200px;
-  height: 4px;
-  border-radius: var(--radius-round);
-  background: var(--card);
-  overflow: hidden;
-}
-
-.boot-progress-fill {
-  height: 100%;
-  background: var(--good);
-  transition: width 0.2s linear;
 }
 
 .btn-icon { display: inline-grid; place-items: center; }

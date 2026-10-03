@@ -34,6 +34,8 @@ func (p hostPlatform) SetKey(key *qdcrypt.Key) { p.tun.SetKey(key) }
 
 func (p hostPlatform) ServerName() string { return p.tun.ServerName() }
 
+func (p hostPlatform) Road() string { return p.tun.Road() }
+
 func (p hostPlatform) SetExit(egress bool) {
 	setExit(egress)
 	if d := p.tun.DNS(); d != nil {

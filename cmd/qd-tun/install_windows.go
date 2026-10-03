@@ -45,7 +45,7 @@ func (p hostPlatform) Install(tag string, open update.Opener, tick func(done, to
 	}
 
 	old := exe + ".old"
-	os.Remove(old)
+	clearAside(old)
 	if err := os.Rename(exe, old); err != nil {
 		return fmt.Errorf("could not move the running client aside: %w", err)
 	}
@@ -61,6 +61,7 @@ func (p hostPlatform) Install(tag string, open update.Opener, tick func(done, to
 	}
 	watcher := exec.Command(old, append([]string{handOver, strconv.Itoa(os.Getpid())}, args...)...)
 	watcher.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.DETACHED_PROCESS | windows.CREATE_NEW_PROCESS_GROUP}
+	bequeath(watcher)
 	if err := watcher.Start(); err != nil {
 		os.Remove(exe)
 		os.Rename(old, exe)
@@ -85,13 +86,7 @@ func watchUpdate(args []string) {
 	exe := strings.TrimSuffix(self, ".old")
 	rest := args[1:]
 
-	if h, err := windows.OpenProcess(windows.SYNCHRONIZE|windows.PROCESS_TERMINATE, false, uint32(pid)); err == nil {
-		if state, _ := windows.WaitForSingleObject(h, leaveWait); state != uint32(windows.WAIT_OBJECT_0) {
-			windows.TerminateProcess(h, 0)
-			windows.WaitForSingleObject(h, 5000)
-		}
-		windows.CloseHandle(h)
-	}
+	awaitExit(uint32(pid))
 
 	up := namedEvent(upEvent, true)
 	if up != 0 {
@@ -167,5 +162,20 @@ func settleUpdate(db *clientstate.DB) {
 			time.Sleep(10 * time.Second)
 		}
 		os.RemoveAll(filepath.Join(filepath.Dir(exe), "qd-update"))
+		if stale, err := filepath.Glob(exe + ".*.gone"); err == nil {
+			for _, path := range stale {
+				os.Remove(path)
+			}
+		}
 	}()
+}
+
+func clearAside(old string) {
+	if err := os.Remove(old); err != nil && !os.IsNotExist(err) {
+		os.Rename(old, fmt.Sprintf("%s.%d.gone", strings.TrimSuffix(old, ".old"), os.Getpid()))
+	}
+}
+
+func bequeath(cmd *exec.Cmd) {
+	cmd.Env = append(os.Environ(), tokenEnv+"="+paneToken)
 }

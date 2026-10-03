@@ -41,7 +41,7 @@
     },
     {
       "name": "Entrypoints",
-      "description": "An entrypoint is a UDP port on one node that clients dial. It carries no protocol configuration — the datapath is the same everywhere — only where it listens, whether it is open, and how fast it is allowed to run. Which clients may use it is decided elsewhere: put the entrypoint in a group, give the group to a client. Every write here edits the draft; nothing reaches a node until the draft is published."
+      "description": "An entrypoint is a UDP port on one node that clients dial. It carries no protocol configuration — the datapath is the same everywhere — only where it listens, whether it is open, and how fast it is allowed to run. Which clients may use it is decided elsewhere: put the entrypoint in a group, give the group to a client."
     },
     {
       "name": "Server",
@@ -999,13 +999,13 @@
         }
       }
     },
-    "/panel/api/inbounds/list": {
+    "/client/api/setup": {
       "get": {
         "tags": [
-          "Entrypoints"
+          "Client"
         ],
-        "summary": "Every entrypoint with its node, port and traffic counters. The counters are telemetry collected from the nodes, not something the panel maintains.",
-        "operationId": "get_panel_api_inbounds_list",
+        "summary": "Windows only. Whether this copy of the client runs from Program Files. A copy that runs from anywhere else shows the install screen instead of the client.",
+        "operationId": "get_client_api_setup",
         "responses": {
           "200": {
             "description": "Successful response",
@@ -1025,21 +1025,56 @@
                 },
                 "example": {
                   "success": true,
-                  "obj": [
-                    {
-                      "id": 1,
-                      "nodeId": 1,
-                      "tag": "node-1-443",
-                      "remark": "main 443",
-                      "port": 443,
-                      "listen": "0.0.0.0",
-                      "protocol": "qd",
-                      "enable": true,
-                      "up": 41884672000,
-                      "down": 318774112000,
-                      "clientCount": 3
-                    }
-                  ]
+                  "obj": {
+                    "installed": false,
+                    "offered": true,
+                    "path": "C:\\Program Files\\qd",
+                    "autostart": true
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/client/api/setup/install": {
+      "post": {
+        "tags": [
+          "Client"
+        ],
+        "summary": "Windows only. Copy the running client into Program Files, add it to the Start menu and to the list of installed apps, then restart from the installed copy; a tunnel that was up comes back. Removal is done from Windows settings and takes the subscription and settings with it.",
+        "operationId": "post_client_api_setup_install",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              },
+              "example": {
+                "autostart": true,
+                "desktop": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
                 }
               }
             }
@@ -1084,337 +1119,6 @@
                       "enable": true
                     }
                   ]
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/panel/api/inbounds/get/{id}": {
-      "get": {
-        "tags": [
-          "Entrypoints"
-        ],
-        "summary": "One entrypoint by id.",
-        "operationId": "get_panel_api_inbounds_get_id",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "description": "Entrypoint ID.",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean"
-                    },
-                    "msg": {
-                      "type": "string"
-                    },
-                    "obj": {}
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/panel/api/inbounds/add": {
-      "post": {
-        "tags": [
-          "Entrypoints"
-        ],
-        "summary": "Open a new entrypoint on a node. The port must be free on that node — the check is per node, not global, since two nodes may both listen on 443. Draft edit.",
-        "operationId": "post_panel_api_inbounds_add",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object"
-              },
-              "example": {
-                "nodeId": 1,
-                "port": 8443,
-                "remark": "spare 8443",
-                "enable": true
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean"
-                    },
-                    "msg": {
-                      "type": "string"
-                    },
-                    "obj": {}
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Error response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean"
-                    },
-                    "msg": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "example": {
-                  "success": false,
-                  "msg": "Port 8443 is already used on this node"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/panel/api/inbounds/update/{id}": {
-      "post": {
-        "tags": [
-          "Entrypoints"
-        ],
-        "summary": "Change an entrypoint: port, name and enable flag. Moving the port rewrites the connection URI of every client whose group holds this entrypoint — they need the new link once the draft is published.",
-        "operationId": "post_panel_api_inbounds_update_id",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "description": "Entrypoint ID.",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object"
-              },
-              "example": {
-                "port": 8443,
-                "remark": "spare 8443",
-                "enable": true
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean"
-                    },
-                    "msg": {
-                      "type": "string"
-                    },
-                    "obj": {}
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/panel/api/inbounds/setEnable/{id}": {
-      "post": {
-        "tags": [
-          "Entrypoints"
-        ],
-        "summary": "Flip only the enable flag. A disabled entrypoint stops accepting connections but stays in its groups, so re-enabling it does not require touching any client.",
-        "operationId": "post_panel_api_inbounds_setEnable_id",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "description": "Entrypoint ID.",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object"
-              },
-              "example": {
-                "enable": false
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean"
-                    },
-                    "msg": {
-                      "type": "string"
-                    },
-                    "obj": {}
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/panel/api/inbounds/del/{id}": {
-      "post": {
-        "tags": [
-          "Entrypoints"
-        ],
-        "summary": "Close an entrypoint and drop it from every group holding it. Clients whose group is left with no entrypoints keep their records but lose their route — check the group before deleting. Draft edit.",
-        "operationId": "post_panel_api_inbounds_del_id",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "description": "Entrypoint ID.",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean"
-                    },
-                    "msg": {
-                      "type": "string"
-                    },
-                    "obj": {}
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/panel/api/inbounds/{id}/resetTraffic": {
-      "post": {
-        "tags": [
-          "Entrypoints"
-        ],
-        "summary": "Zero the accumulated traffic of one entrypoint. Panel-side baseline shift, like the client counterpart — the node keeps counting and is not told.",
-        "operationId": "post_panel_api_inbounds_id_resetTraffic",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "description": "Entrypoint ID.",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean"
-                    },
-                    "msg": {
-                      "type": "string"
-                    },
-                    "obj": {}
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/panel/api/inbounds/resetAllTraffics": {
-      "post": {
-        "tags": [
-          "Entrypoints"
-        ],
-        "summary": "Zero the accumulated traffic of every entrypoint. Collected history is discarded and cannot be recovered from the nodes — their own counters restarted at their last datapath start, not at yours.",
-        "operationId": "post_panel_api_inbounds_resetAllTraffics",
-        "responses": {
-          "200": {
-            "description": "Successful response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean"
-                    },
-                    "msg": {
-                      "type": "string"
-                    },
-                    "obj": {}
-                  }
                 }
               }
             }
@@ -2415,7 +2119,7 @@
         "tags": [
           "Clients"
         ],
-        "summary": "Rename a group and carry the new name to every client holding it, in one transaction. Returns how many clients were relabelled. Draft edit — the connection URIs handed out afterwards carry the new name.",
+        "summary": "Rename a group and carry the new name to every client holding it, in one transaction. Returns how many clients were relabeled. Draft edit — the connection URIs handed out afterwards carry the new name.",
         "operationId": "post_panel_api_clients_groups_rename",
         "requestBody": {
           "required": true,
@@ -4001,7 +3705,7 @@
                 },
                 "example": {
                   "type": "invalidate",
-                  "resource": "inbounds"
+                  "resource": "clients"
                 }
               }
             }

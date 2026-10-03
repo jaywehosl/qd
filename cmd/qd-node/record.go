@@ -32,27 +32,11 @@ func (state *controlState) flush() {
 		}
 	}
 
-	carrier := map[uint32]int{}
-	if nodes, err := state.db.Nodes(); err == nil {
-		for _, n := range nodes {
-			if n.ID != state.id && n.UUID != "" {
-				carrier[qdcrypt.SessionID(n.UUID)] = n.ID
-			}
-		}
-	}
-
 	now := time.Now().UnixMilli()
 	readings := make([]store.Reading, 0, len(stats))
-	peers := make([]store.Reading, 0, len(carrier))
 	for _, s := range stats {
 		id, known := owner[s.Session]
 		if !known {
-			if peer, carried := carrier[s.Session]; carried {
-				peers = append(peers, store.Reading{
-					ClientID: peer, NodeID: state.id, Epoch: state.epoch,
-					Up: s.Up, Down: s.Down, At: now,
-				})
-			}
 			continue
 		}
 		if s.Transit {
@@ -77,7 +61,6 @@ func (state *controlState) flush() {
 	}
 
 	state.db.RecordTraffic(readings)
-	state.db.RecordPeerTraffic(peers)
 }
 
 func worthLogging(ip string) bool {

@@ -91,7 +91,7 @@ func (c *Client) watch(ctx context.Context, stop <-chan struct{}) {
 		}
 
 		now := live.Stats()
-		heard := now.In != was.In
+		heard := now.Heard != was.Heard
 		spoke := now.Out != was.Out
 		if now.Back != was.Back {
 			heardAt = time.Now()

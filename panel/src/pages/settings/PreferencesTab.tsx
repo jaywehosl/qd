@@ -15,10 +15,7 @@ interface Release {
   signed: boolean;
 }
 
-const DATEPICKER_LIST: { name: string; value: 'gregorian' | 'jalalian' }[] = [
-  { name: 'Gregorian (Standard)', value: 'gregorian' },
-  { name: 'Jalalian (شمسی)', value: 'jalalian' },
-];
+const ZONES = ['UTC', ...Intl.supportedValuesOf('timeZone')];
 
 export default function PreferencesTab({ allSetting, updateSetting }: PreferencesTabProps) {
   const { t } = useTranslation();
@@ -103,21 +100,11 @@ export default function PreferencesTab({ allSetting, updateSetting }: Preference
         title={t('pages.settings.timeZone')}
         description={t('pages.settings.timeZoneDesc')}
       >
-        <Input
-          value={allSetting.timeLocation}
-          onChange={(e) => updateSetting({ timeLocation: e.target.value })}
-        />
-      </SettingListItem>
-
-      <SettingListItem
-        paddings="small"
-        title={t('pages.settings.datepicker')}
-        description={t('pages.settings.datepickerDescription')}
-      >
         <Select
-          value={allSetting.datepicker || 'gregorian'}
-          onChange={(v) => updateSetting({ datepicker: v as 'gregorian' | 'jalalian' })}
-          options={DATEPICKER_LIST.map((d) => ({ value: d.value, label: d.name }))}
+          value={allSetting.timeLocation}
+          onChange={(v) => updateSetting({ timeLocation: v as string })}
+          options={(ZONES.includes(allSetting.timeLocation) ? ZONES : [allSetting.timeLocation, ...ZONES])
+            .map((zone) => ({ value: zone, label: zone }))}
         />
       </SettingListItem>
 
