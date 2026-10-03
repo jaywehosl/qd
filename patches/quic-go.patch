@@ -3627,3 +3627,16 @@
  	connID, err := wire.ParseConnectionID(p.data, t.connIDLen)
  	if err != nil {
  		t.logger.Debugf("error parsing connection ID on packet from %s: %s", p.remoteAddr, err)
+--- a/conn_id_manager.go	2026-10-03 07:50:59.497871000 +0300
++++ b/conn_id_manager.go	2026-10-03 07:50:59.514877400 +0300
+@@ -277,7 +277,9 @@
+ }
+ 
+ func (h *connIDManager) RetireConnIDForPath(pathID pathID) {
+-	h.assertNotClosed()
++	if h.closed {
++		return
++	}
+ 	// if we're using zero-length connection IDs, we don't need to change the connection ID
+ 	if h.activeConnectionID.Len() == 0 {
+ 		return

@@ -48,7 +48,7 @@ export function useUpdate() {
     queryFn: async () => {
       const msg = await HttpUtil.get<UpdateInfo>('/client/api/update', undefined, { silent: true });
       const info = msg?.success ? (msg.obj ?? null) : null;
-      if (!info && restarting()) return queryClient.getQueryData<UpdateInfo | null>(KEY) ?? null;
+      if (!info) return queryClient.getQueryData<UpdateInfo | null>(KEY) ?? null;
       if (info?.status === 'installing') expectRestart(90000);
       if (info?.version) {
         if (running && running !== info.version) stale = true;

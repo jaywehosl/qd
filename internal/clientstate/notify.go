@@ -8,23 +8,26 @@ type Notification struct {
 	Read     bool   `json:"read"`
 }
 
-const notificationCap = 200
+const notificationCap = 20
 
 func (d *DB) Notify(severity, text string, now int64) error {
+	if severity == "info" {
+		return nil
+	}
 	if _, err := d.sql.Exec(
 		`INSERT INTO notifications (severity, text, ts, read) VALUES (?, ?, ?, 0)`,
 		severity, text, now); err != nil {
 		return err
 	}
 	_, err := d.sql.Exec(
-		`DELETE FROM notifications WHERE id NOT IN (
-			SELECT id FROM notifications ORDER BY id DESC LIMIT ?)`, notificationCap)
+		`DELETE FROM notifications WHERE severity = 'info' OR id NOT IN (
+			SELECT id FROM notifications WHERE severity != 'info' ORDER BY id DESC LIMIT ?)`, notificationCap)
 	return err
 }
 
 func (d *DB) Notifications() ([]Notification, int, error) {
 	rows, err := d.sql.Query(
-		`SELECT id, severity, text, ts, read FROM notifications ORDER BY id DESC`)
+		`SELECT id, severity, text, ts, read FROM notifications WHERE severity != 'info' ORDER BY id DESC LIMIT ?`, notificationCap)
 	if err != nil {
 		return nil, 0, err
 	}

@@ -110,6 +110,8 @@ function Roll({ text, tone: shade, inline }: { text: string; tone: string; inlin
 
 const rate = shortBits;
 
+let cheered = '';
+
 export default function ConnectScreen({
   state, onConnect, onDisconnect, onEgress, onAdblock, onRefresh, onImport, onSettle, onStage, refreshing,
 }: ConnectScreenProps) {
@@ -168,24 +170,19 @@ export default function ConnectScreen({
   }, [release]);
 
   const [cheer, setCheer] = useState(false);
-  const [spent, setSpent] = useState(false);
   const [cheerKind, setCheerKind] = useState<'updated' | 'delayed'>('updated');
   const [delayed, setDelayed] = useState<number | null>(null);
   const [delayFor, setDelayFor] = useState(0);
+  const fresh = upd?.updatedFrom ? `${upd.updatedFrom}>${upd.version}` : '';
   useEffect(() => {
-    if (!upd?.updatedFrom) {
-      setSpent(false);
-      return;
-    }
+    if (!fresh || cheered === fresh) return;
+    cheered = fresh;
     setCheerKind('updated');
     setCheer(true);
-  }, [upd?.updatedFrom]);
+  }, [fresh]);
   useEffect(() => {
     if (!cheer) return;
-    const id = window.setTimeout(() => {
-      setCheer(false);
-      setSpent(true);
-    }, 10000);
+    const id = window.setTimeout(() => setCheer(false), 10000);
     return () => window.clearTimeout(id);
   }, [cheer]);
   useEffect(() => {
@@ -198,7 +195,7 @@ export default function ConnectScreen({
     return () => window.clearTimeout(id);
   }, [delayed, tempo]);
 
-  const justUpdated = !!upd?.updatedFrom && !spent;
+  const justUpdated = !!fresh && cheered !== fresh;
   const headState = !main
     ? phase
     : cheer || justUpdated ? 'cheer' : failed ? 'manual' : noticed || delayed !== null ? 'service' : 'normal';

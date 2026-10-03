@@ -24,6 +24,7 @@ export const NOTIFIED = 'qd:notified';
 let seq = 0;
 
 function toClient(type: ToastType, text: string) {
+  if (CLIENT_SEVERITY[type] === 'info') return;
   void fetch('/client/api/notifications/add', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-QD-Token': readLocalToken() || '' },
