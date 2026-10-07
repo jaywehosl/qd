@@ -247,6 +247,16 @@ public final class Core {
         MainActivity.poke();
     }
 
+    public static void label(Context context, String label) {
+        if (label.equals(where)) {
+            return;
+        }
+        where = label;
+        TunnelService.refreshNote(context);
+        TileService.refresh();
+        Widget.refresh(context);
+    }
+
     public static void mark(Context context, boolean running, String label) {
         up = running;
         where = label == null ? "" : label;

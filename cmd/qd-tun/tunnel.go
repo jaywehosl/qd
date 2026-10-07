@@ -328,11 +328,18 @@ func (t *tunnel) Redial() {
 func (t *tunnel) Stop() error {
 	t.wanted.Store(false)
 	t.mu.Lock()
+	carried := t.running
 	if t.abort != nil {
 		t.abort()
 	}
 	t.mu.Unlock()
-	return t.halt()
+	err := t.halt()
+	if carried {
+		if n := routeByProcess.Load().dropCarried(); n > 0 {
+			fmt.Printf("route    %d connections dropped with the tunnel\n", n)
+		}
+	}
+	return err
 }
 
 func (t *tunnel) halt() error {

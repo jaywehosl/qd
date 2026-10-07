@@ -436,6 +436,15 @@
       "refreshed": "Subscription refreshed.",
       "exitRefused": "This subscription does not allow exit nodes."
     },
+    "lost": {
+      "lostTitle": "Reconnecting",
+      "lostText": "The window lost touch with qd and keeps trying to reach it. If qd was closed, start it again.",
+      "lostText_phone": "The screen lost touch with the core and keeps trying to reach it. If this does not pass, reopen qd.",
+      "keyTitle": "This window lost its key",
+      "keyText": "The key that let this window talk to qd is gone. Open qd again from the tray icon to get a fresh one.",
+      "keyText_phone": "The key that let this screen talk to the core is gone. Reopen qd to get a fresh one.",
+      "again": "Try now"
+    },
     "update": {
       "check": "Check for updates",
       "checking": "Checking",

@@ -165,6 +165,17 @@ func (d Dialer) Dial(ctx context.Context, endpoint string) (*Conn, error) {
 				line <- finish{err: fmt.Errorf("%s: %w", where, err)}
 				return
 			}
+			select {
+			case <-conn.qc.HandshakeComplete():
+			case <-conn.qc.Context().Done():
+				conn.Close()
+				line <- finish{err: fmt.Errorf("%s: %w", where, context.Cause(conn.qc.Context()))}
+				return
+			case <-round.Done():
+				conn.Close()
+				line <- finish{err: round.Err()}
+				return
+			}
 			line <- finish{conn: conn}
 		}(i, raddr)
 	}

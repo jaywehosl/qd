@@ -100,3 +100,91 @@ html.is-dark .busy-overlay__card,
   align-items: center;
   gap: var(--step-2);
 }
+
+.qd-lost {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--step-3);
+  box-sizing: border-box;
+  padding: var(--step-5);
+  background: var(--ink);
+  font-family: var(--font);
+  animation: qd-fade-in 0.2s ease;
+}
+
+.qd-lost > * {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 420px;
+  margin: 0 auto;
+}
+
+.qd-lost__head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--step-3);
+  min-height: 60px;
+  padding: var(--step-2) var(--step-4);
+  border-radius: var(--radius-card);
+  background: var(--card);
+  color: var(--bold);
+  font-size: var(--size-title);
+  font-weight: 700;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.07), 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.qd-lost__dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--idle);
+}
+
+.qd-lost__dot.is-live {
+  background: var(--good);
+  animation: qd-lost-beat 1.2s ease-in-out infinite;
+}
+
+.qd-lost__text {
+  padding: var(--step-3) var(--step-4);
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.qd-lost__again {
+  height: 76px;
+  border: none;
+  border-radius: 27px;
+  background: var(--ink);
+  color: var(--bold);
+  font-family: inherit;
+  font-size: var(--size-title);
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.07), 0 2px 8px rgba(0, 0, 0, 0.05);
+  transition: transform 0.24s cubic-bezier(0.4, 0.12, 0.28, 1);
+}
+
+.qd-lost__again:hover { transform: scale(1.012); }
+.qd-lost__again:active { transform: scale(0.97); }
+
+html.is-dark .qd-lost__head,
+html.is-dark .qd-lost__again { box-shadow: none; }
+html.is-dark .qd-lost__again { background: var(--card); }
+
+html.in-phone .qd-lost {
+  padding: calc(var(--inset-top, 0px) + var(--step-3)) calc(var(--inset-right, 0px) + var(--step-3)) calc(var(--inset-bottom, 0px) + var(--step-3)) calc(var(--inset-left, 0px) + var(--step-3));
+}
+html.in-phone .qd-lost__head { font-size: clamp(17px, 5.4vw, 22px); }
+
+@keyframes qd-lost-beat {
+  50% { opacity: 0.35; transform: scale(0.8); }
+}

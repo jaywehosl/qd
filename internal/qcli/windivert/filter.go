@@ -54,10 +54,14 @@ func notIn(field string, p netip.Prefix) string {
 	return fmt.Sprintf("(%s < %s or %s > %s)", field, lo, field, hi)
 }
 
+const others = "(ip and ip.Protocol != 1 and ip.Protocol != 2 and ip.Protocol != 6 and ip.Protocol != 17) or " +
+	"(ipv6 and (ipv6.NextHdr == 4 or ipv6.NextHdr == 41 or ipv6.NextHdr == 47 or ipv6.NextHdr == 50 or " +
+	"ipv6.NextHdr == 51 or ipv6.NextHdr == 115 or ipv6.NextHdr == 132 or ipv6.NextHdr == 136))"
+
 func protoClause(cfg CaptureConfig) string {
 	switch {
 	case cfg.TCP && cfg.UDP:
-		return "(tcp or udp or (icmp and icmp.Type == 8) or (icmpv6 and icmpv6.Type == 128))"
+		return "(tcp or udp or (icmp and icmp.Type == 8) or (icmpv6 and icmpv6.Type == 128) or " + others + ")"
 	case cfg.TCP:
 		return "tcp"
 	case cfg.UDP:

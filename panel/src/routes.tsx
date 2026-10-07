@@ -3,7 +3,7 @@ import { createBrowserRouter, Navigate, useRouteError, type RouteObject } from '
 
 import PanelLayout from '@/layouts/PanelLayout';
 import ClientLayout from '@/layouts/ClientLayout';
-import { looksLikeClientGone, showClientClosed } from '@/lib/client-closed';
+import { clientUnreachable, looksLikeClientGone } from '@/lib/client-closed';
 
 const loadClients = () => import('@/pages/index/ClientsSection');
 const loadGroups = () => import('@/pages/index/GroupsSection');
@@ -47,7 +47,7 @@ function RouteError() {
   const clientGone = looksLikeClientGone(error);
 
   useEffect(() => {
-    if (clientGone) showClientClosed();
+    if (clientGone) clientUnreachable(true);
   }, [clientGone]);
 
   if (clientGone) return null;

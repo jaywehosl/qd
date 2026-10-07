@@ -16,6 +16,7 @@ import android.net.NetworkRequest;
 import android.net.VpnService;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.os.ParcelFileDescriptor;
 import android.os.Process;
 import android.util.Log;
@@ -87,6 +88,17 @@ public class TunnelService extends VpnService {
                     carrier = null;
                     setUnderlyingNetworks(null);
                 }
+                final String gone = String.valueOf(network);
+                new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            Core.client(TunnelService.this).networkLost(gone);
+                        } catch (Exception e) {
+                            Log.e(TAG, "networkLost", e);
+                        }
+                    }
+                }).start();
             }
         };
 
@@ -422,19 +434,26 @@ public class TunnelService extends VpnService {
         watch = new Thread(new Runnable() {
             @Override
             public void run() {
+                PowerManager power = getSystemService(PowerManager.class);
                 while (!Thread.currentThread().isInterrupted() && Core.up()) {
                     try {
+                        if (power != null && !power.isInteractive()) {
+                            Thread.sleep(10000);
+                            continue;
+                        }
                         Client client = Core.client(TunnelService.this);
                         int ping = (int) client.ping();
                         JSONObject s = new JSONObject(client.statsJSON());
 
                         String node = client.node();
-                        Core.mark(TunnelService.this, true,
+                        Core.label(TunnelService.this,
                                 node + (ping >= 0 ? " · " + ping + " ms" : ""));
                         update(node
                                 + (ping >= 0 ? " · " + ping + " ms" : " · нет ответа")
                                 + " · ↑" + human(s.optLong("bytesOut"))
                                 + " ↓" + human(s.optLong("bytesIn")));
+                    } catch (InterruptedException stopped) {
+                        return;
                     } catch (Exception e) {
                         Log.e(TAG, "watch", e);
                     }

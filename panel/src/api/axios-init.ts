@@ -2,7 +2,7 @@ import axios from 'axios';
 import type { AxiosError, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
 import qs from 'qs';
 
-import { showClientClosed, showSessionGone } from '@/lib/client-closed';
+import { clientUnreachable, showSessionGone } from '@/lib/client-closed';
 import { restarting } from '@/lib/handover';
 import { readLocalToken } from './localToken';
 
@@ -102,7 +102,7 @@ export function setupAxios(): void {
       const status = error.response?.status;
 
       if (!error.response && error.code !== 'ERR_CANCELED') {
-        if (!restarting()) showClientClosed();
+        if (!restarting()) clientUnreachable();
         return Promise.reject(error);
       }
       const skipAuthRedirect = Boolean((error.config as { skipAuthRedirect?: boolean } | undefined)?.skipAuthRedirect);

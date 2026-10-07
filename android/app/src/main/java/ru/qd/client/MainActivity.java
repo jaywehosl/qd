@@ -6,7 +6,6 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.ContentValues;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.res.Configuration;
 import android.graphics.Color;
@@ -50,7 +49,6 @@ public class MainActivity extends Activity {
     private static final String SHELF = "face";
     private static final String INK = "ink";
 
-    private static final String ASKED = "asked";
 
     private static final String[] CHECKS = {"notify", "battery", "vpn", "autostart"};
     private static final int[] WHAT = {Guard.NOTIFY, Guard.BATTERY, Guard.VPN, Guard.AUTOSTART};
@@ -328,12 +326,6 @@ public class MainActivity extends Activity {
 
         handle(getIntent());
         Notes.wake(this);
-
-        SharedPreferences shelf = getSharedPreferences(SHELF, MODE_PRIVATE);
-        if (Guard.notifying(this) != Guard.YES && !shelf.getBoolean(ASKED, false)) {
-            shelf.edit().putBoolean(ASKED, true).apply();
-            requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 1);
-        }
 
         new Thread(new Runnable() {
             @Override

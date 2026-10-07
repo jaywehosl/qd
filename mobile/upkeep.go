@@ -21,6 +21,7 @@ func (c *Client) meter() {
 
 	var prev qcli.Counters
 	var prevDNS clientdns.Stats
+	quiet := 0
 
 	for {
 		select {
@@ -47,6 +48,14 @@ func (c *Client) meter() {
 		if up > 0 || down > 0 {
 			c.db.AddTraffic(up, down)
 		}
+		if got == prev && dns == prevDNS {
+			quiet++
+			if quiet%quietStep != 0 {
+				continue
+			}
+		} else {
+			quiet = 0
+		}
 		c.db.AddSample(clientstate.Sample{
 			T:           time.Now().Unix(),
 			Up:          up,
@@ -61,6 +70,8 @@ func (c *Client) meter() {
 		prev, prevDNS = got, dns
 	}
 }
+
+const quietStep = 30
 
 func gap(now, before uint64) int64 {
 	if now < before {

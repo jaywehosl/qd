@@ -3640,3 +3640,23 @@
  	// if we're using zero-length connection IDs, we don't need to change the connection ID
  	if h.activeConnectionID.Len() == 0 {
  		return
+--- a/path_manager.go	2026-10-07 18:48:28.193971400 +0300
++++ b/path_manager.go	2026-10-07 18:48:28.212778400 +0300
+@@ -164,7 +164,6 @@
+ 	for _, path := range pm.paths {
+ 		if addrsEqual(path.addr, addr) {
+ 			pm.logger.Debugf("switching to path %d (%s)", path.id, addr)
+-			continue
+ 		}
+ 		pm.retireConnID(path.id)
+ 	}
+--- a/path_manager_outgoing.go	2026-10-07 18:48:28.285937200 +0300
++++ b/path_manager_outgoing.go	2026-10-07 18:48:28.304636000 +0300
+@@ -300,6 +300,7 @@
+ 	}
+ 	p := pm.pathToSwitchTo
+ 	pm.pathToSwitchTo = nil
++	pm.retireConnID(pm.activePath)
+ 	return p.tr, true
+ }
+ 

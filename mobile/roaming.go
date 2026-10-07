@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync/atomic"
 	"time"
+
+	"github.com/jaywehosl/qd/internal/qcli"
 )
 
 var moving atomic.Bool
@@ -141,7 +143,9 @@ func (c *Client) watch(ctx context.Context, stop <-chan struct{}) {
 	}
 }
 
-func (c *Client) pathAnswers(ctx context.Context) bool {
+func (c *Client) pathAnswers(ctx context.Context) bool { return c.pathAnswersIn(ctx, askWait) }
+
+func (c *Client) pathAnswersIn(ctx context.Context, wait time.Duration) bool {
 	c.mu.Lock()
 	live := c.live
 	c.mu.Unlock()
@@ -149,7 +153,7 @@ func (c *Client) pathAnswers(ctx context.Context) bool {
 		return false
 	}
 
-	round, done := context.WithTimeout(ctx, askWait)
+	round, done := context.WithTimeout(ctx, wait)
 	err := live.Ask(round)
 	done()
 	if err == nil {
@@ -185,7 +189,11 @@ func (c *Client) migrate(ctx context.Context) {
 
 		if err == nil {
 			say("roam: the path moved, the tunnel migrated in place")
+			c.mu.Lock()
+			c.pathTag = c.netTag
+			c.mu.Unlock()
 			c.wire().Reset()
+			go c.prove(live)
 			return
 		}
 		if ctx.Err() != nil {
@@ -204,6 +212,23 @@ func (c *Client) migrate(ctx context.Context) {
 	go c.lost()
 }
 
+func (c *Client) prove(moved *qcli.Tunnel) {
+	for _, wait := range []time.Duration{time.Second, 3 * time.Second, 4 * time.Second} {
+		time.Sleep(wait)
+		c.mu.Lock()
+		held := c.running && c.live == moved
+		c.mu.Unlock()
+		if !held {
+			return
+		}
+		if !c.pathAnswers(context.Background()) {
+			say("roam: the moved path went quiet, coming back through a fresh dial")
+			go c.lost()
+			return
+		}
+	}
+}
+
 const (
 	deafStep   = 3 * time.Second
 	deafFor    = 20 * time.Second
@@ -212,7 +237,8 @@ const (
 	goneFor    = 75 * time.Second
 	silenceFor = 60 * time.Second
 	askWait    = 3 * time.Second
-	tries      = 2
-	moveWait   = 4 * time.Second
+	tries      = 1
+	moveWait   = 1500 * time.Millisecond
+	glanceWait = 1500 * time.Millisecond
 	pause      = 1 * time.Second
 )

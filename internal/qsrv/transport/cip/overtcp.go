@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"golang.org/x/net/http2"
 
@@ -62,7 +63,11 @@ func ReachH2(ctx context.Context, endpoint string, keep func(fd uintptr)) (net.C
 		return nil, nil, fmt.Errorf("the node offered %q, not h2", state.NegotiatedProtocol)
 	}
 
-	cc, err := (&http2.Transport{}).NewClientConn(held)
+	cc, err := (&http2.Transport{
+		ReadIdleTimeout:  20 * time.Second,
+		PingTimeout:      6 * time.Second,
+		WriteByteTimeout: 10 * time.Second,
+	}).NewClientConn(held)
 	if err != nil {
 		held.Close()
 		return nil, nil, err

@@ -13,6 +13,8 @@ import (
 
 const quicHeadStart = time.Second
 
+const nextAddress = 250 * time.Millisecond
+
 var (
 	only      atomic.Bool
 	seen      sync.Map
@@ -100,16 +102,43 @@ func ReachTCP(ctx context.Context, dialer *net.Dialer, endpoint string) (net.Con
 		return dialer.DialContext(ctx, "tcp", endpoint)
 	}
 
+	round, stop := context.WithCancel(ctx)
+	defer stop()
+
+	type finish struct {
+		conn net.Conn
+		err  error
+	}
+	line := make(chan finish, len(addrs))
+	for i, where := range addrs {
+		go func(n int, where string) {
+			if n > 0 {
+				select {
+				case <-time.After(time.Duration(n) * nextAddress):
+				case <-round.Done():
+					line <- finish{err: round.Err()}
+					return
+				}
+			}
+			conn, err := dialer.DialContext(round, "tcp", where)
+			line <- finish{conn, err}
+		}(i, where)
+	}
+
 	var last error
-	for _, where := range addrs {
-		conn, err := dialer.DialContext(ctx, "tcp", where)
-		if err == nil {
-			return conn, nil
+	for i := range addrs {
+		got := <-line
+		if got.err == nil {
+			go func(left int) {
+				for ; left > 0; left-- {
+					if late := <-line; late.conn != nil {
+						late.conn.Close()
+					}
+				}
+			}(len(addrs) - i - 1)
+			return got.conn, nil
 		}
-		last = err
-		if ctx.Err() != nil {
-			break
-		}
+		last = got.err
 	}
 	if last == nil {
 		last = fmt.Errorf("no address for %s", endpoint)

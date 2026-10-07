@@ -413,6 +413,14 @@ func (r *procRouter) dropRerouted() int {
 }
 
 func (r *procRouter) dropInherited() int {
+	return r.dropRoles(func(role string) bool { return role == clientstate.RoleTunnel })
+}
+
+func (r *procRouter) dropCarried() int {
+	return r.dropRoles(func(role string) bool { return role != clientstate.RoleDirect })
+}
+
+func (r *procRouter) dropRoles(pick func(role string) bool) int {
 	byPath, byName, def := map[string]string{}, map[string]string{}, clientstate.RoleTunnel
 	if r != nil {
 		r.mu.RLock()
@@ -430,7 +438,7 @@ func (r *procRouter) dropInherited() int {
 		if ident, ok := identFor(row.pid); ok {
 			role = roleIn(ident, byPath, byName, def)
 		}
-		if role != clientstate.RoleTunnel {
+		if !pick(role) {
 			continue
 		}
 		if dropConnection(row) {

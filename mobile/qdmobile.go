@@ -68,6 +68,7 @@ type Client struct {
 	rate      atomic.Int64
 	profile   atomic.Pointer[string]
 	netTag    string
+	pathTag   string
 	quit      chan struct{}
 
 	running  bool

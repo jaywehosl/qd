@@ -106,6 +106,8 @@ func (c *Client) carry(servers []string, relays []relay.Link, session uint32) er
 	c.mu.Lock()
 	c.stop, c.live, c.liveStop, c.session, c.running = held.Halt, held.Live, held.Quit, session, true
 	c.carried = carried
+	c.pathTag = c.netTag
+	orphaned.Store(false)
 	c.dns, c.server, c.gone = held.DNS, held.Endpoint, held.Gone
 	c.src = held.Source
 	c.mu.Unlock()

@@ -115,11 +115,17 @@ func Dial(ctx context.Context, opts Options) (*Tunnel, error) {
 
 	paths := len(opts.Endpoints)
 	line := make(chan finish, paths+1)
+	var standing atomic.Int32
+	standing.Store(int32(paths))
+	direct := make(chan struct{})
 
 	for _, endpoint := range opts.Endpoints {
 		go func(where string) {
 			t, err := reach(round, opts, where)
 			if err != nil {
+				if standing.Add(-1) == 0 {
+					close(direct)
+				}
 				line <- finish{err: fmt.Errorf("%s: %w", where, err)}
 				return
 			}
@@ -140,6 +146,7 @@ func Dial(ctx context.Context, opts Options) (*Tunnel, error) {
 			}
 			select {
 			case <-time.After(fora):
+			case <-direct:
 			case <-round.Done():
 				line <- finish{err: round.Err()}
 				return
@@ -187,7 +194,7 @@ func Dial(ctx context.Context, opts Options) (*Tunnel, error) {
 	return nil, fmt.Errorf("no entrypoint answered: %s", strings.Join(refused, "; "))
 }
 
-const relayHeadStart = 800 * time.Millisecond
+const relayHeadStart = 2500 * time.Millisecond
 
 const slowAddress = 2 * time.Second
 
@@ -276,9 +283,12 @@ func reachRelay(ctx context.Context, opts Options, link relay.Link) (*Tunnel, er
 		peers:    peersOf(ctx, link.Authority),
 		relay:    sess,
 		weblink:  link.Weblink,
+		better:   make(chan struct{}),
+		gone:     make(chan struct{}),
 	}
 	tag := opts.Route
 	t.route.Store(&tag)
+	go t.seekQUIC()
 	return t, nil
 }
 
@@ -727,20 +737,33 @@ func (t *Tunnel) seekQUIC() {
 			return
 		case <-tick.C:
 		}
-		if roads.OnlyTCP() {
+		if !roads.OnlyTCP() {
+			round, stop := context.WithTimeout(context.Background(), quicProbe)
+			conn, err := quicconn.Dialer{
+				TLS:  &tls.Config{ServerName: host, NextProtos: []string{"h3"}, RootCAs: roots.Pool()},
+				Keep: t.opts.Keep,
+			}.Dial(round, t.endpoint)
+			stop()
+			if err == nil {
+				conn.Close()
+				roads.Remember(t.endpoint, false)
+				roads.SetRelay(false)
+				t.improve()
+				return
+			}
+		}
+		if t.relay == nil {
 			continue
 		}
 		round, stop := context.WithTimeout(context.Background(), quicProbe)
-		conn, err := quicconn.Dialer{
-			TLS:  &tls.Config{ServerName: host, NextProtos: []string{"h3"}, RootCAs: roots.Pool()},
-			Keep: t.opts.Keep,
-		}.Dial(round, t.endpoint)
+		conn, _, err := cip.ReachH2(round, t.endpoint, t.opts.Keep)
 		stop()
 		if err != nil {
 			continue
 		}
 		conn.Close()
-		roads.Remember(t.endpoint, false)
+		roads.Remember(t.endpoint, true)
+		roads.SetRelay(false)
 		t.improve()
 		return
 	}
