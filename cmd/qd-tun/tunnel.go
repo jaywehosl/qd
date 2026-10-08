@@ -237,6 +237,9 @@ func (t *tunnel) bring(ctx context.Context, servers []string, relays []relay.Lin
 		}
 	}
 	plan.Dial.Keep = keepSocket
+	plan.Ride = func(live *qcli.Tunnel) func() {
+		return nodeTalk.Ride(live.Endpoint(), live.Carrier(), live.Alive, live.Sign)
+	}
 	plan.Source = func(ctx context.Context, live *qcli.Tunnel) (packet.Source, error) {
 		return open(ctx, live, keepOut)
 	}

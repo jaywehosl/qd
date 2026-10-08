@@ -1,6 +1,7 @@
 package cip
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"encoding/binary"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/jaywehosl/qd/internal/ippkt"
 	"github.com/jaywehosl/qd/internal/qsrv"
+	"github.com/jaywehosl/qd/internal/qsrv/uplink/quicconn"
 	"github.com/jaywehosl/qd/internal/roads"
 	"github.com/jaywehosl/qd/internal/roots"
 )
@@ -48,14 +50,15 @@ func ReachH2(ctx context.Context, endpoint string, keep func(fd uintptr)) (net.C
 			return rc.Control(keep)
 		}
 	}
-	raw, err := roads.ReachTCP(ctx, dialer, endpoint)
-	if err != nil {
-		return nil, nil, err
+	open := &tls.Config{ServerName: host, NextProtos: []string{"h2"}, RootCAs: roots.Pool()}
+	hidden := quicconn.Hidden(open)
+	held, err := shake(ctx, dialer, endpoint, cmp.Or(hidden, open))
+	if err != nil && hidden != nil && ctx.Err() == nil {
+		if held, err = shake(ctx, dialer, endpoint, open); err == nil {
+			quicconn.NoteECH(open, hidden)
+		}
 	}
-
-	held := tls.Client(raw, &tls.Config{ServerName: host, NextProtos: []string{"h2"}, RootCAs: roots.Pool()})
-	if err := held.HandshakeContext(ctx); err != nil {
-		raw.Close()
+	if err != nil {
 		return nil, nil, err
 	}
 	if state := held.ConnectionState(); state.NegotiatedProtocol != "h2" {
@@ -73,6 +76,19 @@ func ReachH2(ctx context.Context, endpoint string, keep func(fd uintptr)) (net.C
 		return nil, nil, err
 	}
 	return held, cc, nil
+}
+
+func shake(ctx context.Context, dialer *net.Dialer, endpoint string, conf *tls.Config) (*tls.Conn, error) {
+	raw, err := roads.ReachTCP(ctx, dialer, endpoint)
+	if err != nil {
+		return nil, err
+	}
+	held := tls.Client(raw, conf)
+	if err := held.HandshakeContext(ctx); err != nil {
+		raw.Close()
+		return nil, err
+	}
+	return held, nil
 }
 
 func DialOver(ctx context.Context, endpoint, token, device, route, authURL string, keep func(fd uintptr)) (*Over, error) {

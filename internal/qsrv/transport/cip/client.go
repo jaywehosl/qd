@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"sync"
 	"time"
 
 	connectip "github.com/quic-go/connect-ip-go"
@@ -43,6 +44,8 @@ func (c *Client) LocalPrefixes(ctx context.Context) ([]netip.Prefix, error) {
 	return c.ip.LocalPrefixes(ctx)
 }
 
+func (c *Client) Reaches(ctx context.Context) error { return c.qc.Reaches(ctx) }
+
 func (c *Client) Migrate(ctx context.Context, laddr *net.UDPAddr) error {
 	return c.qc.Migrate(ctx, laddr)
 }
@@ -55,20 +58,98 @@ func (c *Client) Close() error {
 }
 
 func DialAuth(ctx context.Context, endpoint string, tmpl *uritemplate.Template, tlsConf *tls.Config, token, device, route, authURL string, keep func(fd uintptr)) (*Client, error) {
-	qc, err := quicconn.Dialer{TLS: tlsConf, Keep: keep}.Dial(ctx, endpoint)
-	if err != nil {
-		return nil, err
-	}
-	client, err := DialAuthConn(ctx, qc, tmpl, token, device, route, authURL)
+	client, err := dialAuth(ctx, endpoint, tmpl, tlsConf, token, device, route, authURL, keep)
 	if !Rejected0RTT(err) || tlsConf == nil || tlsConf.ClientSessionCache == nil {
 		return client, err
 	}
 	tlsConf.ClientSessionCache.Put(tlsConf.ServerName, nil)
-	qc, err = quicconn.Dialer{TLS: tlsConf, Keep: keep}.Dial(ctx, endpoint)
+	return dialAuth(ctx, endpoint, tmpl, tlsConf, token, device, route, authURL, keep)
+}
+
+type carried struct {
+	conn *connectip.Conn
+	err  error
+}
+
+type opening struct {
+	h3 *http3.Transport
+	cc *http3.ClientConn
+	ip chan carried
+}
+
+func (o *opening) close() {
+	o.h3.Close()
+	if o.ip == nil {
+		return
+	}
+	go func() {
+		if got := <-o.ip; got.conn != nil {
+			got.conn.Close()
+		}
+	}()
+}
+
+func dialAuth(ctx context.Context, endpoint string, tmpl *uritemplate.Template, tlsConf *tls.Config, token, device, route, authURL string, keep func(fd uintptr)) (*Client, error) {
+	head := http.Header{}
+	sign(&http.Request{Header: head}, token, device, route)
+	carry := func(o *opening) {
+		o.ip = make(chan carried, 1)
+		go func() {
+			conn, _, err := connectip.Dial(ctx, o.cc, tmpl, head)
+			o.ip <- carried{conn, err}
+		}()
+	}
+
+	var mu sync.Mutex
+	opened := map[*quicconn.Conn]*opening{}
+	settled := false
+	qc, err := quicconn.Dialer{TLS: tlsConf, Keep: keep, Prove: func(round context.Context, qc *quicconn.Conn, first bool) error {
+		h3tr := &http3.Transport{EnableDatagrams: true}
+		o := &opening{h3: h3tr, cc: h3tr.NewClientConn(qc.QUIC())}
+		if first {
+			carry(o)
+		}
+		mu.Lock()
+		late := settled
+		if !late {
+			opened[qc] = o
+		}
+		mu.Unlock()
+		if late {
+			o.close()
+			return context.Canceled
+		}
+		_, err := greet(round, o.cc, http3.MethodGet0RTT, token, device, route, authURL)
+		return err
+	}}.Dial(ctx, endpoint)
+
+	mu.Lock()
+	settled = true
+	won := opened[qc]
+	delete(opened, qc)
+	mu.Unlock()
+	for _, o := range opened {
+		o.close()
+	}
 	if err != nil {
 		return nil, err
 	}
-	return DialAuthConn(ctx, qc, tmpl, token, device, route, authURL)
+
+	if won.ip == nil {
+		carry(won)
+	}
+	var got carried
+	select {
+	case got = <-won.ip:
+	case <-ctx.Done():
+		got = carried{err: ctx.Err()}
+	}
+	if got.err != nil {
+		won.close()
+		qc.Close()
+		return nil, got.err
+	}
+	return &Client{qc: qc, h3: won.h3, cc: won.cc, ip: got.conn, auth: authURL, token: token, device: device}, nil
 }
 
 func Rejected0RTT(err error) bool { return errors.Is(err, quic.Err0RTTRejected) }

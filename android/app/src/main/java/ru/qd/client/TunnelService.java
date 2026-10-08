@@ -218,9 +218,7 @@ public class TunnelService extends VpnService {
             JSONArray peers = p.optJSONArray("peers");
             int spared = 0;
             for (int i = 0; peers != null && i < peers.length(); i++) {
-                if (spare(builder, peers.getString(i))) {
-                    spared++;
-                }
+                spared += spare(builder, peers.getString(i));
             }
             Core.say(this, "java: kept " + spared + " node addresses off the tunnel");
 
@@ -339,14 +337,17 @@ public class TunnelService extends VpnService {
         }
     }
 
-    private boolean spare(Builder builder, String host) {
+    private int spare(Builder builder, String host) {
+        int kept = 0;
         try {
-            InetAddress at = InetAddress.getByName(host);
-            builder.excludeRoute(new IpPrefix(at, at instanceof Inet6Address ? 128 : 32));
-            return true;
+            for (InetAddress at : InetAddress.getAllByName(host)) {
+                builder.excludeRoute(new IpPrefix(at, at instanceof Inet6Address ? 128 : 32));
+                kept++;
+            }
         } catch (Exception e) {
-            return false;
+            return kept;
         }
+        return kept;
     }
 
     private boolean allow(Builder builder, String pkg) {

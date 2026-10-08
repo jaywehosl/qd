@@ -18,6 +18,7 @@ import (
 
 	"github.com/jaywehosl/qd/internal/clientapi"
 	"github.com/jaywehosl/qd/internal/clientstate"
+	"github.com/jaywehosl/qd/internal/pace"
 	"github.com/jaywehosl/qd/internal/qdcrypt"
 	"github.com/jaywehosl/qd/internal/qsrv/uplink/quicconn"
 	"github.com/jaywehosl/qd/internal/update"
@@ -65,6 +66,7 @@ func runClient(opts runOptions) error {
 	defer db.Close()
 	quicconn.Tokens = db.Tokens()
 	quicconn.ECH = db.ECH
+	quicconn.OnlyV4.Store(true)
 	stateDir = filepath.Dir(opts.StatePath)
 	settleUpdate(db)
 
@@ -320,17 +322,4 @@ func tellParent(what map[string]any) {
 	fmt.Printf("%s\n", line)
 }
 
-func comeBack(was time.Duration) time.Duration {
-	switch {
-	case was < 3*time.Second:
-		return 3 * time.Second
-	case was < 5*time.Second:
-		return 5 * time.Second
-	case was < 10*time.Second:
-		return 10 * time.Second
-	case was < 20*time.Second:
-		return 20 * time.Second
-	default:
-		return 30 * time.Second
-	}
-}
+func comeBack(was time.Duration) time.Duration { return pace.Backoff(was) }

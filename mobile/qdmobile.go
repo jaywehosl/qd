@@ -111,6 +111,7 @@ func Open(stateDir string, host Host, protector Protector, deviceID, model, name
 	}
 	quicconn.Tokens = db.Tokens()
 	quicconn.ECH = db.ECH
+	quicconn.OnlyV4.Store(true)
 
 	settings, err := db.Settings()
 	if err != nil {

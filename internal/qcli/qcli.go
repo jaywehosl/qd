@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"crypto/tls"
-	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -19,6 +18,7 @@ import (
 	quic "github.com/quic-go/quic-go"
 
 	"github.com/jaywehosl/qd/internal/ippkt"
+	"github.com/jaywehosl/qd/internal/pace"
 	"github.com/jaywehosl/qd/internal/qcli/connectdial"
 	"github.com/jaywehosl/qd/internal/qcli/guard"
 	"github.com/jaywehosl/qd/internal/qcli/hybrid"
@@ -71,6 +71,7 @@ type Tunnel struct {
 	marks    atomic.Uint64
 	better   chan struct{}
 	gone     chan struct{}
+	hurry    chan struct{}
 	once     sync.Once
 	left     sync.Once
 }
@@ -94,6 +95,25 @@ func Dial(ctx context.Context, opts Options) (*Tunnel, error) {
 		return nil, fmt.Errorf("no entrypoint to dial")
 	}
 
+	straight := map[string]bool{}
+	links := map[string][]relay.Link{}
+	var lanes []string
+	for _, endpoint := range opts.Endpoints {
+		if !straight[endpoint] {
+			straight[endpoint] = true
+			lanes = append(lanes, endpoint)
+		}
+	}
+	for _, link := range opts.Relays {
+		if link.Weblink == "" || link.Authority == "" {
+			continue
+		}
+		if !straight[link.Authority] && links[link.Authority] == nil {
+			lanes = append(lanes, link.Authority)
+		}
+		links[link.Authority] = append(links[link.Authority], link)
+	}
+
 	round, stop := context.WithCancel(ctx)
 	defer stop()
 
@@ -113,19 +133,11 @@ func Dial(ctx context.Context, opts Options) (*Tunnel, error) {
 		return taken
 	}
 
-	paths := len(opts.Endpoints)
-	line := make(chan finish, paths+1)
-	var standing atomic.Int32
-	standing.Store(int32(paths))
-	direct := make(chan struct{})
-
-	for _, endpoint := range opts.Endpoints {
+	line := make(chan finish, len(lanes))
+	for _, where := range lanes {
 		go func(where string) {
-			t, err := reach(round, opts, where)
+			t, err := climb(round, opts, where, straight[where], links[where])
 			if err != nil {
-				if standing.Add(-1) == 0 {
-					close(direct)
-				}
 				line <- finish{err: fmt.Errorf("%s: %w", where, err)}
 				return
 			}
@@ -134,38 +146,11 @@ func Dial(ctx context.Context, opts Options) (*Tunnel, error) {
 			} else {
 				line <- finish{err: fmt.Errorf("%s lost the race", where)}
 			}
-		}(endpoint)
-	}
-
-	if len(opts.Relays) > 0 {
-		paths++
-		go func() {
-			fora := relayHeadStart
-			if roads.RelayMode() {
-				fora = 0
-			}
-			select {
-			case <-time.After(fora):
-			case <-direct:
-			case <-round.Done():
-				line <- finish{err: round.Err()}
-				return
-			}
-			t := dialRelays(round, opts)
-			if t == nil {
-				line <- finish{err: fmt.Errorf("no relay answered")}
-				return
-			}
-			if won(t) {
-				line <- finish{tunnel: t}
-			} else {
-				line <- finish{err: fmt.Errorf("relay lost the race")}
-			}
-		}()
+		}(where)
 	}
 
 	refused := []string{}
-	for i := 0; i < paths; i++ {
+	for i := range lanes {
 		select {
 		case <-ctx.Done():
 			go func(left int) {
@@ -174,7 +159,7 @@ func Dial(ctx context.Context, opts Options) (*Tunnel, error) {
 						late.tunnel.Close()
 					}
 				}
-			}(paths - i)
+			}(len(lanes) - i)
 			return nil, ctx.Err()
 		case got := <-line:
 			if got.err != nil {
@@ -183,7 +168,6 @@ func Dial(ctx context.Context, opts Options) (*Tunnel, error) {
 			}
 			fmt.Printf("race     %s answered first in %d ms\n",
 				got.tunnel.endpoint, time.Since(began).Milliseconds())
-			roads.SetRelay(got.tunnel.relay != nil)
 			return got.tunnel, nil
 		}
 	}
@@ -194,54 +178,113 @@ func Dial(ctx context.Context, opts Options) (*Tunnel, error) {
 	return nil, fmt.Errorf("no entrypoint answered: %s", strings.Join(refused, "; "))
 }
 
-const relayHeadStart = 2500 * time.Millisecond
-
 const slowAddress = 2 * time.Second
+
+func climb(ctx context.Context, opts Options, endpoint string, straight bool, links []relay.Link) (*Tunnel, error) {
+	var tries []roads.Try[*Tunnel]
+	if straight && !roads.OnlyTCP() {
+		tries = append(tries, roads.Try[*Tunnel]{Rung: roads.QUIC, Run: func(ctx context.Context) (*Tunnel, error) {
+			return overQUIC(ctx, opts, endpoint)
+		}})
+	}
+	if straight {
+		tries = append(tries, roads.Try[*Tunnel]{Rung: roads.TCP, Run: func(ctx context.Context) (*Tunnel, error) {
+			return overTCP(ctx, opts, endpoint)
+		}})
+	}
+	for _, link := range links {
+		tries = append(tries, roads.Try[*Tunnel]{Rung: roads.Relay, Run: func(ctx context.Context) (*Tunnel, error) {
+			t, err := reachRelay(ctx, opts, link)
+			if err != nil && ctx.Err() == nil {
+				fmt.Printf("relay    %s via %s failed: %v\n", link.Authority, link.Weblink, err)
+			}
+			return t, err
+		}})
+	}
+
+	var held atomic.Pointer[Tunnel]
+	var climbed atomic.Bool
+	t, rung, err := roads.Climb(ctx, endpoint, tries, func(late *Tunnel) { late.Close() }, func() {
+		climbed.Store(true)
+		if up := held.Load(); up != nil {
+			up.improve()
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+	held.Store(t)
+	if climbed.Load() {
+		t.improve()
+	}
+
+	switch rung {
+	case roads.TCP:
+		fmt.Printf("carriage %s over tcp, datagrams ride an h2 stream\n", endpoint)
+		if over, ok := t.road.(*cip.Over); ok && !over.Marked() {
+			fmt.Printf("carriage this node takes no exit per packet on tcp, udp of every app follows the global exit\n")
+		}
+	case roads.Relay:
+		fmt.Printf("relay    %s up over cursor-relay via %s\n", t.endpoint, t.weblink)
+	}
+	if rung != roads.QUIC {
+		go t.seek(rung)
+	}
+	return t, nil
+}
+
+func overQUIC(ctx context.Context, opts Options, endpoint string) (*Tunnel, error) {
+	host, _, err := net.SplitHostPort(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("endpoint %q: %w", endpoint, err)
+	}
+	tlsConf := &tls.Config{ServerName: host, ClientSessionCache: opts.Tickets, RootCAs: roots.Pool()}
+	client, err := cip.DialAuth(ctx, endpoint, qsrv.Template(endpoint, qsrv.ConnectIPPath), tlsConf,
+		opts.Token, opts.Device, opts.Route, "https://"+endpoint+qsrv.AuthPath, opts.Keep)
+	if err != nil {
+		return nil, fmt.Errorf("quic: %w", err)
+	}
+	return settle(ctx, opts, endpoint, client, false)
+}
+
+func overTCP(ctx context.Context, opts Options, endpoint string) (*Tunnel, error) {
+	over, err := cip.DialOver(ctx, endpoint, opts.Token, opts.Device, opts.Route, "https://"+endpoint+qsrv.AuthPath, opts.Keep)
+	if err != nil {
+		return nil, fmt.Errorf("tcp: %w", err)
+	}
+	return settle(ctx, opts, endpoint, over, true)
+}
+
+func settle(ctx context.Context, opts Options, endpoint string, held road, overTCP bool) (*Tunnel, error) {
+	began := time.Now()
+	assigned, err := held.LocalPrefixes(ctx)
+	if took := time.Since(began); took > slowAddress {
+		fmt.Printf("carry    the node gave an address %d ms after the road was up\n", took.Milliseconds())
+	}
+	if err != nil {
+		held.Close()
+		return nil, fmt.Errorf("the node assigned no address: %w", err)
+	}
+	t := &Tunnel{
+		road:     held,
+		overTCP:  overTCP,
+		opts:     opts,
+		endpoint: endpoint,
+		assigned: assigned,
+		peers:    peersOf(ctx, endpoint),
+		better:   make(chan struct{}),
+		gone:     make(chan struct{}),
+		hurry:    make(chan struct{}, 1),
+	}
+	tag := opts.Route
+	t.route.Store(&tag)
+	return t, nil
+}
 
 func relayQUIC() *quic.Config {
 	c := quicconn.DefaultConfig()
 	c.HandshakeIdleTimeout = 15 * time.Second
 	return c
-}
-
-func dialRelays(ctx context.Context, opts Options) *Tunnel {
-	links := make([]relay.Link, 0, len(opts.Relays))
-	for _, link := range opts.Relays {
-		if link.Weblink != "" && link.Authority != "" {
-			links = append(links, link)
-		}
-	}
-
-	round, stop := context.WithCancel(ctx)
-	defer stop()
-
-	line := make(chan *Tunnel, len(links))
-	for _, link := range links {
-		go func(link relay.Link) {
-			t, err := reachRelay(round, opts, link)
-			if err != nil {
-				fmt.Printf("relay    %s via %s failed: %v\n", link.Authority, link.Weblink, err)
-			}
-			line <- t
-		}(link)
-	}
-
-	for i := range links {
-		t := <-line
-		if t == nil {
-			continue
-		}
-		fmt.Printf("relay    %s up over cursor-relay via %s\n", t.endpoint, t.weblink)
-		go func(left int) {
-			for ; left > 0; left-- {
-				if late := <-line; late != nil {
-					late.Close()
-				}
-			}
-		}(len(links) - i - 1)
-		return t
-	}
-	return nil
 }
 
 func reachRelay(ctx context.Context, opts Options, link relay.Link) (*Tunnel, error) {
@@ -285,10 +328,10 @@ func reachRelay(ctx context.Context, opts Options, link relay.Link) (*Tunnel, er
 		weblink:  link.Weblink,
 		better:   make(chan struct{}),
 		gone:     make(chan struct{}),
+		hurry:    make(chan struct{}, 1),
 	}
 	tag := opts.Route
 	t.route.Store(&tag)
-	go t.seekQUIC()
 	return t, nil
 }
 
@@ -298,128 +341,6 @@ func (t *Tunnel) RelayPeers() []netip.Addr {
 	}
 	return t.relay.Peers()
 }
-
-func reach(ctx context.Context, opts Options, endpoint string) (*Tunnel, error) {
-	host, _, err := net.SplitHostPort(endpoint)
-	if err != nil {
-		return nil, fmt.Errorf("endpoint %q: %w", endpoint, err)
-	}
-
-	tmpl := qsrv.Template(endpoint, qsrv.ConnectIPPath)
-	tlsConf := &tls.Config{ServerName: host, ClientSessionCache: opts.Tickets, RootCAs: roots.Pool()}
-	authURL := "https://" + endpoint + qsrv.AuthPath
-
-	round, stop := context.WithCancel(ctx)
-	defer stop()
-
-	quicRound, quicStop := context.WithTimeout(context.WithoutCancel(ctx), lateRoad)
-	detach := context.AfterFunc(ctx, quicStop)
-
-	type finish struct {
-		road road
-		err  error
-	}
-	line := make(chan finish, 2)
-	paths := 2
-	if roads.OnlyTCP() {
-		paths = 1
-	}
-
-	if !roads.OnlyTCP() {
-		go func() {
-			defer quicStop()
-			client, err := cip.DialAuth(quicRound, endpoint, tmpl, tlsConf,
-				opts.Token, opts.Device, opts.Route, authURL, opts.Keep)
-			if err != nil {
-				line <- finish{err: fmt.Errorf("quic: %w", err)}
-				return
-			}
-			line <- finish{road: client}
-		}()
-	}
-
-	go func() {
-		select {
-		case <-time.After(roads.HeadStart(endpoint)):
-		case <-round.Done():
-			line <- finish{err: round.Err()}
-			return
-		}
-		over, err := cip.DialOver(round, endpoint, opts.Token, opts.Device, opts.Route, authURL, opts.Keep)
-		if err != nil {
-			line <- finish{err: fmt.Errorf("tcp: %w", err)}
-			return
-		}
-		line <- finish{road: over}
-	}()
-
-	var refused []string
-	for i := 0; i < paths; i++ {
-		got := <-line
-		if got.err != nil {
-			refused = append(refused, got.err.Error())
-			continue
-		}
-
-		roadUp := time.Now()
-		assigned, err := got.road.LocalPrefixes(ctx)
-		if took := time.Since(roadUp); took > slowAddress {
-			fmt.Printf("carry    the node gave an address %d ms after the road was up\n", took.Milliseconds())
-		}
-		if err != nil {
-			got.road.Close()
-			refused = append(refused, fmt.Sprintf("the node assigned no address: %v", err))
-			continue
-		}
-
-		over, overTCP := got.road.(*cip.Over)
-		roads.Remember(endpoint, overTCP && i > 0)
-		if overTCP {
-			fmt.Printf("carriage %s over tcp, datagrams ride an h2 stream\n", endpoint)
-			if !over.Marked() {
-				fmt.Printf("carriage this node takes no exit per packet on tcp, udp of every app follows the global exit\n")
-			}
-		}
-
-		t := &Tunnel{
-			road:     got.road,
-			overTCP:  overTCP,
-			opts:     opts,
-			endpoint: endpoint,
-			assigned: assigned,
-			peers:    peersOf(ctx, endpoint),
-			better:   make(chan struct{}),
-			gone:     make(chan struct{}),
-		}
-		tag := opts.Route
-		t.route.Store(&tag)
-
-		left := paths - i - 1
-		if overTCP {
-			detach()
-			go t.seekQUIC()
-		}
-		go func() {
-			for k := 0; k < left; k++ {
-				late := <-line
-				if overTCP {
-					roads.Remember(endpoint, late.road == nil)
-					if late.road != nil {
-						t.improve()
-					}
-				}
-				if late.road != nil {
-					late.road.Close()
-				}
-			}
-		}()
-		return t, nil
-	}
-	quicStop()
-	return nil, errors.New(strings.Join(refused, " / "))
-}
-
-const lateRoad = 6 * time.Second
 
 type road interface {
 	Alive() bool
@@ -718,27 +639,56 @@ func (t *Tunnel) markOf(pkt []byte) uint64 {
 
 func (t *Tunnel) Endpoint() string { return t.endpoint }
 
+type Carrier interface {
+	RoundTrip(*http.Request) (*http.Response, error)
+}
+
+func (t *Tunnel) Carrier() Carrier {
+	switch held := t.road.(type) {
+	case *cip.Client:
+		return held.H3Conn()
+	case *cip.Over:
+		return held.H2Conn()
+	}
+	return nil
+}
+
+func (t *Tunnel) Sign(h http.Header) {
+	h.Set(qsrv.HeaderToken, t.opts.Token)
+	if t.opts.Device != "" {
+		h.Set(qsrv.HeaderDevice, t.opts.Device)
+	}
+}
+
 func (t *Tunnel) Better() <-chan struct{} { return t.better }
 
 func (t *Tunnel) OverTCP() bool { return t.overTCP }
 
+func (t *Tunnel) Reseek() {
+	select {
+	case t.hurry <- struct{}{}:
+	default:
+	}
+}
+
 func (t *Tunnel) improve() { t.once.Do(func() { close(t.better) }) }
 
-func (t *Tunnel) seekQUIC() {
+func (t *Tunnel) seek(rung roads.Rung) {
 	host, _, err := net.SplitHostPort(t.endpoint)
 	if err != nil {
 		return
 	}
-	tick := time.NewTicker(quicRetry)
+	tick := time.NewTicker(pace.ProbeEvery)
 	defer tick.Stop()
 	for {
 		select {
 		case <-t.gone:
 			return
 		case <-tick.C:
+		case <-t.hurry:
 		}
 		if !roads.OnlyTCP() {
-			round, stop := context.WithTimeout(context.Background(), quicProbe)
+			round, stop := context.WithTimeout(context.Background(), pace.ProbeWait)
 			conn, err := quicconn.Dialer{
 				TLS:  &tls.Config{ServerName: host, NextProtos: []string{"h3"}, RootCAs: roots.Pool()},
 				Keep: t.opts.Keep,
@@ -746,35 +696,33 @@ func (t *Tunnel) seekQUIC() {
 			stop()
 			if err == nil {
 				conn.Close()
-				roads.Remember(t.endpoint, false)
-				roads.SetRelay(false)
+				roads.Remember(t.endpoint, roads.QUIC)
 				t.improve()
 				return
 			}
 		}
-		if t.relay == nil {
+		if rung != roads.Relay {
 			continue
 		}
-		round, stop := context.WithTimeout(context.Background(), quicProbe)
+		round, stop := context.WithTimeout(context.Background(), pace.ProbeWait)
 		conn, _, err := cip.ReachH2(round, t.endpoint, t.opts.Keep)
 		stop()
 		if err != nil {
 			continue
 		}
 		conn.Close()
-		roads.Remember(t.endpoint, true)
-		roads.SetRelay(false)
+		roads.Remember(t.endpoint, roads.TCP)
 		t.improve()
 		return
 	}
 }
 
-const (
-	quicRetry = 2 * time.Minute
-	quicProbe = 4 * time.Second
-)
-
 func (t *Tunnel) CanMigrate() bool { return !t.overTCP && t.relay == nil }
+
+func (t *Tunnel) Reaches(ctx context.Context) bool {
+	held, ok := t.road.(interface{ Reaches(context.Context) error })
+	return !ok || held.Reaches(ctx) == nil
+}
 
 func peersOf(ctx context.Context, endpoint string) []netip.Addr {
 	if held := quicconn.Known(endpoint); len(held) > 0 {

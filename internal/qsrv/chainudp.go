@@ -17,8 +17,6 @@ import (
 
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
-
-	"github.com/jaywehosl/qd/internal/costream"
 )
 
 const chainAnswerWait = 15 * time.Second
@@ -75,7 +73,9 @@ func (c chained) DialUDP(ctx context.Context, dst netip.AddrPort) (net.Conn, err
 	c.ls.hold(at)
 	done := func() { c.ls.release(at) }
 	if rsp.Header.Get(HeaderDgram) != "1" {
-		return costream.NewPackets(rs, rs, abort, dst, done), nil
+		abort()
+		done()
+		return nil, fmt.Errorf("%s answers without datagrams, it runs an older build", c.endpoint)
 	}
 	return newDgramConn(rs, dst, abort, done), nil
 }
@@ -132,6 +132,7 @@ func (d *dgramConn) deliver(b []byte) {
 	case d.in <- b:
 	case <-d.quit:
 	default:
+		linkDrops.Add(1)
 	}
 }
 

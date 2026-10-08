@@ -15,7 +15,6 @@ import (
 	"golang.org/x/net/http2"
 
 	"github.com/jaywehosl/qd/internal/costream"
-	"github.com/jaywehosl/qd/internal/qsrv"
 	"github.com/jaywehosl/qd/internal/update"
 )
 
@@ -24,8 +23,6 @@ type Dialer struct {
 	H2     *http2.ClientConn
 	Header http.Header
 }
-
-func (d Dialer) Packets() bool { return d.CC == nil && d.H2 != nil }
 
 func (d Dialer) roundTrip(ctx context.Context, req *http.Request) (*http.Response, error) {
 	type answer struct {
@@ -52,7 +49,7 @@ func (d Dialer) roundTrip(ctx context.Context, req *http.Request) (*http.Respons
 	}
 }
 
-func (d Dialer) open(ctx context.Context, dst netip.AddrPort, udp bool) (io.ReadCloser, io.WriteCloser, context.CancelFunc, error) {
+func (d Dialer) open(ctx context.Context, dst netip.AddrPort) (io.ReadCloser, io.WriteCloser, context.CancelFunc, error) {
 	sctx, scancel := context.WithCancel(context.Background())
 	pr, pw := io.Pipe()
 
@@ -61,9 +58,6 @@ func (d Dialer) open(ctx context.Context, dst netip.AddrPort, udp bool) (io.Read
 		head = http.Header{}
 	}
 	update.Stamp(head)
-	if udp {
-		head.Set(qsrv.HeaderProto, "udp")
-	}
 
 	req := (&http.Request{
 		Method: http.MethodConnect,
@@ -97,20 +91,13 @@ func (d Dialer) open(ctx context.Context, dst netip.AddrPort, udp bool) (io.Read
 }
 
 func (d Dialer) DialTCP(ctx context.Context, dst netip.AddrPort) (net.Conn, error) {
-	r, w, stop, err := d.open(ctx, dst, false)
+	r, w, stop, err := d.open(ctx, dst)
 	if err != nil {
 		return nil, err
 	}
 	return costream.NewStream(r, w, stop, dst, nil), nil
 }
 
-func (d Dialer) DialUDP(ctx context.Context, dst netip.AddrPort) (net.Conn, error) {
-	if !d.Packets() {
-		return nil, errors.New("connectdial: UDP travels as datagrams, not as a CONNECT stream")
-	}
-	r, w, stop, err := d.open(ctx, dst, true)
-	if err != nil {
-		return nil, err
-	}
-	return costream.NewPackets(r, w, stop, dst, nil), nil
+func (d Dialer) DialUDP(context.Context, netip.AddrPort) (net.Conn, error) {
+	return nil, errors.New("connectdial: UDP travels as datagrams, not as a CONNECT stream")
 }

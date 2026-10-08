@@ -373,8 +373,9 @@ func printStats(node *qsrv.Node) {
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)
 	bbr, brutal := quic.CongestionSenders()
-	fmt.Printf("sessions=%d transits=%d refused=%d goroutines=%d heap=%dMB sys=%dMB senders bbr=%d brutal=%d\n",
-		sessions, transits, refused, runtime.NumGoroutine(), mem.HeapAlloc>>20, mem.Sys>>20, bbr, brutal)
+	outlets, links := qsrv.Dropped()
+	fmt.Printf("sessions=%d transits=%d refused=%d goroutines=%d heap=%dMB sys=%dMB senders bbr=%d brutal=%d dropped outlet=%d link=%d\n",
+		sessions, transits, refused, runtime.NumGoroutine(), mem.HeapAlloc>>20, mem.Sys>>20, bbr, brutal, outlets, links)
 
 	for _, s := range node.Sessions() {
 		if s.PktUp == 0 && s.PktDown == 0 {

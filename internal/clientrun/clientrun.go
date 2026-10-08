@@ -11,7 +11,6 @@ import (
 	"github.com/jaywehosl/qd/internal/clientdns"
 	"github.com/jaywehosl/qd/internal/qcli"
 	"github.com/jaywehosl/qd/internal/qcli/packet"
-	"github.com/jaywehosl/qd/internal/roads"
 )
 
 type Plan struct {
@@ -20,6 +19,7 @@ type Plan struct {
 	DNS    *clientdns.Config
 	Source func(context.Context, *qcli.Tunnel) (packet.Source, error)
 	Lost   func(error)
+	Ride   func(live *qcli.Tunnel) (release func())
 	Say    func(format string, args ...any)
 }
 
@@ -82,14 +82,12 @@ func Carry(ctx context.Context, p Plan) (*Carried, error) {
 	}
 	undo = append(undo, func() { live.Close() })
 
-	path := live.Path()
-	release := roads.Follow(path)
-	go func() {
-		<-round.Done()
-		release()
-	}()
-	if p.Say != nil {
-		p.Say("carry: control follows the tunnel: %s", path)
+	if p.Ride != nil {
+		release := p.Ride(live)
+		go func() {
+			<-round.Done()
+			release()
+		}()
 	}
 
 	assigned := live.Assigned()

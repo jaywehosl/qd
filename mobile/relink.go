@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jaywehosl/qd/internal/pace"
 	"github.com/jaywehosl/qd/internal/roads"
 )
 
@@ -13,6 +14,7 @@ const (
 	settle     = 250 * time.Millisecond
 	lingerFor  = 30 * time.Second
 	lingerStep = 5 * time.Second
+	glanceWait = pace.GlanceWait
 )
 
 var (
@@ -62,7 +64,7 @@ func (c *Client) follow(tag string) {
 	c.mu.Lock()
 	live := c.live
 	c.mu.Unlock()
-	stays := live != nil && live.CanMigrate()
+	stays := live != nil && live.CanMigrate() && live.Reaches(context.Background())
 	if !orphaned.Swap(false) && stays && c.pathAnswersIn(context.Background(), glanceWait) {
 		say("net: the path in use still answers, staying on it")
 		for waited := time.Duration(0); waited < lingerFor; waited += lingerStep {

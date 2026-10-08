@@ -12,16 +12,21 @@ type pool struct {
 	mu      sync.Mutex
 	base    netip.Prefix
 	next    netip.Addr
-	taken   map[netip.Addr]struct{}
+	taken   map[netip.Addr]*lease
 	mine    map[uint32]netip.Addr
 	streams netip.Prefix
+}
+
+type lease struct {
+	seat uint32
+	held int
 }
 
 func newPool(prefix netip.Prefix) *pool {
 	return &pool{
 		base:    prefix,
 		next:    prefix.Addr().Next(),
-		taken:   map[netip.Addr]struct{}{},
+		taken:   map[netip.Addr]*lease{},
 		mine:    map[uint32]netip.Addr{},
 		streams: streamTail(prefix),
 	}
@@ -62,10 +67,17 @@ func (p *pool) own(session uint32) (netip.Prefix, bool) {
 	if !ok {
 		return netip.Prefix{}, false
 	}
-	if _, busy := p.taken[was]; busy || p.streams.Contains(was) {
+	if p.streams.Contains(was) {
 		return netip.Prefix{}, false
 	}
-	p.taken[was] = struct{}{}
+	switch held := p.taken[was]; {
+	case held == nil:
+		p.taken[was] = &lease{seat: session, held: 1}
+	case held.seat == session:
+		held.held++
+	default:
+		return netip.Prefix{}, false
+	}
 	return netip.PrefixFrom(was, was.BitLen()), true
 }
 
@@ -90,7 +102,7 @@ func (p *pool) take(session uint32) (netip.Prefix, error) {
 		if _, busy := p.taken[addr]; busy {
 			continue
 		}
-		p.taken[addr] = struct{}{}
+		p.taken[addr] = &lease{seat: session, held: 1}
 		if session != 0 {
 			p.mine[session] = addr
 		}
@@ -101,7 +113,11 @@ func (p *pool) take(session uint32) (netip.Prefix, error) {
 
 func (p *pool) give(prefix netip.Prefix) {
 	p.mu.Lock()
-	delete(p.taken, prefix.Addr())
+	if held := p.taken[prefix.Addr()]; held != nil {
+		if held.held--; held.held <= 0 {
+			delete(p.taken, prefix.Addr())
+		}
+	}
 	p.mu.Unlock()
 }
 

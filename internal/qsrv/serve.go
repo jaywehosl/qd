@@ -383,7 +383,8 @@ func (n *Node) serveConnect(w http.ResponseWriter, r *http.Request) {
 			n.relayDatagrams(w, hs, out, s)
 			return
 		}
-		n.relayPackets(w, r, out, s)
+		out.Close()
+		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
@@ -458,67 +459,6 @@ func (d steered) route(ctx context.Context) string {
 		return AnyExit
 	}
 	return ""
-}
-
-func (n *Node) relayPackets(w http.ResponseWriter, r *http.Request, out net.Conn, s *live) {
-	defer out.Close()
-
-	w.WriteHeader(http.StatusOK)
-	if f, ok := w.(http.Flusher); ok {
-		f.Flush()
-	}
-
-	var lastOut atomic.Int64
-	lastOut.Store(time.Now().UnixNano())
-
-	go func() {
-		defer out.Close()
-		var size [2]byte
-		buf := make([]byte, 65535)
-		for {
-			if _, err := io.ReadFull(r.Body, size[:]); err != nil {
-				return
-			}
-			want := int(binary.BigEndian.Uint16(size[:]))
-			if _, err := io.ReadFull(r.Body, buf[:want]); err != nil {
-				return
-			}
-			if _, err := out.Write(buf[:want]); err != nil {
-				return
-			}
-			lastOut.Store(time.Now().UnixNano())
-			if s != nil {
-				s.wentUp(want)
-			}
-		}
-	}()
-
-	var head [2]byte
-	buf := make([]byte, 65535)
-	for {
-		out.SetReadDeadline(time.Now().Add(flowQuiet))
-		read, err := out.Read(buf)
-		if err != nil {
-			if quiet, ok := err.(net.Error); ok && quiet.Timeout() &&
-				time.Since(time.Unix(0, lastOut.Load())) < flowQuiet {
-				continue
-			}
-			break
-		}
-		binary.BigEndian.PutUint16(head[:], uint16(read))
-		if _, err := w.Write(head[:]); err != nil {
-			break
-		}
-		if _, err := w.Write(buf[:read]); err != nil {
-			break
-		}
-		if f, ok := w.(http.Flusher); ok {
-			f.Flush()
-		}
-		if s != nil {
-			s.cameDown(read)
-		}
-	}
 }
 
 const flowQuiet = 2 * time.Minute

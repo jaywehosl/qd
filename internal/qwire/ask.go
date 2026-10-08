@@ -15,7 +15,7 @@ import (
 )
 
 func (d *Dialer) Ask(endpoint, op, auth string, body any, out any) error {
-	cc, token, err := d.conn(endpoint)
+	cc, sign, err := d.conn(endpoint)
 	if err != nil {
 		return err
 	}
@@ -37,7 +37,7 @@ func (d *Dialer) Ask(endpoint, op, auth string, body any, out any) error {
 	if err != nil {
 		return err
 	}
-	req.Header.Set(qsrv.HeaderToken, token)
+	sign(req.Header)
 	update.Stamp(req.Header)
 	if auth != "" {
 		req.Header.Set(qsrv.HeaderAuth, auth)
@@ -112,7 +112,7 @@ const (
 )
 
 func (d *Dialer) Open(endpoint, path string) (io.ReadCloser, error) {
-	cc, token, err := d.conn(endpoint)
+	cc, sign, err := d.conn(endpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +122,7 @@ func (d *Dialer) Open(endpoint, path string) (io.ReadCloser, error) {
 		stop()
 		return nil, err
 	}
-	req.Header.Set(qsrv.HeaderToken, token)
+	sign(req.Header)
 	update.Stamp(req.Header)
 
 	rsp, err := cc.RoundTrip(req)

@@ -13,9 +13,14 @@ import (
 )
 
 const (
-	outletSlot  = 2048
-	outletQueue = 512
+	outletSlot   = 2048
+	outletQueue  = 512
+	outletBuffer = 2 << 20
 )
+
+var outletDrops, linkDrops atomic.Uint64
+
+func Dropped() (outlets, links uint64) { return outletDrops.Load(), linkDrops.Load() }
 
 var outletPool = sync.Pool{New: func() any { return new([outletSlot]byte) }}
 
@@ -57,6 +62,7 @@ func (s *live) reach(slot uint32, dst netip.AddrPort) (net.Conn, error) {
 		if err != nil {
 			return nil, err
 		}
+		sock.SetReadBuffer(outletBuffer)
 		o = &outlet{sock: sock, flows: map[netip.AddrPort][]*outFlow{}}
 		if s.outlets == nil {
 			s.outlets = map[uint32]*outlet{}
@@ -131,6 +137,7 @@ func (o *outlet) read() {
 		select {
 		case f.in <- pkt:
 		default:
+			outletDrops.Add(1)
 			giveBack(pkt)
 		}
 	}

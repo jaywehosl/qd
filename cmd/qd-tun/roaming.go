@@ -4,13 +4,15 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"sync/atomic"
-	"time"
 
+	"github.com/jaywehosl/qd/internal/clientrun"
 	"github.com/jaywehosl/qd/internal/qcli"
 )
+
+var errBetter = clientrun.ErrBetter
+
+func roamSay(format string, args ...any) { fmt.Printf(format+"\n", args...) }
 
 func roamWatch(ctx context.Context, stop <-chan struct{}, live *qcli.Tunnel, lost func(error)) {
 	defer func() {
@@ -27,214 +29,26 @@ func roamWatch(ctx context.Context, stop <-chan struct{}, live *qcli.Tunnel, los
 		changed = watcher.Changed()
 	}
 
-	tick := time.NewTicker(roamStep)
-	defer tick.Stop()
-
-	was := live.Stats()
-	deaf := time.Time{}
-	heardAt := time.Now()
-	last := time.Now()
-	better := live.Better()
-	var later <-chan time.Time
-	if !live.OverTCP() {
-		switches.Store(0)
+	held := func() bool {
+		now := liveTunnel.Load()
+		return now != nil && *now == live
 	}
-
-	for {
-		select {
-		case <-stop:
-			return
-		case <-ctx.Done():
-			return
-
-		case <-better:
-			better = nil
-			if held := lastSwitch.Load(); held != nil && time.Since(*held) < switchPause() {
-				later = time.After(switchPause() - time.Since(*held))
-				continue
+	clientrun.Watch{
+		Live:    live,
+		Changed: changed,
+		Migrate: func(ctx context.Context) bool {
+			if !clientrun.Move(ctx, live, roamSay) {
+				return false
 			}
-			comeOver(lost)
-			return
-
-		case <-later:
-			comeOver(lost)
-			return
-
-		case <-changed:
-			was, deaf, heardAt, last = live.Stats(), time.Time{}, time.Now(), time.Now()
-			if !live.CanMigrate() {
-				if !pathAnswers(ctx, live) {
-					if ctx.Err() == nil {
-						lost(fmt.Errorf("the network changed and the path does not answer"))
-					}
-					return
-				}
-				continue
-			}
-			if !migrate(ctx, live) {
-				if ctx.Err() == nil {
-					lost(fmt.Errorf("the network changed and the path did not move"))
-				}
-				return
-			}
-
-		case <-tick.C:
-			select {
-			case <-stop:
-				return
-			default:
-			}
-			if ctx.Err() != nil {
-				return
-			}
-			stood := time.Since(last)
-			last = time.Now()
-
-			if !live.Alive() {
-				lost(fmt.Errorf("the session is gone"))
-				return
-			}
-
-			if stood > goneFor {
-				lost(fmt.Errorf("the process stood still for %s, the node has dropped the session by now", stood.Round(time.Second)))
-				return
-			}
-
-			if stood > frozenFor {
-				fmt.Printf("roam     the process stood still for %s, asking the path\n", stood.Round(time.Second))
-				if !pathAnswers(ctx, live) {
-					lost(fmt.Errorf("the path did not answer after a %s pause", stood.Round(time.Second)))
-					return
-				}
-				was, deaf, heardAt = live.Stats(), time.Time{}, time.Now()
-				continue
-			}
-
-			now := live.Stats()
-			heard := now.Heard != was.Heard
-			spoke := now.Out != was.Out
-			if now.Back != was.Back {
-				heardAt = time.Now()
-			}
-			was = now
-
-			if heard {
-				if !deaf.IsZero() {
-					fmt.Printf("roam     the path answers again\n")
-				}
-				deaf = time.Time{}
-				continue
-			}
-
-			if time.Since(heardAt) > silenceFor {
-				fmt.Printf("roam     nothing has come back for %s, asking the path\n", silenceFor)
-				if !pathAnswers(ctx, live) {
-					lost(fmt.Errorf("the path stopped answering while idle"))
-					return
-				}
-				was, deaf, heardAt = live.Stats(), time.Time{}, time.Now()
-				continue
-			}
-
-			if !spoke {
-				deaf = time.Time{}
-				continue
-			}
-
-			if deaf.IsZero() {
-				deaf = time.Now()
-				continue
-			}
-			if time.Since(deaf) < deafFor {
-				continue
-			}
-			if time.Since(deaf) < deafFor+roamPatience {
-				fmt.Printf("roam     nothing comes back, trying to migrate in place\n")
-				if !migrate(ctx, live) {
-					if ctx.Err() == nil {
-						lost(fmt.Errorf("the node stopped answering and the path did not move"))
-					}
-					return
-				}
-				deaf = time.Now().Add(-deafFor)
-				continue
-			}
-			lost(fmt.Errorf("the node stopped answering for %s and migration did not help", roamPatience))
-			return
-		}
-	}
-}
-
-func pathAnswers(ctx context.Context, live *qcli.Tunnel) bool {
-	round, done := context.WithTimeout(ctx, askWait)
-	err := live.Ask(round)
-	done()
-	if err == nil {
-		return true
-	}
-	fmt.Printf("roam     the path does not answer: %v\n", err)
-	return false
-}
-
-func migrate(ctx context.Context, live *qcli.Tunnel) bool {
-	if !live.CanMigrate() {
-		fmt.Printf("roam     this path does not migrate, bringing the tunnel up again\n")
-		return false
-	}
-
-	for try := 1; try <= roamTries; try++ {
-		round, done := context.WithTimeout(ctx, roamWait)
-		err := live.Rebind(round)
-		done()
-
-		if err == nil {
-			fmt.Printf("roam     the path moved, the tunnel migrated in place\n")
 			nodeTalk.Reset()
+			go func() {
+				if !clientrun.Prove(live, held, roamSay) && held() {
+					lost(fmt.Errorf("the moved path went quiet"))
+				}
+			}()
 			return true
-		}
-		if ctx.Err() != nil {
-			return false
-		}
-		fmt.Printf("roam     migration attempt %d of %d failed: %v\n", try, roamTries, err)
-
-		select {
-		case <-ctx.Done():
-			return false
-		case <-time.After(roamPause):
-		}
-	}
-	fmt.Printf("roam     the path did not move, coming back through a fresh dial\n")
-	return false
+		},
+		Lost: lost,
+		Say:  roamSay,
+	}.Run(ctx, stop)
 }
-
-var (
-	errBetter  = errors.New("a better path answers")
-	lastSwitch atomic.Pointer[time.Time]
-)
-
-const switchRest = 90 * time.Second
-
-var switches atomic.Int32
-
-func switchPause() time.Duration { return switchRest << min(switches.Load(), 5) }
-
-func comeOver(lost func(error)) {
-	now := time.Now()
-	lastSwitch.Store(&now)
-	switches.Add(1)
-	fmt.Printf("roam     quic answers on this path after all, coming back over it\n")
-	lost(errBetter)
-}
-
-const (
-	roamStep     = 3 * time.Second
-	roamWait     = 8 * time.Second
-	roamPause    = 2 * time.Second
-	roamTries    = 3
-	deafFor      = 20 * time.Second
-	roamPatience = 45 * time.Second
-	frozenFor    = 30 * time.Second
-	goneFor      = 75 * time.Second
-	silenceFor   = 60 * time.Second
-	askWait      = 3 * time.Second
-)

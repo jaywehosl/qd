@@ -181,7 +181,7 @@ func (c *Client) appLists() (direct []string, allowed []string, carveOut bool) {
 
 func (p platform) HoldAutostart(on bool) error { return nil }
 
-func (c *Client) hold(assigned, six netip.Prefix, mtu int) (int, error) {
+func (c *Client) hold(assigned, six netip.Prefix, mtu int, dialed []netip.Addr) (int, error) {
 	direct, allowed, carveOut := c.appLists()
 	if carveOut {
 		say("rules: only these apps enter the tunnel: %v", allowed)
@@ -193,6 +193,11 @@ func (c *Client) hold(assigned, six netip.Prefix, mtu int) (int, error) {
 	c.appSplit = fmt.Sprintf("%v|%v|%v", direct, allowed, carveOut)
 	c.mu.Unlock()
 
+	peers := c.peerAddresses()
+	for _, at := range dialed {
+		peers = append(peers, at.String())
+	}
+
 	shape := map[string]any{
 		"localIp":  assigned.Addr().String(),
 		"prefix":   assigned.Bits(),
@@ -201,7 +206,7 @@ func (c *Client) hold(assigned, six netip.Prefix, mtu int) (int, error) {
 		"exclude":  direct,
 		"include":  allowed,
 		"carveOut": carveOut,
-		"peers":    c.peerAddresses(),
+		"peers":    peers,
 	}
 	if six.IsValid() {
 		shape["localIp6"] = six.Addr().String()

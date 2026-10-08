@@ -9,6 +9,7 @@ import (
 
 	"github.com/jaywehosl/qd/internal/clientdns"
 	"github.com/jaywehosl/qd/internal/clientrun"
+	"github.com/jaywehosl/qd/internal/pace"
 	"github.com/jaywehosl/qd/internal/peers"
 	"github.com/jaywehosl/qd/internal/qcli"
 	"github.com/jaywehosl/qd/internal/qcli/packet"
@@ -85,7 +86,7 @@ func (c *Client) carry(servers []string, relays []relay.Link, session uint32) er
 		},
 		Source: func(ctx context.Context, live *qcli.Tunnel) (packet.Source, error) {
 			six, carried := live.Six()
-			fd, err := c.hold(live.Assigned()[0], six, mtu)
+			fd, err := c.hold(live.Assigned()[0], six, mtu, append(live.Peers(), live.RelayPeers()...))
 			if err != nil {
 				return nil, err
 			}
@@ -96,7 +97,10 @@ func (c *Client) carry(servers []string, relays []relay.Link, session uint32) er
 			return watched(raw, carried), nil
 		},
 		Lost: func(error) { c.lost() },
-		Say:  say,
+		Ride: func(live *qcli.Tunnel) func() {
+			return c.wire().Ride(live.Endpoint(), live.Carrier(), live.Alive, live.Sign)
+		},
+		Say: say,
 	})
 	if err != nil {
 		say("carry: could not reach any entrypoint: %v", err)
@@ -189,7 +193,7 @@ func (c *Client) comeBack() {
 	}
 	defer backing.Store(false)
 
-	for pause := settle; ; pause = longer(pause) {
+	for pause := settle; ; pause = pace.Backoff(pause) {
 		select {
 		case <-time.After(pause):
 		case <-nudge:
@@ -205,22 +209,7 @@ func (c *Client) comeBack() {
 		if err == nil {
 			return
 		}
-		say("carry: could not come back, next try in %s: %v", longer(pause), err)
-	}
-}
-
-func longer(was time.Duration) time.Duration {
-	switch {
-	case was < 3*time.Second:
-		return 3 * time.Second
-	case was < 5*time.Second:
-		return 5 * time.Second
-	case was < 10*time.Second:
-		return 10 * time.Second
-	case was < 20*time.Second:
-		return 20 * time.Second
-	default:
-		return 30 * time.Second
+		say("carry: could not come back, next try in %s: %v", pace.Backoff(pause), err)
 	}
 }
 

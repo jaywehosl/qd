@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	quic "github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 
 	"github.com/jaywehosl/qd/internal/qsrv/uplink/quicconn"
@@ -105,8 +106,8 @@ func (l *link) dial(ctx context.Context) (*http3.ClientConn, *http3.Transport, *
 	dialCtx, cancel := context.WithTimeout(ctx, peerDialTimeout)
 	defer cancel()
 
-	tlsConf := &tls.Config{ServerName: host, NextProtos: []string{http3.NextProtoH3}, RootCAs: roots.Pool()}
-	conn, err := quicconn.Dialer{TLS: tlsConf}.Dial(dialCtx, l.endpoint)
+	tlsConf := &tls.Config{ServerName: host, NextProtos: []string{http3.NextProtoH3}, RootCAs: roots.Pool(), ClientSessionCache: linkSessions}
+	conn, err := quicconn.Dialer{TLS: tlsConf, QUIC: linkConfig()}.Dial(dialCtx, l.endpoint)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -120,6 +121,15 @@ func (l *link) dial(ctx context.Context) (*http3.ClientConn, *http3.Transport, *
 		return nil, nil, nil, err
 	}
 	return cc, tr, conn, nil
+}
+
+var linkSessions = tls.NewLRUClientSessionCache(256)
+
+func linkConfig() *quic.Config {
+	c := quicconn.DefaultConfig()
+	c.MaxIdleTimeout = 30 * time.Second
+	c.KeepAlivePeriod = 10 * time.Second
+	return c
 }
 
 func (l *link) dropLocked() {

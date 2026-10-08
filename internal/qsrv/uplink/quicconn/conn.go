@@ -10,10 +10,12 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	quic "github.com/quic-go/quic-go"
 
+	"github.com/jaywehosl/qd/internal/pace"
 	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
 	"github.com/jaywehosl/qd/internal/roots"
 )
@@ -62,7 +64,26 @@ func (c *Conn) MaxDatagramSize() int {
 
 func (c *Conn) QUIC() *quic.Conn { return c.qc }
 
+func (c *Conn) Reaches(ctx context.Context) error {
+	remote, ok := c.remote.(*net.UDPAddr)
+	if !ok {
+		return nil
+	}
+	d := net.Dialer{}
+	if c.keep != nil {
+		d.Control = func(_, _ string, rc syscall.RawConn) error { return rc.Control(c.keep) }
+	}
+	probe, err := d.DialContext(ctx, "udp", remote.String())
+	if err != nil {
+		return fmt.Errorf("this network has no way to %s: %w", remote.IP, err)
+	}
+	return probe.Close()
+}
+
 func (c *Conn) Migrate(ctx context.Context, laddr *net.UDPAddr) error {
+	if err := c.Reaches(ctx); err != nil {
+		return err
+	}
 	pc, err := c.listenLike(laddr)
 	if err != nil {
 		return err
@@ -122,9 +143,31 @@ func (c *Conn) Close() error {
 }
 
 type Dialer struct {
-	TLS  *tls.Config
-	QUIC *quic.Config
-	Keep func(fd uintptr)
+	TLS   *tls.Config
+	QUIC  *quic.Config
+	Keep  func(fd uintptr)
+	Prove func(ctx context.Context, c *Conn, first bool) error
+}
+
+type candidate struct {
+	addr  *net.UDPAddr
+	v     quic.Version
+	plain bool
+	after time.Duration
+}
+
+type proof struct {
+	addr string
+	v    quic.Version
+}
+
+var best sync.Map
+
+var OnlyV4 atomic.Bool
+
+func Forget() {
+	best.Clear()
+	noECH.Clear()
 }
 
 func (d Dialer) Dial(ctx context.Context, endpoint string) (*Conn, error) {
@@ -132,98 +175,162 @@ func (d Dialer) Dial(ctx context.Context, endpoint string) (*Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	if len(addrs) == 1 {
-		conn, err := d.reach(ctx, addrs[0])
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", addrs[0], err)
-		}
-		return conn, nil
-	}
+	lane := d.lane(endpoint, addrs)
 
 	round, stop := context.WithCancel(ctx)
 	defer stop()
 
 	type finish struct {
 		conn *Conn
+		who  candidate
 		err  error
 	}
-	line := make(chan finish, len(addrs))
-
-	for i, raddr := range addrs {
-		go func(n int, where *net.UDPAddr) {
-			if n > 0 {
-				select {
-				case <-time.After(time.Duration(n) * headStart):
-				case <-round.Done():
-					line <- finish{err: round.Err()}
-					return
-				}
-			}
-			conn, err := d.reach(round, where)
-			if err != nil {
-				line <- finish{err: fmt.Errorf("%s: %w", where, err)}
-				return
-			}
-			select {
-			case <-conn.qc.HandshakeComplete():
-			case <-conn.qc.Context().Done():
+	line := make(chan finish, len(lane))
+	run := func(n int) {
+		who := lane[n]
+		conn, err := d.open(round, who)
+		if err == nil && d.Prove != nil {
+			if err = d.Prove(round, conn, n == 0); err != nil {
 				conn.Close()
-				line <- finish{err: fmt.Errorf("%s: %w", where, context.Cause(conn.qc.Context()))}
-				return
-			case <-round.Done():
-				conn.Close()
-				line <- finish{err: round.Err()}
-				return
 			}
-			line <- finish{conn: conn}
-		}(i, raddr)
-	}
-
-	tried := make([]string, 0, len(addrs))
-	for i := range addrs {
-		got := <-line
-		if got.err == nil {
-			go func(left int) {
-				for ; left > 0; left-- {
-					if late := <-line; late.conn != nil {
-						late.conn.Close()
-					}
-				}
-			}(len(addrs) - i - 1)
-			return got.conn, nil
 		}
-		tried = append(tried, got.err.Error())
+		if err != nil {
+			line <- finish{who: who, err: fmt.Errorf("%s: %w", who.addr, err)}
+			return
+		}
+		line <- finish{conn: conn, who: who}
 	}
-	return nil, errors.New(strings.Join(tried, " / "))
+	drain := func(left int) {
+		for ; left > 0; left-- {
+			if late := <-line; late.conn != nil {
+				late.conn.Close()
+			}
+		}
+	}
+
+	began := time.Now()
+	next := time.NewTimer(0)
+	defer next.Stop()
+	started, ended, refused := 0, 0, false
+	tried := make(failures, 0, len(lane))
+	for {
+		select {
+		case <-next.C:
+			if started == len(lane) {
+				continue
+			}
+			if who := lane[started]; who.after > 0 {
+				early := refused
+				if !who.plain {
+					early = ended == started
+				}
+				if held := time.Until(began.Add(who.after)); held > 0 && !early {
+					next.Reset(held)
+					continue
+				}
+			}
+			go run(started)
+			started++
+			next.Reset(pace.Stagger)
+		case got := <-line:
+			ended++
+			if got.err == nil {
+				go drain(started - ended)
+				best.Store(endpoint, proof{got.who.addr.String(), got.who.v})
+				if hidden := withECH(d.TLS); got.who.plain && hidden != nil {
+					NoteECH(d.TLS, hidden)
+				}
+				fmt.Printf("dial     %s answered in %d ms over QUIC %s\n", got.who.addr, time.Since(began).Milliseconds(), got.who.v)
+				return got.conn, nil
+			}
+			var rejected *tls.ECHRejectionError
+			refused = refused || errors.As(got.err, &rejected)
+			tried = append(tried, got.err)
+			if ended == len(lane) || errors.Is(got.err, quic.Err0RTTRejected) {
+				go drain(started - ended)
+				return nil, tried
+			}
+			if ended == started {
+				next.Reset(0)
+			}
+		case <-ctx.Done():
+			go drain(started - ended)
+			return nil, ctx.Err()
+		}
+	}
 }
 
-func (d Dialer) reach(ctx context.Context, raddr *net.UDPAddr) (*Conn, error) {
-	pc, err := listenFor(raddr)
+type failures []error
+
+func (f failures) Error() string {
+	said := make([]string, len(f))
+	for i, one := range f {
+		said[i] = one.Error()
+	}
+	return strings.Join(said, " / ")
+}
+
+func (f failures) Unwrap() []error { return f }
+
+func (d Dialer) lane(endpoint string, addrs []*net.UDPAddr) []candidate {
+	versions := []quic.Version{quic.Version2, quic.Version1}
+	out := make([]candidate, 0, 3*len(addrs))
+	if held, ok := best.Load(endpoint); ok {
+		was := held.(proof)
+		if was.v == quic.Version1 {
+			versions[0], versions[1] = versions[1], versions[0]
+		}
+		for _, a := range addrs {
+			if a.String() == was.addr {
+				out = append(out, candidate{addr: a, v: was.v})
+			}
+		}
+	}
+	for _, v := range versions {
+		for _, a := range addrs {
+			if len(out) > 0 && a == out[0].addr && v == out[0].v {
+				continue
+			}
+			out = append(out, candidate{addr: a, v: v})
+		}
+	}
+	if withECH(d.TLS) != nil {
+		for _, a := range addrs {
+			out = append(out, candidate{addr: a, v: versions[0], plain: true, after: pace.QUICHeadStart})
+		}
+	}
+	return out
+}
+
+func (d Dialer) open(ctx context.Context, who candidate) (*Conn, error) {
+	pc, err := listenFor(who.addr)
 	if err != nil {
-		fmt.Printf("dial     %s: no socket: %v\n", raddr, err)
+		fmt.Printf("dial     %s: no socket: %v\n", who.addr, err)
 		return nil, err
 	}
 	setUDPBuffers(pc)
 	keepOutside(pc, d.Keep)
-	fmt.Printf("dial     %s from %s\n", raddr, pc.LocalAddr())
+	fmt.Printf("dial     %s from %s\n", who.addr, pc.LocalAddr())
 	tr := &quic.Transport{Conn: pc}
 
+	conf := d.TLS
+	if hidden := withECH(d.TLS); hidden != nil && !who.plain {
+		conf = hidden
+	}
 	began := time.Now()
-	qc, err := dialOn(ctx, tr, raddr, d.TLS, d.QUIC)
+	qc, err := dialVersion(ctx, tr, who.addr, conf, d.QUIC, who.v, d.Prove != nil)
 	if err != nil {
-		fmt.Printf("dial     %s gave up after %d ms: %v\n", raddr, time.Since(began).Milliseconds(), err)
+		if ctx.Err() == nil {
+			fmt.Printf("dial     %s gave up after %d ms: %v\n", who.addr, time.Since(began).Milliseconds(), err)
+		}
 		tr.Close()
 		pc.Close()
 		return nil, err
 	}
-	fmt.Printf("dial     %s answered in %d ms\n", raddr, time.Since(began).Milliseconds())
-	c := &Conn{qc: qc, tr: tr, pc: pc, remote: raddr, keep: d.Keep}
+	c := &Conn{qc: qc, tr: tr, pc: pc, remote: who.addr, keep: d.Keep}
 	c.maxDgram.Store(defaultMaxDatagram)
 	return c, nil
 }
-
-const headStart = 250 * time.Millisecond
 
 func OverRelay(ctx context.Context, sess *relay.Session, authority string, conf *quic.Config, tickets tls.ClientSessionCache) (*Conn, error) {
 	host, _, err := net.SplitHostPort(authority)
@@ -248,7 +355,11 @@ func OverRelay(ctx context.Context, sess *relay.Session, authority string, conf 
 
 func DialPacketConn(ctx context.Context, pc net.PacketConn, raddr net.Addr, tlsConf *tls.Config, quicConf *quic.Config) (*Conn, error) {
 	tr := &quic.Transport{Conn: pc}
-	qc, err := dialOn(ctx, tr, raddr, tlsConf, quicConf)
+	conf := tlsConf
+	if hidden := withECH(tlsConf); hidden != nil {
+		conf = hidden
+	}
+	qc, err := dialVersion(ctx, tr, raddr, conf, quicConf, quic.Version2, true)
 	if err != nil {
 		tr.Close()
 		return nil, err
@@ -373,23 +484,27 @@ func resolve(ctx context.Context, endpoint string) ([]*net.UDPAddr, error) {
 	}
 
 	out := order(ips, number)
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no ipv4 address for %s", host)
+	}
 	known.Store(endpoint, out)
 	fmt.Printf("resolve  %s -> %v (v6 route %v)\n", endpoint, out, holdsV6())
 	return out, nil
 }
 
 func order(ips []net.IP, port int) []*net.UDPAddr {
-	v6 := holdsV6()
-
 	first := make([]*net.UDPAddr, 0, len(ips))
 	rest := make([]*net.UDPAddr, 0, len(ips))
 	for _, ip := range ips {
 		one := &net.UDPAddr{IP: ip, Port: port}
-		if ip.To4() != nil || v6 {
+		if ip.To4() != nil {
 			first = append(first, one)
 			continue
 		}
 		rest = append(rest, one)
+	}
+	if OnlyV4.Load() {
+		return first
 	}
 	return append(first, rest...)
 }
@@ -429,10 +544,8 @@ func (c *Conn) listenLike(laddr *net.UDPAddr) (*net.UDPConn, error) {
 const resolveWait = 4 * time.Second
 
 var (
-	skipV2 atomic.Bool
-	prove  atomic.Bool
-	ECH    func(serverName string) []byte
-	noECH  sync.Map
+	ECH   func(serverName string) []byte
+	noECH sync.Map
 )
 
 type echFailure struct {
@@ -442,26 +555,10 @@ type echFailure struct {
 
 const echRetry = 10 * time.Minute
 
-func dialOn(ctx context.Context, tr *quic.Transport, raddr net.Addr, tlsConf *tls.Config, conf *quic.Config) (*quic.Conn, error) {
-	early := !prove.Swap(false)
-	hidden := withECH(tlsConf)
-	if hidden == nil {
-		qc, err := dialVersions(ctx, tr, raddr, tlsConf, conf, early)
-		if timedOut(err) && tlsConf != nil {
-			noECH.Delete(tlsConf.ServerName)
-		}
-		return qc, err
-	}
-	qc, err := dialVersions(ctx, tr, raddr, hidden, conf, early)
-	if err == nil || ctx.Err() != nil {
-		return qc, err
-	}
-	fmt.Printf("dial     %s: ECH did not go through (%v), trying without\n", raddr, err)
-	qc, err = dialVersions(ctx, tr, raddr, tlsConf, conf, early)
-	if err == nil {
-		noECH.Store(tlsConf.ServerName, echFailure{string(hidden.EncryptedClientHelloConfigList), time.Now()})
-	}
-	return qc, err
+func Hidden(tlsConf *tls.Config) *tls.Config { return withECH(tlsConf) }
+
+func NoteECH(plain, hidden *tls.Config) {
+	noECH.Store(plain.ServerName, echFailure{string(hidden.EncryptedClientHelloConfigList), time.Now()})
 }
 
 func withECH(tlsConf *tls.Config) *tls.Config {
@@ -482,35 +579,6 @@ func withECH(tlsConf *tls.Config) *tls.Config {
 	return hidden
 }
 
-func dialVersions(ctx context.Context, tr *quic.Transport, raddr net.Addr, tlsConf *tls.Config, conf *quic.Config, early bool) (*quic.Conn, error) {
-	if skipV2.Load() {
-		qc, err := dialVersion(ctx, tr, raddr, tlsConf, conf, quic.Version1, early)
-		if err == nil && early {
-			go watch(qc)
-		}
-		if timedOut(err) {
-			skipV2.Store(false)
-		}
-		return qc, err
-	}
-	qc, err := dialVersion(ctx, tr, raddr, tlsConf, conf, quic.Version2, early)
-	if err == nil {
-		if early {
-			go watch(qc)
-		}
-		return qc, nil
-	}
-	if !timedOut(err) || ctx.Err() != nil {
-		return nil, err
-	}
-	fmt.Printf("dial     %s: no answer to QUIC v2, trying v1\n", raddr)
-	qc, err = dialVersion(ctx, tr, raddr, tlsConf, conf, quic.Version1, early)
-	if err == nil {
-		skipV2.Store(true)
-	}
-	return qc, err
-}
-
 func dialVersion(ctx context.Context, tr *quic.Transport, raddr net.Addr, tlsConf *tls.Config, conf *quic.Config, v quic.Version, early bool) (*quic.Conn, error) {
 	tlsConf = ensureALPN(tlsConf)
 	conf = configOrDefault(conf).Clone()
@@ -522,25 +590,6 @@ func dialVersion(ctx context.Context, tr *quic.Transport, raddr net.Addr, tlsCon
 		return tr.DialEarly(ctx, raddr, tlsConf, conf)
 	}
 	return tr.Dial(ctx, raddr, tlsConf, conf)
-}
-
-func watch(qc *quic.Conn) {
-	select {
-	case <-qc.HandshakeComplete():
-	case <-qc.Context().Done():
-		cause := context.Cause(qc.Context())
-		var te *quic.TransportError
-		if timedOut(cause) || errors.As(cause, &te) && te.ErrorCode.IsCryptoError() {
-			fmt.Printf("dial     %s: the early handshake failed (%v), the next dial goes without 0-RTT to see whether QUIC v2 or ECH is at fault\n", qc.RemoteAddr(), cause)
-			prove.Store(true)
-		}
-	}
-}
-
-func timedOut(err error) bool {
-	var idle *quic.IdleTimeoutError
-	var hs *quic.HandshakeTimeoutError
-	return errors.As(err, &idle) || errors.As(err, &hs)
 }
 
 func Known(endpoint string) []netip.Addr {
@@ -571,5 +620,7 @@ func refresh(endpoint, host string, port int) {
 	if err != nil || len(ips) == 0 {
 		return
 	}
-	known.Store(endpoint, order(ips, port))
+	if fresh := order(ips, port); len(fresh) > 0 {
+		known.Store(endpoint, fresh)
+	}
 }
