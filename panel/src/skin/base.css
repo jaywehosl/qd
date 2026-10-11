@@ -1,4 +1,5 @@
 html {
+  touch-action: pan-x pan-y;
   background: var(--ink);
   color-scheme: light;
 }

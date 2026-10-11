@@ -273,6 +273,8 @@ public class MainActivity extends Activity {
         set.setDomStorageEnabled(true);
         set.setTextZoom(100);
         set.setSupportZoom(false);
+        set.setBuiltInZoomControls(false);
+        set.setDisplayZoomControls(false);
         web.addJavascriptInterface(new Bridge(), "qdHost");
         web.setWebViewClient(new WebViewClient() {
             @Override
