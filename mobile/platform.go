@@ -52,6 +52,15 @@ func (p platform) SetKey(key *qdcrypt.Key) {
 
 func (p platform) SetExit(egress bool) { p.c.applyExit(egress) }
 
+func (p platform) FlushDNS() {
+	p.c.mu.Lock()
+	dns := p.c.dns
+	p.c.mu.Unlock()
+	if dns != nil {
+		dns.Flush()
+	}
+}
+
 func (p platform) SetCarriage(mbit int, profile string) {
 	p.c.rate.Store(int64(mbit))
 	p.c.profile.Store(&profile)
@@ -99,10 +108,30 @@ func (p platform) Identify() clientapi.Device { return p.c.device }
 
 func (p platform) Processes() []clientapi.Process { return p.c.installed() }
 
+func (p platform) RoutesByDomain() {}
+
+func (p platform) DomainFlows() map[string]int {
+	p.c.mu.Lock()
+	live := p.c.live
+	p.c.mu.Unlock()
+
+	out := map[string]int{}
+	if live == nil {
+		return out
+	}
+	for _, addr := range live.FlowDsts() {
+		if rule, known := p.c.names.RuleOf(addr); known {
+			out[rule]++
+		}
+	}
+	return out
+}
+
 func (p platform) RulesChanged() {
 	if p.c.marks != nil {
 		p.c.marks.reload(p.c.db)
 	}
+	p.c.loadNames()
 	p.c.reroute()
 	p.c.restack()
 }

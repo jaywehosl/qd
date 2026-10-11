@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"encoding/hex"
-	"github.com/jaywehosl/qd/internal/adblock"
 
 	"github.com/jaywehosl/qd/internal/clientapi"
 	"github.com/jaywehosl/qd/internal/clientstate"
@@ -77,7 +76,7 @@ func runClient(opts runOptions) error {
 	if err != nil {
 		return err
 	}
-	seen := clientapi.NewVisits(db, adblock.Default(), settings.Adblock)
+	seen := clientapi.NewVisits(db, settings.Adblock)
 	defer seen.Close()
 
 	keyText := opts.Key
@@ -116,7 +115,8 @@ func runClient(opts runOptions) error {
 		Workers: opts.Readers,
 		Tickets: db.Tickets(),
 		DNS:     opts.DNS,
-		OnQuery: seen.Query,
+		OnQuery: seen.Note,
+		Adblock: seen.Adblock,
 		Token: func() string {
 			sub, err := db.Subscription()
 			if err != nil {

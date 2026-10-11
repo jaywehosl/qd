@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/jaywehosl/qd/internal/steerlist"
+	"github.com/jaywehosl/qd/internal/blocklist"
 )
 
 var networkKeys = []string{
 	"refreshMinutes",
-	"routeList",
-	"routeServices",
+	"blockTier",
+	"blockTif",
 	"dnsPrimary",
 	"dnsSecondary",
 	"dnsCache",
@@ -42,7 +42,8 @@ func (a *API) dnsRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/panel/api/dns/records/del", a.dnsRecordDelete)
 	mux.HandleFunc("/panel/api/dns/stats", a.dnsStats)
 	mux.HandleFunc("/panel/api/dns/flush", a.dnsFlush)
-	mux.HandleFunc("/panel/api/dns/services", func(w http.ResponseWriter, r *http.Request) { sendOK(w, steerlist.Services) })
+	mux.HandleFunc("/panel/api/dns/lists", a.dnsLists)
+	mux.HandleFunc("/panel/api/dns/lists/refresh", a.dnsListsRefresh)
 }
 
 func (a *API) dnsRecords(w http.ResponseWriter, r *http.Request) {
@@ -112,6 +113,27 @@ func (a *API) dnsStats(w http.ResponseWriter, r *http.Request) {
 		out = append(out, stats)
 	}
 	sendOK(w, out)
+}
+
+func (a *API) dnsLists(w http.ResponseWriter, r *http.Request) {
+	out := []map[string]any{}
+	for id, body := range a.fleet.Gather("dns.lists", nil) {
+		var lists []blocklist.Status
+		if json.Unmarshal(body, &lists) != nil {
+			continue
+		}
+		out = append(out, map[string]any{"nodeId": id, "tag": a.fleet.TagOf(id), "lists": lists})
+	}
+	sendOK(w, out)
+}
+
+func (a *API) dnsListsRefresh(w http.ResponseWriter, r *http.Request) {
+	results, err := a.write("dns.lists.refresh", nil)
+	if err != nil {
+		sendFailWith(w, err, results)
+		return
+	}
+	sendOK(w, map[string]bool{"asked": true})
 }
 
 func (a *API) dnsFlush(w http.ResponseWriter, r *http.Request) {

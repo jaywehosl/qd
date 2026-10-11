@@ -20,10 +20,9 @@ func (state *controlState) syncSessions() {
 	}
 	now := time.Now().UnixMilli()
 	want := map[uint32]bool{}
-	routed := map[uint32]bool{}
 	builds := map[uint32][2]bool{}
 	linked := map[uint32]bool{}
-	peers, exits, byDNS := 0, 0, 0
+	peers, exits := 0, 0
 
 	mine, err := netstate.Project(state.id, network)
 	switch {
@@ -36,13 +35,9 @@ func (state *controlState) syncSessions() {
 				continue
 			}
 			want[qdcrypt.SessionID(c.UUID)] = c.AllowExit
-			routed[qdcrypt.SessionID(c.UUID)] = c.RouteDNS
 			builds[qdcrypt.SessionID(c.UUID)] = [2]bool{c.AllowDev, c.AllowCore}
 			if c.AllowExit {
 				exits++
-			}
-			if c.RouteDNS {
-				byDNS++
 			}
 		}
 		for _, p := range mine.Peers {
@@ -63,7 +58,6 @@ func (state *controlState) syncSessions() {
 			added++
 		}
 		state.gate.exit(id, allowExit)
-		state.gate.route(id, routed[id])
 		state.gate.builds(id, builds[id][0], builds[id][1])
 	}
 	for id := range live {
@@ -75,12 +69,11 @@ func (state *controlState) syncSessions() {
 		removed++
 	}
 
-	if added > 0 || removed > 0 || exits != state.exits || byDNS != state.byDNS {
-		fmt.Printf("sessions   %d carried (+%d, -%d), %d may take an exit, %d route by DNS, %d are peer nodes\n",
-			len(want), added, removed, exits, byDNS, peers)
+	if added > 0 || removed > 0 || exits != state.exits {
+		fmt.Printf("sessions   %d carried (+%d, -%d), %d may take an exit, %d are peer nodes\n",
+			len(want), added, removed, exits, peers)
 	}
 	state.exits = exits
-	state.byDNS = byDNS
 
 	alive := map[uint32]bool{}
 	for _, s := range state.node.Sessions() {

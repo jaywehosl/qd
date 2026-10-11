@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jaywehosl/qd/internal/clientstate"
+	"github.com/jaywehosl/qd/internal/pace"
 	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
 	"github.com/jaywehosl/qd/internal/update"
 )
@@ -155,7 +156,7 @@ collect:
 	return reached, best
 }
 
-const sweepWait = 4 * time.Second
+const sweepWait = pace.ControlWait
 
 func (a *API) take() (int, error) {
 	reached, answer := a.sweep()

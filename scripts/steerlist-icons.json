@@ -1,0 +1,22 @@
+{
+  "gemini": "dash:google-gemini",
+  "apple-tvplus": "dash:apple-tv-plus",
+  "meta": "dash:instagram",
+  "disney": "dash:disney-plus",
+  "activision-blizzard": "si:battledotnet",
+  "nintendo": "dash:nintendo-switch",
+  "gog": "si:gogdotcom",
+  "itchio": "si:itchdotio",
+  "hoyoverse": "si:mihoyo",
+  "hm": "si:handm",
+  "booking": "si:bookingdotcom",
+  "ok": "si:odnoklassniki",
+  "mailru-group": "si:maildotru",
+  "ea": "dash:electronic-arts",
+  "lastfm": "si:lastdotfm",
+  "midjourney": "dashpng:midjourney",
+  "take-two": "si:rockstargames",
+  "anthropic": "dash:claude-ai",
+  "geforce-now": "dash:nvidia",
+  "riot": "si:riotgames"
+}

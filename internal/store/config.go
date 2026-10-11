@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/jaywehosl/qd/internal/blocklist"
 	"github.com/jaywehosl/qd/internal/netstate"
 )
 
@@ -123,11 +124,11 @@ func (d *DB) nameNode(n netstate.Node) netstate.Node {
 		}
 	}
 
-	if n.Tag != "" && (!found || before.Role == n.Role) {
+	if n.Tag != "" && (!found || before.Role == n.Role || (n.Tag != before.Tag && !taken[n.Tag])) {
 		return n
 	}
 
-	if picked := netstate.PickName(n.Role, taken); picked != "" {
+	if picked := netstate.NameFor(n.Role, taken, n.UUID+n.Address); picked != "" {
 		n.Tag = picked
 	}
 	return n
@@ -180,10 +181,10 @@ func (d *DB) alignEntrypoints(n netstate.Node, now int64) {
 		return
 	}
 	for _, e := range held {
-		if e.NodeID != n.ID || e.Port == n.Port {
+		if e.NodeID != n.ID || (e.Port == n.Port && e.Remark == n.Tag) {
 			continue
 		}
-		e.Port = n.Port
+		e.Port, e.Remark = n.Port, n.Tag
 		d.SaveEntrypoint(e, now)
 	}
 }
@@ -311,11 +312,11 @@ func parseRelays(s string) []netstate.GroupRelay {
 
 func (d *DB) Groups() ([]netstate.Group, error) {
 	out := []netstate.Group{}
-	err := scan(d.sql, `SELECT id, tag, allow_exit, route_dns, device_limit, relay_enable, relays, allow_dev, allow_core FROM groups ORDER BY id`,
+	err := scan(d.sql, `SELECT id, tag, allow_exit, device_limit, relay_enable, relays, allow_dev, allow_core FROM groups ORDER BY id`,
 		func(r *sql.Rows) error {
 			var g netstate.Group
 			var relays string
-			if err := r.Scan(&g.ID, &g.Tag, &g.AllowExit, &g.RouteDNS, &g.DeviceLimit, &g.RelayEnable, &relays, &g.AllowDev, &g.AllowCore); err != nil {
+			if err := r.Scan(&g.ID, &g.Tag, &g.AllowExit, &g.DeviceLimit, &g.RelayEnable, &relays, &g.AllowDev, &g.AllowCore); err != nil {
 				return err
 			}
 			g.Relays = parseRelays(relays)
@@ -358,8 +359,8 @@ func (d *DB) SaveGroup(g netstate.Group, now int64) (int, error) {
 	id := g.ID
 	if id == 0 {
 		res, err := tx.Exec(
-			`INSERT INTO groups (tag, allow_exit, route_dns, device_limit, relay_enable, relays, allow_dev, allow_core, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			g.Tag, g.AllowExit, g.RouteDNS, g.DeviceLimit, g.RelayEnable, marshalRelays(g.Relays), g.AllowDev, g.AllowCore, now)
+			`INSERT INTO groups (tag, allow_exit, device_limit, relay_enable, relays, allow_dev, allow_core, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			g.Tag, g.AllowExit, g.DeviceLimit, g.RelayEnable, marshalRelays(g.Relays), g.AllowDev, g.AllowCore, now)
 		if err != nil {
 			return 0, err
 		}
@@ -369,8 +370,8 @@ func (d *DB) SaveGroup(g netstate.Group, now int64) (int, error) {
 		}
 		id = int(newID)
 	} else {
-		res, err := tx.Exec(`UPDATE groups SET tag = ?, allow_exit = ?, route_dns = ?, device_limit = ?, relay_enable = ?, relays = ?, allow_dev = ?, allow_core = ? WHERE id = ?`,
-			g.Tag, g.AllowExit, g.RouteDNS, g.DeviceLimit, g.RelayEnable, marshalRelays(g.Relays), g.AllowDev, g.AllowCore, id)
+		res, err := tx.Exec(`UPDATE groups SET tag = ?, allow_exit = ?, device_limit = ?, relay_enable = ?, relays = ?, allow_dev = ?, allow_core = ? WHERE id = ?`,
+			g.Tag, g.AllowExit, g.DeviceLimit, g.RelayEnable, marshalRelays(g.Relays), g.AllowDev, g.AllowCore, id)
 		if err != nil {
 			return 0, err
 		}
@@ -419,8 +420,8 @@ type NetworkSettings struct {
 	IdleSeconds      int    `json:"idleSeconds"`
 	KeepAliveSeconds int    `json:"keepAliveSeconds"`
 	SocketBuffer     int    `json:"socketBufferKb"`
-	RouteList        string `json:"routeList"`
-	RouteServices    string `json:"routeServices"`
+	BlockTier        string `json:"blockTier"`
+	BlockTIF         bool   `json:"blockTif"`
 	ECHName          string `json:"echName"`
 	ClientVersion    string `json:"clientVersion"`
 	ClientReleases   string `json:"clientReleases"`
@@ -447,6 +448,7 @@ func defaultNetworkSettings() NetworkSettings {
 		IdleSeconds:      90,
 		KeepAliveSeconds: 15,
 		SocketBuffer:     2048,
+		BlockTier:        blocklist.Usual,
 	}
 }
 
@@ -456,14 +458,14 @@ func (d *DB) NetworkSettings() (NetworkSettings, error) {
 		`SELECT refresh_minutes, dns_primary, dns_secondary, dns_cache, dns_min_ttl,
 		        dns_max_ttl, dns_stale, mtu, stats_seconds, pool, brutal_mbit, bbr_profile,
 		        max_streams, stream_window, max_stream_window, conn_window, max_conn_window,
-		        idle_seconds, keepalive_seconds, socket_buffer, route_list, route_services, ech_name,
+		        idle_seconds, keepalive_seconds, socket_buffer, block_tier, block_tif, ech_name,
 		        client_version, client_releases
 		 FROM network WHERE id = 1`).Scan(
 		&out.RefreshMinutes, &out.DNSPrimary, &out.DNSSecondary,
 		&out.DNSCache, &out.DNSMinTTL, &out.DNSMaxTTL, &out.DNSStale,
 		&out.MTU, &out.StatsSeconds, &out.Pool, &out.BrutalMbit, &out.BBRProfile, &out.MaxStreams, &out.StreamWindow, &out.MaxStreamWindow,
 		&out.ConnWindow, &out.MaxConnWindow, &out.IdleSeconds, &out.KeepAliveSeconds,
-		&out.SocketBuffer, &out.RouteList, &out.RouteServices, &out.ECHName,
+		&out.SocketBuffer, &out.BlockTier, &out.BlockTIF, &out.ECHName,
 		&out.ClientVersion, &out.ClientReleases)
 	if errors.Is(err, sql.ErrNoRows) {
 		return defaultNetworkSettings(), nil
@@ -479,6 +481,9 @@ func (s NetworkSettings) sane() NetworkSettings {
 	}
 	if s.RefreshMinutes > 1440 {
 		s.RefreshMinutes = 1440
+	}
+	if !blocklist.KnownTier(s.BlockTier) {
+		s.BlockTier = ""
 	}
 	if s.DNSPrimary == "" && s.DNSSecondary == "" {
 		s.DNSPrimary, s.DNSSecondary = fallback.DNSPrimary, fallback.DNSSecondary
@@ -578,14 +583,14 @@ func (d *DB) SaveNetworkSettings(s NetworkSettings) error {
 		        mtu = ?, stats_seconds = ?,
 		        pool = ?, brutal_mbit = ?, bbr_profile = ?, max_streams = ?, stream_window = ?,
 		        max_stream_window = ?, conn_window = ?, max_conn_window = ?,
-		        idle_seconds = ?, keepalive_seconds = ?, socket_buffer = ?, route_list = ?, route_services = ?,
+		        idle_seconds = ?, keepalive_seconds = ?, socket_buffer = ?, block_tier = ?, block_tif = ?,
 		        ech_name = ?, client_version = ?, client_releases = ?
 		 WHERE id = 1`,
 		s.RefreshMinutes, s.DNSPrimary, s.DNSSecondary,
 		s.DNSCache, s.DNSMinTTL, s.DNSMaxTTL, s.DNSStale,
 		s.MTU, s.StatsSeconds, s.Pool, s.BrutalMbit, s.BBRProfile,
 		s.MaxStreams, s.StreamWindow, s.MaxStreamWindow, s.ConnWindow, s.MaxConnWindow,
-		s.IdleSeconds, s.KeepAliveSeconds, s.SocketBuffer, s.RouteList, s.RouteServices,
+		s.IdleSeconds, s.KeepAliveSeconds, s.SocketBuffer, s.BlockTier, s.BlockTIF,
 		s.ECHName, s.ClientVersion, s.ClientReleases)
 	if err != nil {
 		return err
@@ -603,14 +608,15 @@ type DNSRecord struct {
 	V6      string `json:"v6"`
 	Comment string `json:"comment"`
 	Enable  bool   `json:"enable"`
+	Allow   bool   `json:"allow"`
 }
 
 func (d *DB) DNSRecords() ([]DNSRecord, error) {
 	out := []DNSRecord{}
-	err := scan(d.sql, `SELECT id, suffix, v4, v6, comment, enable FROM dns_records ORDER BY suffix`,
+	err := scan(d.sql, `SELECT id, suffix, v4, v6, comment, enable, allow FROM dns_records ORDER BY suffix`,
 		func(r *sql.Rows) error {
 			var rec DNSRecord
-			if err := r.Scan(&rec.ID, &rec.Suffix, &rec.V4, &rec.V6, &rec.Comment, &rec.Enable); err != nil {
+			if err := r.Scan(&rec.ID, &rec.Suffix, &rec.V4, &rec.V6, &rec.Comment, &rec.Enable, &rec.Allow); err != nil {
 				return err
 			}
 			out = append(out, rec)
@@ -625,7 +631,10 @@ func (d *DB) SaveDNSRecord(rec DNSRecord) (int, error) {
 	rec.Suffix = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(rec.Suffix), "*.")))
 	rec.V4 = strings.TrimSpace(rec.V4)
 	rec.V6 = strings.TrimSpace(rec.V6)
-	if rec.Suffix == "" || (rec.V4 == "" && rec.V6 == "") {
+	if rec.Allow {
+		rec.V4, rec.V6 = "", ""
+	}
+	if rec.Suffix == "" || (!rec.Allow && rec.V4 == "" && rec.V6 == "") {
 		return 0, ErrEmptyRecord
 	}
 	if rec.V4 != "" {
@@ -643,8 +652,8 @@ func (d *DB) SaveDNSRecord(rec DNSRecord) (int, error) {
 
 	if rec.ID > 0 {
 		res, err := d.sql.Exec(
-			`UPDATE dns_records SET suffix = ?, v4 = ?, v6 = ?, comment = ?, enable = ? WHERE id = ?`,
-			rec.Suffix, rec.V4, rec.V6, rec.Comment, rec.Enable, rec.ID)
+			`UPDATE dns_records SET suffix = ?, v4 = ?, v6 = ?, comment = ?, enable = ?, allow = ? WHERE id = ?`,
+			rec.Suffix, rec.V4, rec.V6, rec.Comment, rec.Enable, rec.Allow, rec.ID)
 		if err != nil {
 			return 0, err
 		}
@@ -655,10 +664,10 @@ func (d *DB) SaveDNSRecord(rec DNSRecord) (int, error) {
 	}
 
 	res, err := d.sql.Exec(
-		`INSERT INTO dns_records (suffix, v4, v6, comment, enable) VALUES (?, ?, ?, ?, ?)
+		`INSERT INTO dns_records (suffix, v4, v6, comment, enable, allow) VALUES (?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(suffix) DO UPDATE SET v4 = excluded.v4, v6 = excluded.v6,
-		        comment = excluded.comment, enable = excluded.enable`,
-		rec.Suffix, rec.V4, rec.V6, rec.Comment, rec.Enable)
+		        comment = excluded.comment, enable = excluded.enable, allow = excluded.allow`,
+		rec.Suffix, rec.V4, rec.V6, rec.Comment, rec.Enable, rec.Allow)
 	if err != nil {
 		return 0, err
 	}

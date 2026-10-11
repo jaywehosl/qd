@@ -212,7 +212,7 @@ func (s *Stack) handleTCP(r *tcp.ForwarderRequest) {
 	r.Complete(false)
 
 	inbound := gonet.NewTCPConn(&wq, ep)
-	held := s.keepFlow(Flow{Src: src, Dst: dst}, shutBoth{inbound, outbound})
+	held := s.keepFlow(Flow{Src: src, Dst: dst}, shutBoth{ep, inbound, outbound})
 	go func() {
 		pipe(inbound, outbound)
 		s.dropFlow(held)
@@ -369,9 +369,13 @@ type liveFlow struct {
 	shut io.Closer
 }
 
-type shutBoth struct{ a, b net.Conn }
+type shutBoth struct {
+	ep   tcpip.Endpoint
+	a, b net.Conn
+}
 
 func (s shutBoth) Close() error {
+	s.ep.Abort()
 	s.a.Close()
 	return s.b.Close()
 }

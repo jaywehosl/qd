@@ -55,6 +55,7 @@ func (c *Client) Page() (string, error) {
 		return "", err
 	}
 
+	time.AfterFunc(1200*time.Millisecond, func() { c.installed() })
 	l, err := srv.ListenOn("127.0.0.1", localapi.DefaultPort)
 	if err != nil {
 		return "", err
@@ -138,7 +139,10 @@ func (c *Client) installed() []clientapi.Process {
 	c.mu.Unlock()
 
 	if held == nil {
-		return c.list()
+		c.listed.Do(func() { c.list() })
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return c.apps
 	}
 	if stale {
 		go c.list()

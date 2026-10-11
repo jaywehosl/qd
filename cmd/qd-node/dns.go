@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/netip"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/jaywehosl/qd/internal/blocklist"
 	"github.com/jaywehosl/qd/internal/dnsproxy"
 	"github.com/jaywehosl/qd/internal/qsrv"
 )
@@ -19,7 +21,7 @@ func (state *controlState) dnsConfig() dnsproxy.Config {
 
 	records := make([]dnsproxy.Record, 0, len(rows))
 	for _, r := range rows {
-		if r.Enable {
+		if r.Enable && !r.Allow {
 			records = append(records, dnsproxy.Record{Suffix: r.Suffix, V4: r.V4, V6: r.V6})
 		}
 	}
@@ -45,7 +47,10 @@ func (state *controlState) startResolver() {
 	state.dns = dnsproxy.New(cfg)
 	fmt.Printf("resolver   %v, %d cached names, %d local records\n",
 		cfg.Upstreams, cfg.Cache, len(cfg.Records))
-	state.loadRoutes()
+	state.lists = blocklist.New(filepath.Join(filepath.Dir(state.dbPath), "lists"), func(format string, args ...any) {
+		fmt.Printf(format+"\n", args...)
+	})
+	state.loadLists()
 }
 
 func (state *controlState) reloadResolver() {
@@ -55,7 +60,19 @@ func (state *controlState) reloadResolver() {
 	cfg := state.dnsConfig()
 	state.dns.Reconfigure(cfg)
 	fmt.Printf("resolver   now %v\n", cfg.Upstreams)
-	state.loadRoutes()
+	state.loadLists()
+}
+
+func (state *controlState) loadLists() {
+	settings, _ := state.db.NetworkSettings()
+	rows, _ := state.db.DNSRecords()
+	spared := make([]string, 0, len(rows))
+	for _, r := range rows {
+		if r.Enable {
+			spared = append(spared, r.Suffix)
+		}
+	}
+	state.lists.Apply(blocklist.Wanted(settings.BlockTier, settings.BlockTIF), strings.Join(spared, "\n"))
 }
 
 func (state *controlState) resolve(req request) response {
@@ -64,15 +81,20 @@ func (state *controlState) resolve(req request) response {
 	}
 
 	var body struct {
-		Query  []byte `json:"query"`
-		Device string `json:"device"`
-		Exit   bool   `json:"exit"`
+		Query   []byte `json:"query"`
+		Device  string `json:"device"`
+		Exit    bool   `json:"exit"`
+		Adblock bool   `json:"adblock"`
 	}
 	if err := json.Unmarshal(req.Body, &body); err != nil {
 		return response{OK: false, Error: err.Error()}
 	}
 	if len(body.Query) < 12 {
 		return response{OK: false, Error: "dns: query too short"}
+	}
+
+	if name, _, ok := dnsproxy.Question(body.Query); ok && body.Adblock && state.lists.Blocked(name) {
+		return reply(req, map[string]any{"answer": dnsproxy.NXDomain(body.Query), "hit": true, "blocked": true})
 	}
 
 	if answer, ok := state.resolveAbroad(req.Auth, body.Device, body.Exit, body.Query); ok {

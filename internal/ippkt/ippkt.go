@@ -10,6 +10,49 @@ const (
 	protoUDP = 17
 )
 
+var StandIn = netip.MustParsePrefix("198.18.0.0/15")
+
+func Reset4(pkt []byte) []byte {
+	if len(pkt) < 20 || pkt[0]>>4 != 4 || pkt[9] != protoTCP {
+		return nil
+	}
+	ihl := int(pkt[0]&0x0F) * 4
+	if ihl < 20 || len(pkt) < ihl+20 {
+		return nil
+	}
+	seg := pkt[ihl:]
+	head, flags := int(seg[12]>>4)*4, seg[13]
+	if head < 20 || head > len(seg) || flags&0x04 != 0 {
+		return nil
+	}
+	taken := uint32(len(seg) - head)
+	if flags&0x03 != 0 {
+		taken++
+	}
+
+	out := make([]byte, 40)
+	out[0], out[8], out[9] = 0x45, 64, protoTCP
+	binary.BigEndian.PutUint16(out[2:], 40)
+	copy(out[12:16], pkt[16:20])
+	copy(out[16:20], pkt[12:16])
+	binary.BigEndian.PutUint16(out[10:], Checksum(out[:20]))
+
+	tcp := out[20:]
+	copy(tcp[0:2], seg[2:4])
+	copy(tcp[2:4], seg[0:2])
+	if flags&0x10 != 0 {
+		copy(tcp[4:8], seg[8:12])
+	}
+	binary.BigEndian.PutUint32(tcp[8:], binary.BigEndian.Uint32(seg[4:8])+taken)
+	tcp[12], tcp[13] = 5<<4, 0x14
+
+	sum := make([]byte, 12, 32)
+	copy(sum[0:8], out[12:20])
+	sum[9], sum[11] = protoTCP, 20
+	binary.BigEndian.PutUint16(tcp[16:], Checksum(append(sum, tcp...)))
+	return out
+}
+
 func Dst(pkt []byte) (netip.Addr, bool) {
 	if len(pkt) < 1 {
 		return netip.Addr{}, false
@@ -32,6 +75,11 @@ func Dst(pkt []byte) (netip.Addr, bool) {
 func IsTCP(pkt []byte) bool {
 	proto, _, ok := after(pkt, 0)
 	return ok && proto == protoTCP
+}
+
+func IsUDP(pkt []byte) bool {
+	proto, _, ok := after(pkt, 0)
+	return ok && proto == protoUDP
 }
 
 func after(pkt []byte, need int) (byte, []byte, bool) {

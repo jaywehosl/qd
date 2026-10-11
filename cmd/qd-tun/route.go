@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 
 	"github.com/jaywehosl/qd/internal/clientstate"
+	"github.com/jaywehosl/qd/internal/domainroute"
 	"github.com/jaywehosl/qd/internal/qcli"
 	"github.com/jaywehosl/qd/internal/qsrv"
 )
@@ -52,7 +53,38 @@ func routeTag() string {
 	return ""
 }
 
+var routeByDomain = domainroute.New()
+
+func detours(dst netip.Addr) bool {
+	role, known := routeByDomain.RoleOf(dst)
+	return known && role == clientstate.RoleDirect
+}
+
+func (p hostPlatform) DomainFlows() map[string]int {
+	out := map[string]int{}
+	for _, addr := range openRemotes() {
+		if rule, known := routeByDomain.RuleOf(addr); known {
+			out[rule]++
+		}
+	}
+	return out
+}
+
+func namedDirect(name string) bool {
+	role, known := routeByDomain.RoleOfName(name)
+	return known && role == clientstate.RoleDirect
+}
+
 func exitFor(src, dst netip.AddrPort, udp bool) string {
+	if role, ok := routeByDomain.RoleOf(dst.Addr()); ok {
+		switch role {
+		case clientstate.RoleEgress:
+			return anyExit
+		case clientstate.RoleNoEgress:
+			return ""
+		}
+		return routeTag()
+	}
 	r := routeByProcess.Load()
 	if r == nil || !r.Active() {
 		return routeTag()

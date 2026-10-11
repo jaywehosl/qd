@@ -113,9 +113,9 @@ func (a *API) inboundOptions(w http.ResponseWriter, r *http.Request) {
 		if exits[e.NodeID] {
 			continue
 		}
-		label := e.Remark
+		label := names[e.NodeID]
 		if label == "" {
-			label = names[e.NodeID]
+			label = e.Remark
 		}
 		out = append(out, map[string]any{
 			"id": e.ID, "remark": label, "port": e.Port, "nodeId": e.NodeID,

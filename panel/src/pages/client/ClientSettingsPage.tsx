@@ -12,7 +12,7 @@ import { useClientSettings } from '@/layouts/ClientSettingsController';
 import { resetAll } from '@/stores/notificationStore';
 import UpdateButton from './UpdateButton';
 import { useTheme } from '@/hooks/useTheme';
-import { HOST_EVENT, hostChecks, phone, worded } from '@/lib/phone';
+import { HOST_EVENT, hostChecks, navLow, phone, setNavLow, worded } from '@/lib/phone';
 
 const TAB_SLUGS = ['preferences', 'about'];
 
@@ -52,6 +52,7 @@ export default function ClientSettingsPage() {
   const activeSlug = TAB_SLUGS.includes(slug) ? slug : 'preferences';
 
   const [confirm, setConfirm] = useState<'data' | 'all' | null>(null);
+  const [low, setLow] = useState(navLow);
 
   const onPhone = !!phone();
   const { follow, setFollow } = useTheme();
@@ -170,6 +171,14 @@ export default function ClientSettingsPage() {
                   { value: 'system', label: t('client.settings.themeSystem') },
                 ]}
               />
+            </SettingListItem>
+
+            <SettingListItem
+              paddings="small"
+              title={t('client.settings.navLow')}
+              description={t('client.settings.navLowDesc')}
+            >
+              <Switch checked={low} onChange={(v) => { setNavLow(v); setLow(v); }} />
             </SettingListItem>
 
             {(settings.fixedRate ?? 0) > 0 && (

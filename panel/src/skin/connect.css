@@ -776,6 +776,8 @@ html.is-dark .cx-power.is-field > .cx-paste { background: var(--idle); }
 .cx-duo .cx-power__main { transition: color calc(0.3s * var(--cx-t)) ease; }
 
 html.in-phone .cx { padding: var(--step-2) 0; }
+html.in-phone .cx-stage { height: clamp(220px, calc(100dvh - var(--inset-top, 0px) - var(--inset-bottom, 0px) - 449px), 336px); }
+html.in-phone.nav-low .cx-stage { height: clamp(220px, calc(100dvh - var(--inset-top, 0px) - var(--inset-bottom, 0px) - 512px), 336px); }
 html.in-phone .cx-head { gap: var(--step-2); padding-left: var(--step-3); }
 html.in-phone .cx-head__row {
   min-width: 0;

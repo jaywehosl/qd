@@ -38,6 +38,10 @@ func (p hostPlatform) Road() string { return p.tun.Road() }
 
 func (p hostPlatform) SetExit(egress bool) {
 	setExit(egress)
+	p.FlushDNS()
+}
+
+func (p hostPlatform) FlushDNS() {
 	if d := p.tun.DNS(); d != nil {
 		d.Flush()
 	}

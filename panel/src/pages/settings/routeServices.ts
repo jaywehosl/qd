@@ -6,10 +6,19 @@ export interface RouteService {
   entries: string[];
 }
 
-const icons = import.meta.glob('../../assets/services/*.png', { eager: true, import: 'default' }) as Record<string, string>;
+const icons = import.meta.glob('../../assets/services/*.{png,svg}', { eager: true, import: 'default' }) as Record<string, string>;
 
-export function iconOf(id: string): string | undefined {
-  return icons[`../../assets/services/${id}.png`];
+export interface ServiceIcon {
+  src: string;
+  night?: string;
+  mono: boolean;
+}
+
+export function iconOf(id: string): ServiceIcon | undefined {
+  const at = (tail: string) => icons[`../../assets/services/${id}${tail}`];
+  const mono = at('.mono.svg');
+  const src = mono ?? at('.svg') ?? at('.png');
+  return src ? { src, night: at('.night.svg') ?? at('.night.png'), mono: !!mono } : undefined;
 }
 
 export function pickedOf(text?: string): string[] {

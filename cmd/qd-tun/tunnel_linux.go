@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"syscall"
 
 	"golang.org/x/sys/unix"
 
@@ -46,6 +47,13 @@ var keepSocket = func(fd uintptr) {
 }
 
 func goesDirect(pkt []byte) bool { return false }
+
+func outside(ctx context.Context, network string, dst netip.AddrPort) (net.Conn, error) {
+	dialer := net.Dialer{Control: func(_, _ string, raw syscall.RawConn) error { return raw.Control(keepSocket) }}
+	return dialer.DialContext(ctx, network, dst.String())
+}
+
+func (p hostPlatform) RoutesByDomain() {}
 
 func keepAsideReset() {}
 

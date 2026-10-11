@@ -1,6 +1,9 @@
 package netstate
 
-import "math/rand"
+import (
+	"hash/fnv"
+	"math/rand"
+)
 
 var norse = []string{
 	"Óðinn", "Þórr", "Freyja", "Loki", "Frigg", "Baldr", "Týr", "Heimdallr",
@@ -39,6 +42,21 @@ func PoolFor(role Role) []string {
 		return greek
 	}
 	return norse
+}
+
+func NameFor(role Role, taken map[string]bool, seed string) string {
+	free := make([]string, 0, len(PoolFor(role)))
+	for _, name := range PoolFor(role) {
+		if !taken[name] {
+			free = append(free, name)
+		}
+	}
+	if len(free) == 0 {
+		return ""
+	}
+	h := fnv.New32a()
+	h.Write([]byte(seed))
+	return free[h.Sum32()%uint32(len(free))]
 }
 
 func PickName(role Role, taken map[string]bool) string {

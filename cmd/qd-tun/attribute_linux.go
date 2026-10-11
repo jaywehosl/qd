@@ -5,6 +5,7 @@ package main
 import (
 	"bufio"
 	"encoding/binary"
+	"encoding/hex"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -100,6 +101,39 @@ func readSockets(into map[portKey]uint32) {
 			into[key] = pid
 		}
 	})
+}
+
+func dropMoved(moved []netip.Addr) int { return 0 }
+
+func openRemotes() []netip.Addr {
+	var out []netip.Addr
+	for _, file := range []string{"/proc/net/tcp", "/proc/net/tcp6"} {
+		f, err := os.Open(file)
+		if err != nil {
+			continue
+		}
+		sc := bufio.NewScanner(f)
+		sc.Scan()
+		for sc.Scan() {
+			fields := strings.Fields(sc.Text())
+			if len(fields) < 4 || fields[3] == "0A" {
+				continue
+			}
+			words, _, _ := strings.Cut(fields[2], ":")
+			raw, err := hex.DecodeString(words)
+			if err != nil || len(raw)%4 != 0 {
+				continue
+			}
+			for i := 0; i+4 <= len(raw); i += 4 {
+				raw[i], raw[i+1], raw[i+2], raw[i+3] = raw[i+3], raw[i+2], raw[i+1], raw[i]
+			}
+			if addr, ok := netip.AddrFromSlice(raw); ok && !addr.IsUnspecified() {
+				out = append(out, addr.Unmap())
+			}
+		}
+		f.Close()
+	}
+	return out
 }
 
 func readNetTable(file string, proto uint8, v6 bool, into map[uint64]portKey) {

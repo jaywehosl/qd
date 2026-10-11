@@ -1,13 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 
-import { Button, Card, DataTable, Dialog, Field, Input, Switch, Tag, Textarea, toast, type ColumnDef } from '@/components/ds';
+import { Button, Card, DataTable, Dialog, Field, Input, Switch, Tag, toast, type ColumnDef } from '@/components/ds';
 import { SettingListItem } from '@/components/ui';
 import { HttpUtil } from '@/utils';
 import type { AllSetting } from '@/models/setting';
-import { adoptPreset, countEntries, iconOf, pickedOf, type RouteService } from './routeServices';
 
 interface DnsTabProps {
   allSetting: AllSetting;
@@ -21,6 +20,7 @@ interface DnsRecord {
   v6: string;
   comment: string;
   enable: boolean;
+  allow: boolean;
 }
 
 interface DnsNodeStats {
@@ -34,30 +34,68 @@ interface DnsNodeStats {
   evicted: number;
   entries: number;
   size: number;
+  blocked?: number;
 }
 
-const blank: DnsRecord = { id: 0, suffix: '', v4: '', v6: '', comment: '', enable: true };
+interface HeldList {
+  id: string;
+  title: string;
+  entries: number;
+  version: string;
+  modified: string;
+  fetched: number;
+  error: string;
+}
+
+interface HeldRow extends HeldList {
+  key: string;
+  tag: string;
+  first: boolean;
+  idle: boolean;
+}
+
+interface NodeLists {
+  nodeId: number;
+  tag: string;
+  lists: HeldList[];
+}
+
+const THREATS = 'tif';
+
+const COLUMNS = [
+  { id: 'light', title: 'Light' },
+  { id: 'normal', title: 'Normal' },
+  { id: 'pro', title: 'Pro' },
+  { id: 'proplus', title: 'Pro++' },
+  { id: 'ultimate', title: 'Ultimate' },
+  { id: THREATS, title: 'TIF' },
+];
+
+const COVERAGE = [
+  { key: 'fake', levels: [0, 4, 4, 4, 4, 4] },
+  { key: 'popups', levels: [1, 2, 4, 4, 4, 2] },
+  { key: 'threats', levels: [0, 1, 1, 2, 2, 4] },
+  { key: 'native', levels: [1, 1, 2, 3, 4, 0] },
+  { key: 'crash', levels: [0, 0, 4, 4, 4, 0] },
+  { key: 'referral', levels: [0, 0, 1, 2, 2, 0] },
+];
+
+const blank: DnsRecord = { id: 0, suffix: '', v4: '', v6: '', comment: '', enable: true, allow: false };
 
 export default function DnsTab({ allSetting, updateSetting }: DnsTabProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
 
   const [editing, setEditing] = useState<DnsRecord | null>(null);
-  const { data: services = [] } = useQuery<RouteService[]>({
-    queryKey: ['dns', 'services'],
+  const { data: held = [] } = useQuery<NodeLists[]>({
+    queryKey: ['dns', 'lists'],
     queryFn: async () => {
-      const msg = await HttpUtil.get<RouteService[]>('/panel/api/dns/services', undefined, { silent: true });
-      return msg?.success ? (msg.obj ?? []) : [];
+      const msg = await HttpUtil.get<NodeLists[]>('/panel/api/dns/lists', undefined, { silent: true });
+      return msg?.success ? (msg.obj ?? []).sort((a, b) => a.nodeId - b.nodeId) : [];
     },
-    staleTime: Infinity,
+    refetchInterval: 10000,
   });
-  const picked = pickedOf(allSetting.routeServices);
-
-  useEffect(() => {
-    if (services.length === 0 || picked.length > 0) return;
-    const adopted = adoptPreset(allSetting.routeList ?? '', services);
-    if (adopted) updateSetting({ routeList: adopted.list, routeServices: adopted.ids.join(',') });
-  }, [services]);
+  const on = (id: string) => (id === THREATS ? !!allSetting.blockTif : allSetting.blockTier === id);
 
   const { data: records = [], isFetching } = useQuery<DnsRecord[]>({
     queryKey: ['dns', 'records'],
@@ -71,7 +109,7 @@ export default function DnsTab({ allSetting, updateSetting }: DnsTabProps) {
     queryKey: ['dns', 'stats'],
     queryFn: async () => {
       const msg = await HttpUtil.get<DnsNodeStats[]>('/panel/api/dns/stats', undefined, { silent: true });
-      return msg?.success ? (msg.obj ?? []) : [];
+      return msg?.success ? (msg.obj ?? []).sort((a, b) => a.nodeId - b.nodeId) : [];
     },
     refetchInterval: 10000,
   });
@@ -101,6 +139,58 @@ export default function DnsTab({ allSetting, updateSetting }: DnsTabProps) {
       refresh();
     },
   });
+
+  const pull = useMutation({
+    mutationFn: async () => HttpUtil.post('/panel/api/dns/lists/refresh', {}),
+    onSuccess: () => refresh(),
+  });
+
+  const heldRows = useMemo<HeldRow[]>(() => held.flatMap((node): HeldRow[] => (node.lists.length > 0
+    ? node.lists.map((l, i) => ({ ...l, key: `${node.nodeId}:${l.id}`, tag: node.tag, first: i === 0, idle: false }))
+    : [{
+      key: String(node.nodeId), tag: node.tag, first: true, idle: true,
+      id: '', title: '—', entries: 0, version: '', modified: '', fetched: 0, error: '',
+    }])), [held]);
+
+  const listColumns = useMemo<ColumnDef<HeldRow, unknown>[]>(() => [
+    {
+      id: 'node',
+      header: t('pages.settings.blockNode'),
+      cell: ({ row }) => (row.original.first
+        ? <Tag tone="success" className="dns-stats__node">{row.original.tag}</Tag>
+        : null),
+    },
+    { id: 'list', header: t('pages.settings.blockList'), cell: ({ row }) => <b>{row.original.title}</b> },
+    {
+      id: 'names',
+      header: t('pages.settings.blockNames'),
+      cell: ({ row }) => (row.original.entries > 0 ? row.original.entries.toLocaleString() : '—'),
+    },
+    { id: 'version', header: t('pages.settings.blockVersion'), cell: ({ row }) => row.original.version || '—' },
+    {
+      id: 'checked',
+      header: t('pages.settings.blockChecked'),
+      cell: ({ row }) => (row.original.fetched > 0
+        ? new Date(row.original.fetched * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        : '—'),
+    },
+    {
+      id: 'state',
+      header: t('pages.settings.blockState'),
+      cell: ({ row }) => {
+        const l = row.original;
+        if (l.error) {
+          return (
+            <Tag tone="warning" title={l.error}>
+              {t(l.entries > 0 ? 'pages.settings.blockStale' : 'pages.settings.blockFailed')}
+            </Tag>
+          );
+        }
+        if (l.idle) return t('pages.settings.blockIdle');
+        return t(l.entries > 0 ? 'pages.settings.blockInForce' : 'pages.settings.blockLoading');
+      },
+    },
+  ], [t]);
 
   const columns = useMemo<ColumnDef<DnsRecord, unknown>[]>(() => [
     {
@@ -136,6 +226,13 @@ export default function DnsTab({ allSetting, updateSetting }: DnsTabProps) {
       ),
     },
   ], [t, remove]);
+
+  const allowColumns = useMemo(
+    () => columns.filter((c) => !('accessorKey' in c) || (c.accessorKey !== 'v4' && c.accessorKey !== 'v6')),
+    [columns],
+  );
+  const own = useMemo(() => records.filter((r) => !r.allow), [records]);
+  const spared = useMemo(() => records.filter((r) => r.allow), [records]);
 
   return (
     <div className="dns-tab">
@@ -213,40 +310,80 @@ export default function DnsTab({ allSetting, updateSetting }: DnsTabProps) {
       </SettingListItem>
       </Card>
 
-      <Card title={t('pages.settings.routeList')}>
-        <p className="dns-route__note">{t('pages.settings.routeListDesc')}</p>
-        <div className="ge-picks dns-route__services">
-          {services.map((s) => {
-            const on = picked.includes(s.id);
-            const icon = iconOf(s.id);
-            return (
-              <Tag
-                key={s.id}
-                tone={on ? 'success' : 'neutral'}
-                className={`ge-pick dns-route__service${on ? ' is-on' : ''}`}
-                title={[s.note, `${s.entries.length} ${t('pages.settings.routeServiceEntries')}`].filter(Boolean).join(' · ')}
-                onClick={() => updateSetting({
-                  routeServices: (on ? picked.filter((id) => id !== s.id) : [...picked, s.id]).join(','),
-                })}
+      <Card
+        title={t('pages.settings.blockTitle')}
+        extra={(
+          <Button size="sm" variant="text" onClick={() => pull.mutate()} disabled={pull.isPending}>
+            <ReloadOutlined /> {t('pages.settings.blockRefresh')}
+          </Button>
+        )}
+      >
+        <p className="dns-route__note">{t('pages.settings.blockDesc')}</p>
+        <div className="bl-scroll">
+          <div className="bl-matrix">
+            <span />
+            {COLUMNS.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                className={`bl-col${on(c.id) ? ' is-on' : ''}`}
+                aria-pressed={on(c.id)}
+                onClick={() => updateSetting(c.id === THREATS
+                  ? { blockTif: !allSetting.blockTif }
+                  : { blockTier: allSetting.blockTier === c.id ? '' : c.id })}
               >
-                {icon ? <img src={icon} alt="" aria-hidden="true" /> : null}
-                {s.name}
-              </Tag>
-            );
-          })}
+                {c.title}
+              </button>
+            ))}
+            <span className="bl-col bl-col--now">{t('pages.settings.blockNow')}</span>
+            {COVERAGE.map((row) => (
+              <Fragment key={row.key}>
+                <span className="bl-row">{t(`pages.settings.blockCovers.${row.key}`)}</span>
+                {COLUMNS.map((c, i) => (
+                  <span key={c.id} className={`bl-cell${on(c.id) ? ' is-on' : ''}`}>
+                    <i className="bl-dot" data-level={row.levels[i]} />
+                  </span>
+                ))}
+                <span className="bl-cell bl-cell--now">
+                  <i
+                    className="bl-dot"
+                    data-level={Math.max(0, ...COLUMNS.map((c, i) => (on(c.id) ? row.levels[i] : 0)))}
+                  />
+                </span>
+              </Fragment>
+            ))}
+          </div>
         </div>
-        <p className="dns-route__note">{t('pages.settings.routeOwn')}</p>
-        <Textarea
-          className="dns-route__list"
-          rows={14}
-          spellCheck={false}
-          value={allSetting.routeList ?? ''}
-          onChange={(e) => updateSetting({ routeList: e.target.value })}
-        />
-        <p className="dns-route__note">{t('pages.settings.routeCount', {
-          own: countEntries(allSetting.routeList ?? ''),
-          services: picked.length,
-        })}</p>
+        <div className="bl-legend">
+          <span><i className="bl-dot" data-level={4} /> {t('pages.settings.blockFull')}</span>
+          <span><i className="bl-dot" data-level={2} /> {t('pages.settings.blockPartial')}</span>
+          <span><i className="bl-dot" data-level={0} /> {t('pages.settings.blockNone')}</span>
+        </div>
+
+        <div className="dns-table bl-table">
+          <DataTable
+            data={heldRows}
+            columns={listColumns}
+            getRowId={(row) => row.key}
+            sortable={false}
+            empty={t('pages.settings.blockWaiting')}
+          />
+        </div>
+
+        <div className="bl-allow">
+          <span className="dns-route__note">{t('pages.settings.blockAllow')}</span>
+          <Button size="sm" onClick={() => setEditing({ ...blank, allow: true })}>
+            <PlusOutlined /> {t('pages.settings.blockAllowAdd')}
+          </Button>
+        </div>
+        <div className="dns-table">
+          <DataTable
+            data={spared}
+            columns={allowColumns}
+            getRowId={(row) => String(row.id)}
+            empty={isFetching ? '…' : t('pages.settings.blockAllowNone')}
+          />
+        </div>
       </Card>
 
       <Card
@@ -264,7 +401,7 @@ export default function DnsTab({ allSetting, updateSetting }: DnsTabProps) {
       >
       <div className="dns-table">
         <DataTable
-          data={records}
+          data={own}
           columns={columns}
           getRowId={(row) => String(row.id)}
           empty={isFetching ? '…' : t('pages.settings.dnsNoRecords')}
@@ -292,6 +429,9 @@ export default function DnsTab({ allSetting, updateSetting }: DnsTabProps) {
                 <b>{s.records}</b> {t('pages.settings.dnsStatOwn')}
               </span>
               <span className="dns-stats__cell">
+                <b>{s.blocked ?? 0}</b> {t('pages.settings.dnsStatBlocked')}
+              </span>
+              <span className="dns-stats__cell">
                 <b>{s.failed}</b> {t('pages.settings.dnsStatFailed')}
               </span>
             </div>
@@ -303,10 +443,12 @@ export default function DnsTab({ allSetting, updateSetting }: DnsTabProps) {
       <Dialog
         open={editing !== null}
         onOpenChange={(o) => { if (!o) setEditing(null); }}
-        title={editing?.id ? t('pages.settings.dnsRecordEdit') : t('pages.settings.dnsRecordAdd')}
+        title={editing?.allow
+          ? t(editing.id ? 'pages.settings.blockAllowEdit' : 'pages.settings.blockAllowAdd')
+          : editing?.id ? t('pages.settings.dnsRecordEdit') : t('pages.settings.dnsRecordAdd')}
         okText={t('save')}
         cancelText={t('cancel')}
-        okDisabled={!editing?.suffix || (!editing?.v4 && !editing?.v6)}
+        okDisabled={!editing?.suffix || (!editing?.allow && !editing?.v4 && !editing?.v6)}
         confirmLoading={save.isPending}
         onOk={() => { if (editing) save.mutate(editing); }}
         autoHeight
@@ -317,24 +459,28 @@ export default function DnsTab({ allSetting, updateSetting }: DnsTabProps) {
             <Field label={t('pages.settings.dnsRecordName')}>
               <Input
                 value={editing.suffix}
-                placeholder="internal.example.com"
+                placeholder={editing.allow ? 'ads.example.com' : 'internal.example.com'}
                 onChange={(e) => setEditing({ ...editing, suffix: e.target.value })}
               />
             </Field>
-            <Field label="IPv4">
-              <Input
-                value={editing.v4}
-                placeholder="10.0.0.1"
-                onChange={(e) => setEditing({ ...editing, v4: e.target.value })}
-              />
-            </Field>
-            <Field label="IPv6">
-              <Input
-                value={editing.v6}
-                placeholder="2001:db8::1"
-                onChange={(e) => setEditing({ ...editing, v6: e.target.value })}
-              />
-            </Field>
+            {!editing.allow && (
+              <>
+                <Field label="IPv4">
+                  <Input
+                    value={editing.v4}
+                    placeholder="10.0.0.1"
+                    onChange={(e) => setEditing({ ...editing, v4: e.target.value })}
+                  />
+                </Field>
+                <Field label="IPv6">
+                  <Input
+                    value={editing.v6}
+                    placeholder="2001:db8::1"
+                    onChange={(e) => setEditing({ ...editing, v6: e.target.value })}
+                  />
+                </Field>
+              </>
+            )}
             <Field label={t('pages.settings.dnsRecordComment')}>
               <Input
                 value={editing.comment}

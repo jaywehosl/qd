@@ -20,9 +20,6 @@
   box-sizing: border-box;
 }
 
-html.is-dark .custom-modal-container,
-html.is-dark .busy-overlay__card,
-
 .custom-modal-header {
   display: flex;
   align-items: center;

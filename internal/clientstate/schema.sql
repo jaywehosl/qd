@@ -95,3 +95,15 @@ CREATE TABLE IF NOT EXISTS ech (
     server TEXT PRIMARY KEY,
     list   BLOB NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS domain_rules (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    domain  TEXT    NOT NULL UNIQUE,
+    role    TEXT    NOT NULL,
+    matched INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS bundle_rules (
+    bundle TEXT PRIMARY KEY,
+    role   TEXT NOT NULL
+);

@@ -29,6 +29,7 @@ type Config struct {
 	MinTTL    time.Duration
 	MaxTTL    time.Duration
 	Stale     time.Duration
+	Negative  time.Duration
 	Timeout   time.Duration
 	Forward   func(query []byte) ([]byte, error)
 }
@@ -78,6 +79,7 @@ type Resolver struct {
 	maxTTL    time.Duration
 	maxSize   int
 	stale     time.Duration
+	negative  time.Duration
 	timeout   time.Duration
 	forwarder func(query []byte) ([]byte, error)
 	cache     map[string]*entry
@@ -128,7 +130,7 @@ func (r *Resolver) Reconfigure(cfg Config) {
 	}
 
 	r.mu.Lock()
-	r.minTTL, r.maxTTL, r.stale = cfg.MinTTL, cfg.MaxTTL, cfg.Stale
+	r.minTTL, r.maxTTL, r.stale, r.negative = cfg.MinTTL, cfg.MaxTTL, cfg.Stale, cfg.Negative
 	r.maxSize, r.timeout, r.rules = cfg.Cache, cfg.Timeout, rules
 	r.forwarder = cfg.Forward
 
@@ -243,7 +245,7 @@ func (r *Resolver) forward(query []byte) ([]byte, time.Duration, error) {
 	r.mu.Lock()
 	ups := make([]*upstream, len(r.upstreams))
 	copy(ups, r.upstreams)
-	timeout, minTTL, maxTTL, via := r.timeout, r.minTTL, r.maxTTL, r.forwarder
+	timeout, minTTL, maxTTL, empty, via := r.timeout, r.minTTL, r.maxTTL, r.negative, r.forwarder
 	r.mu.Unlock()
 
 	if via != nil {
@@ -251,7 +253,7 @@ func (r *Resolver) forward(query []byte) ([]byte, time.Duration, error) {
 		if err != nil {
 			return nil, 0, err
 		}
-		return answer, answerTTL(answer, minTTL, maxTTL), nil
+		return answer, answerTTL(answer, minTTL, maxTTL, empty), nil
 	}
 	if len(ups) == 0 {
 		return nil, 0, errors.New("dns: no upstream configured")
@@ -278,7 +280,7 @@ func (r *Resolver) forward(query []byte) ([]byte, time.Duration, error) {
 	for range ups {
 		got := <-answers
 		if got.err == nil {
-			return got.answer, answerTTL(got.answer, minTTL, maxTTL), nil
+			return got.answer, answerTTL(got.answer, minTTL, maxTTL, empty), nil
 		}
 		last = got.err
 	}
@@ -697,7 +699,7 @@ func afterQuestions(msg []byte) int {
 	return i
 }
 
-func answerTTL(msg []byte, lo, hi time.Duration) time.Duration {
+func answerTTL(msg []byte, lo, hi, empty time.Duration) time.Duration {
 	if len(msg) < 12 {
 		return 0
 	}
@@ -706,7 +708,7 @@ func answerTTL(msg []byte, lo, hi time.Duration) time.Duration {
 	}
 	answers := int(binary.BigEndian.Uint16(msg[6:8]))
 	if answers == 0 {
-		return lo
+		return max(lo, empty)
 	}
 
 	i := afterQuestions(msg)

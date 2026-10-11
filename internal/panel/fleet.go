@@ -229,6 +229,9 @@ func (f *Fleet) TagOf(id int) string {
 
 func (f *Fleet) Gather(op string, body any) map[int]json.RawMessage {
 	live := f.Live()
+	if len(live) == 0 {
+		live = f.Nodes()
+	}
 	out := make(map[int]json.RawMessage, len(live))
 	if len(live) == 0 {
 		return out

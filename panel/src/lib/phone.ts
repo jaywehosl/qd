@@ -50,12 +50,22 @@ export function saveOnPhone(name: string, blob: Blob): boolean {
   return true;
 }
 
+const NAV_LOW = 'qd-nav-low';
+
+export const navLow = () => localStorage.getItem(NAV_LOW) === 'true';
+
+export function setNavLow(on: boolean) {
+  localStorage.setItem(NAV_LOW, String(on));
+  document.documentElement.classList.toggle('nav-low', on);
+}
+
 export function mountPhone() {
   const host = phone();
   if (!host?.paint) return;
 
   const root = document.documentElement;
   root.classList.add('in-phone');
+  root.classList.toggle('nav-low', navLow());
 
   const tell = () => host.paint?.(getComputedStyle(root).backgroundColor);
   new MutationObserver(tell).observe(root, { attributes: true, attributeFilter: ['class'] });

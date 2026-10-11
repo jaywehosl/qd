@@ -11,9 +11,9 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
+	"github.com/jaywehosl/qd/internal/blocklist"
 	"github.com/jaywehosl/qd/internal/dnsproxy"
 	"github.com/jaywehosl/qd/internal/netstate"
 	"github.com/jaywehosl/qd/internal/qdcrypt"
@@ -62,13 +62,12 @@ type controlState struct {
 	gate  *gate
 	shelf *update.Shelf
 	exits int
-	byDNS int
 	watch *presence
 	epoch int64
 
-	dns    *dnsproxy.Resolver
-	routes atomic.Pointer[routeList]
-	ech    *echHolder
+	dns   *dnsproxy.Resolver
+	lists *blocklist.Lists
+	ech   *echHolder
 
 	confPath string
 }
@@ -369,10 +368,22 @@ func handleControl(state *controlState, req request) response {
 		return reply(req, map[string]int{"id": body.ID})
 
 	case "dns.stats":
-		if state.dns == nil {
-			return reply(req, dnsproxy.Stats{})
+		var said struct {
+			dnsproxy.Stats
+			Blocked uint64 `json:"blocked"`
 		}
-		return reply(req, state.dns.Stats())
+		if state.dns != nil {
+			said.Stats = state.dns.Stats()
+		}
+		said.Blocked = state.lists.Hits()
+		return reply(req, said)
+
+	case "dns.lists":
+		return reply(req, state.lists.Status())
+
+	case "dns.lists.refresh":
+		state.lists.Refresh()
+		return reply(req, map[string]bool{"asked": true})
 
 	case "dns.flush":
 		if state.dns != nil {

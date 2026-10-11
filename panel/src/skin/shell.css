@@ -406,6 +406,34 @@ html.in-phone .antigravity-header:not(.client-header) .header-center {
 }
 
 
+html.in-phone.nav-low .header-right { grid-column: 3; }
+
+html.in-phone.nav-low .header-center,
+html.in-phone.nav-low .antigravity-header:not(.client-header) .header-center {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--inset-bottom, 0px) + 9px);
+  transform: translateX(-50%);
+  z-index: 20;
+}
+
+html.in-phone.nav-low { --island: color-mix(in srgb, var(--idle) 50%, var(--card)); }
+html.is-dark.in-phone.nav-low { --island: var(--idle); }
+
+html.in-phone.nav-low .header-center::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: 19px;
+  background: var(--island);
+}
+html.in-phone.nav-low .header-center > nav { padding: 5px; }
+html.in-phone.nav-low .nav-menu-item { padding: var(--step-2) clamp(10px, 4.4vw - 4px, 16px); }
+html.in-phone.nav-low .nav-menu-item.is-active { background: var(--ink); }
+html.in-phone.nav-low body { padding-bottom: calc(var(--inset-bottom, 0px) + 15px); }
+html.in-phone.nav-low .client-main { padding-bottom: 64px; }
+
 html.in-phone .nav-menu-item:disabled { opacity: 0.35; }
 
 html.in-phone .brand-block { height: 56px; padding: 0; }

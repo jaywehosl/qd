@@ -3,8 +3,8 @@ import { ObjectUtil } from '@/utils';
 export class AllSetting {
   pageSize = 25;
   refreshMinutes: number = 480;
-  routeList = '';
-  routeServices = '';
+  blockTier = 'pro';
+  blockTif = false;
   expireDiff = 0;
   trafficDiff = 0;
   remarkModel = '-io';

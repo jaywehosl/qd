@@ -44,6 +44,7 @@ type Options struct {
 	Fast     func()
 	CatchDNS bool
 	Direct   func(pkt []byte) bool
+	Detour   func(dst netip.Addr) bool
 	Mark     func(pkt []byte) uint64
 	Loud     bool
 	Gateway  netip.Addr
@@ -196,10 +197,16 @@ func (e *Engine) pumpOutbound(ctx context.Context, rd packet.Reader, src packet.
 			catch := e.CatchDNS && ippkt.IsDNS(p.Data)
 			if !catch && (e.Guard.Bypass(dst) || e.stepsAside(p.Data)) {
 				e.cBypass.Add(1)
+				if ippkt.StandIn.Contains(dst) {
+					if refusal := ippkt.Reset4(p.Data); refusal != nil {
+						reinject = append(reinject, packet.Packet{Data: refusal, Dir: packet.Inbound, IfIndex: p.IfIndex})
+					}
+					continue
+				}
 				reinject = append(reinject, *p)
 				continue
 			}
-			if catch || ippkt.IsTCP(p.Data) {
+			if catch || ippkt.IsTCP(p.Data) || (e.Detour != nil && ippkt.IsUDP(p.Data) && e.Detour(dst)) {
 				e.cTCP.Add(1)
 				e.Meter.carried(len(p.Data))
 				tt.push(p.Data)

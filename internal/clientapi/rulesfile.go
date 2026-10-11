@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jaywehosl/qd/internal/clientstate"
+	"github.com/jaywehosl/qd/internal/steerlist"
 )
 
 const rulesTag = "qdr1."
@@ -22,6 +23,8 @@ type rulesFile struct {
 	OS      string      `json:"os"`
 	Default string      `json:"d"`
 	Rules   [][3]string `json:"r"`
+	Domains [][2]string `json:"n,omitempty"`
+	Bundles [][2]string `json:"b,omitempty"`
 }
 
 var errNotRules = errors.New("this is not a qd routing file, or it is damaged")
@@ -39,6 +42,22 @@ func (a *API) ExportRules() (string, error) {
 	f := rulesFile{OS: runtime.GOOS, Default: def, Rules: [][3]string{}}
 	for _, r := range rules {
 		f.Rules = append(f.Rules, [3]string{r.Process, r.Path, r.Role})
+	}
+	domains, err := a.db.DomainRules()
+	if err != nil {
+		return "", err
+	}
+	for _, r := range domains {
+		f.Domains = append(f.Domains, [2]string{r.Domain, r.Role})
+	}
+	bundles, err := a.db.BundleRoles()
+	if err != nil {
+		return "", err
+	}
+	for _, b := range steerlist.Bundles {
+		if role := bundles[b.ID]; role != "" && role != clientstate.RoleTunnel {
+			f.Bundles = append(f.Bundles, [2]string{b.ID, role})
+		}
 	}
 	raw, err := json.Marshal(f)
 	if err != nil {
@@ -83,8 +102,22 @@ func (a *API) ImportRules(code string) (int, error) {
 	if err := a.db.ReplaceRules(f.Default, rules); err != nil {
 		return 0, err
 	}
+	domains := make([]clientstate.DomainRule, 0, len(f.Domains))
+	for _, r := range f.Domains {
+		domains = append(domains, clientstate.DomainRule{Domain: r[0], Role: r[1]})
+	}
+	if err := a.db.ReplaceDomainRules(domains); err != nil {
+		return 0, err
+	}
+	bundles := map[string]string{}
+	for _, b := range f.Bundles {
+		bundles[b[0]] = b[1]
+	}
+	if err := a.db.ReplaceBundleRoles(bundles); err != nil {
+		return 0, err
+	}
 	a.platform.RulesChanged()
-	return len(rules), nil
+	return len(rules) + len(domains) + len(bundles), nil
 }
 
 func osName(goos string) string {

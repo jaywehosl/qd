@@ -1,15 +1,31 @@
 import { lazy, useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { DeleteOutlined, DownloadOutlined, DownOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
+import {
+  AppstoreOutlined, BlockOutlined, DeleteOutlined, DownloadOutlined, DownOutlined, GlobalOutlined, PlusOutlined,
+  UploadOutlined,
+} from '@ant-design/icons';
 
-import { Alert, Button, Card, Dialog, Select, Tag, toast } from '@/components/ds';
-import { Spin } from '@/components/ui';
+import { Alert, Button, Card, Dialog, Field, Input, Select, Tag, toast } from '@/components/ds';
+import { Spin, VerticalTabs } from '@/components/ui';
 import { LazyMount } from '@/components/utility';
+import { iconOf } from '@/pages/settings/routeServices';
 import { ROUTING_ROLES, type RoutingRole } from '@/schemas/client-routing';
 import { useClientRouting } from '@/hooks/useClientRouting';
 import { HttpUtil } from '@/utils';
 import { phone, worded } from '@/lib/phone';
 const ProcessPickerDialog = lazy(() => import('./ProcessPickerDialog'));
+
+type Page = 'process' | 'domain' | 'bundle';
+
+function hostOf(raw: string): string {
+  const bare = raw.trim().replace(/^[a-z][a-z0-9+.-]*:\/\//i, '').replace(/^\*\./, '');
+  try {
+    const host = new URL(`http://${bare}`).hostname.replace(/^\.+|\.+$/g, '');
+    return host.includes('.') && !/^[\d.]+$/.test(host) && !host.includes(':') ? host : '';
+  } catch {
+    return '';
+  }
+}
 
 interface RoutingSectionProps {
   connected: boolean;
@@ -18,8 +34,14 @@ interface RoutingSectionProps {
 
 export default function RoutingSection({ connected, onReconnect }: RoutingSectionProps) {
   const { t } = useTranslation();
-  const { state, loading, setRole, setDefaultRole, remove, add, reset, refresh } = useClientRouting();
+  const {
+    state, loading, setRole, setDefaultRole, remove, add, reset,
+    setDomainRole, removeDomain, addDomain, resetDomains, setBundleRole, resetBundles, refresh,
+  } = useClientRouting();
 
+  const [page, setPage] = useState<Page>('process');
+  const [naming, setNaming] = useState(false);
+  const [name, setName] = useState('');
   const [picking, setPicking] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const [legendOpen, setLegendOpen] = useState(false);
@@ -54,9 +76,31 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
 
   const onPick = useCallback((pick: { process: string; path?: string }) => {
     if (!state) return;
-    const role: RoutingRole = state.defaultRole === 'direct' ? 'tunnel' : 'direct';
-    void add({ ...pick, role });
+    void add({ ...pick, role: 'tunnel' });
   }, [state, add]);
+
+  const pages = useMemo(() => [
+    { key: 'process', label: t('client.routing.byProcess', worded()), icon: <AppstoreOutlined /> },
+    { key: 'domain', label: t('client.routing.byDomain'), icon: <GlobalOutlined /> },
+    { key: 'bundle', label: t('client.routing.byBundle'), icon: <BlockOutlined /> },
+  ], [t]);
+
+  const host = hostOf(name);
+  const hostTaken = (state?.domains ?? []).some((d) => d.domain === host);
+
+  const doName = useCallback(async () => {
+    if (!state || !host || hostTaken) return;
+    setBusy(true);
+    try {
+      const next = await addDomain(host, 'tunnel');
+      if (next) {
+        setNaming(false);
+        setName('');
+      }
+    } finally {
+      setBusy(false);
+    }
+  }, [state, host, hostTaken, addDomain]);
 
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -90,18 +134,22 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
   const doReset = useCallback(async () => {
     setBusy(true);
     try {
-      await reset();
+      await (page === 'bundle' ? resetBundles() : page === 'domain' ? resetDomains() : reset());
       setConfirmReset(false);
     } finally {
       setBusy(false);
     }
-  }, [reset]);
+  }, [page, reset, resetDomains, resetBundles]);
 
   if (loading || !state) {
     return <div className="rt-boot"><Spin spinning size="large" /></div>;
   }
 
-  const { rules, defaultRole, allowExit, applyMode, pendingRestart } = state;
+  const { rules, domains, bundles, defaultRole, allowExit, applyMode, pendingRestart, byDomain } = state;
+  const view: Page = byDomain ? page : 'process';
+  const stack = phone() ? 7 : 9;
+  const named = view === 'domain';
+  const idle = view === 'bundle' ? !bundles.some((b) => b.role && b.role !== 'tunnel') : (named ? domains : rules).length === 0;
   const plain = (r: RoutingRole) => r === 'direct' || r === 'tunnel';
   const shownRoles = ROUTING_ROLES.filter((r) => allowExit || plain(r));
 
@@ -137,17 +185,94 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
         </div>
       </Card>
 
+      {byDomain && (
+        <div className="inb-roles">
+          <VerticalTabs items={pages} activeKey={page} onChange={(key) => setPage(key as Page)} />
+        </div>
+      )}
+
       <Card
         title={t('client.routing.rules')}
-        extra={(
-          <Button size="sm" icon={<PlusOutlined />} onClick={() => setPicking(true)}>
-            {t('client.routing.addRule')}
+        extra={view === 'bundle' ? null : (
+          <Button size="sm" icon={<PlusOutlined />} onClick={() => (named ? setNaming(true) : setPicking(true))}>
+            {t(named ? 'client.routing.addDomain' : 'client.routing.addRule')}
           </Button>
         )}
         flush
       >
-        <div className="rt-rules">
-          {rules.length === 0 ? (
+        <div className="rt-rules qd-page-swap" key={view}>
+          {view === 'bundle' ? bundles.map((b) => {
+            const role = b.role || 'tunnel';
+            return (
+              <div key={b.id} className="rt-rule rt-bundle">
+                <div className="rt-bundle__id">
+                  <span className="rt-rule__name">{b.name}</span>
+                  <span className="rt-stack">
+                    {b.services.slice(0, stack).map((s, i) => {
+                      const icon = iconOf(s.id);
+                      return (
+                        <span
+                          key={s.id}
+                          className={`rt-stack__one${icon?.mono ? ' is-mono' : ''}`}
+                          title={s.name}
+                          style={{ zIndex: stack - i }}
+                        >
+                          {icon ? (
+                            <>
+                              <img className={icon.night ? 'rt-day' : undefined} src={icon.src} alt={s.name} />
+                              {icon.night && <img className="rt-night" src={icon.night} alt={s.name} />}
+                            </>
+                          ) : (
+                            <GlobalOutlined aria-label={s.name} />
+                          )}
+                        </span>
+                      );
+                    })}
+                    {b.services.length > stack && (
+                      <span
+                        className="rt-stack__one rt-stack__more"
+                        title={b.services.slice(stack).map((s) => s.name).join(', ')}
+                      >
+                        +{b.services.length - stack}
+                      </span>
+                    )}
+                  </span>
+                </div>
+                {b.matched ? <Tag>{t('client.routing.flows', { count: b.matched })}</Tag> : null}
+                {!allowExit && (role === 'egress' || role === 'noEgress') && <Tag tone="warning">{t('client.routing.noExit')}</Tag>}
+                <Select
+                  className={`rt-role rt-role--${role}`}
+                  value={role}
+                  options={roleOptions.filter((o) => allowExit || plain(o.value) || o.value === role)}
+                  onChange={(v) => void setBundleRole(b.id, String(v))}
+                />
+              </div>
+            );
+          }) : view === 'domain' ? (domains.length === 0 ? (
+            <div className="rt-empty">{t('client.routing.noDomains', worded())}</div>
+          ) : domains.map((d) => (
+            <div key={d.id} className="rt-rule">
+              <GlobalOutlined className="rt-proc__icon rt-domain__icon" aria-hidden="true" />
+              <div className="rt-rule__id">
+                <span className="rt-rule__name">{d.domain}</span>
+              </div>
+              {d.matched ? <Tag>{t('client.routing.flows', { count: d.matched })}</Tag> : null}
+              {!allowExit && !plain(d.role) && <Tag tone="warning">{t('client.routing.noExit')}</Tag>}
+              <Select
+                className={`rt-role rt-role--${d.role}`}
+                value={d.role}
+                options={roleOptions.filter((o) => allowExit || plain(o.value) || o.value === d.role)}
+                onChange={(v) => void setDomainRole(d.id, v as RoutingRole)}
+              />
+              <Button
+                size="sm"
+                danger
+                icon={<DeleteOutlined />}
+                aria-label={t('client.routing.removeRule')}
+                onClick={() => void removeDomain(d.id)}
+              />
+            </div>
+          ))) : rules.length === 0 ? (
             <div className="rt-empty">{t('client.routing.noRules', worded())}</div>
           ) : rules.map((r) => (
             <div key={r.id} className="rt-rule">
@@ -189,14 +314,18 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
             {t('client.routing.legend')}
           </button>
           <div className="rt-danger__actions">
-            <Button size="sm" icon={<DownloadOutlined />} onClick={() => void doExport()}>
-              {t('client.routing.exportRules')}
+            <Button icon={<DownloadOutlined />} onClick={() => void doExport()}>
+              {t('client.routing.exportRules', worded())}
             </Button>
-            <Button size="sm" icon={<UploadOutlined />} onClick={() => fileRef.current?.click()}>
-              {t('client.routing.importRules')}
+            <Button icon={<UploadOutlined />} onClick={() => fileRef.current?.click()}>
+              {t('client.routing.importRules', worded())}
             </Button>
-            <Button size="sm" danger disabled={rules.length === 0} onClick={() => setConfirmReset(true)}>
-              {t('client.routing.resetRules')}
+            <Button
+              danger
+              disabled={idle}
+              onClick={() => setConfirmReset(true)}
+            >
+              {t('client.routing.resetRules', worded())}
             </Button>
           </div>
           <input
@@ -223,7 +352,10 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
               ))}
             </div>
             <p className="rt-note">{t('client.routing.newFlowsNote')}</p>
-            <p className="rt-note">{t('client.routing.matchNote', worded())}</p>
+            <p className="rt-note">
+              {t(view === 'bundle' ? 'client.routing.bundleNote'
+                : named ? 'client.routing.domainNote' : 'client.routing.matchNote', worded())}
+            </p>
           </div>
         </div>
       </Card>
@@ -246,7 +378,35 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
         confirmLoading={busy}
         onOk={() => void doReset()}
       >
-        <p style={{ margin: 0 }}>{t('client.routing.resetRulesDesc')}</p>
+        <p style={{ margin: 0 }}>
+          {t(view === 'bundle' ? 'client.routing.resetBundlesDesc'
+            : named ? 'client.routing.resetDomainsDesc'
+              : byDomain ? 'client.routing.resetProcessDesc' : 'client.routing.resetRulesDesc', worded())}
+        </p>
+      </Dialog>
+
+      <Dialog
+        open={naming}
+        onOpenChange={(o) => { if (!o) setName(''); setNaming(o); }}
+        title={t('client.routing.addDomain')}
+        okText={t('client.routing.addDomain')}
+        okDisabled={!host || hostTaken}
+        confirmLoading={busy}
+        onOk={() => void doName()}
+      >
+        <Field
+          label={t('client.routing.domainHint')}
+          error={hostTaken ? t('client.routing.domainTaken') : undefined}
+        >
+          <Input
+            autoFocus
+            value={name}
+            placeholder="example.com"
+            spellCheck={false}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') void doName(); }}
+          />
+        </Field>
       </Dialog>
     </div>
   );

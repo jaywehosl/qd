@@ -28,6 +28,7 @@ const (
 	defaultOrigin = "https://docs.datacloudmail.ru"
 	maxReconnect  = 999999
 	browserUA     = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36"
+	browserLang   = "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7"
 )
 
 type Link struct {
@@ -254,6 +255,9 @@ func (s *Session) connect(attempt int) {
 		headers := http.Header{}
 		headers.Set("User-Agent", browserUA)
 		headers.Set("Origin", defaultOrigin)
+		headers.Set("Accept-Language", browserLang)
+		headers.Set("Cache-Control", "no-cache")
+		headers.Set("Pragma", "no-cache")
 
 		conn, resp, err := dialer.Dial(wsURL, headers)
 		if err != nil {
@@ -325,6 +329,7 @@ func (s *Session) mint() (string, error) {
 
 	if req, err := http.NewRequest("GET", pubURL, nil); err == nil {
 		req.Header.Set("User-Agent", browserUA)
+		req.Header.Set("Accept-Language", browserLang)
 		if resp, err := client.Do(req); err == nil {
 			io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 			resp.Body.Close()
@@ -340,6 +345,7 @@ func (s *Session) mint() (string, error) {
 	req.Header.Set("X-Api-Version", "4")
 	req.Header.Set("User-Agent", browserUA)
 	req.Header.Set("Origin", "https://cloud.mail.ru")
+	req.Header.Set("Accept-Language", browserLang)
 	req.Header.Set("Referer", pubURL+"?weblink="+s.cfg.Public)
 
 	resp, err := client.Do(req)

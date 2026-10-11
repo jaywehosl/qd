@@ -17,6 +17,7 @@ import (
 	"github.com/jaywehosl/qd/internal/clientstate"
 	"github.com/jaywehosl/qd/internal/qdcrypt"
 	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
+	"github.com/jaywehosl/qd/internal/steerlist"
 	"github.com/jaywehosl/qd/internal/update"
 )
 
@@ -703,8 +704,18 @@ func (a *API) SetAdblock(on bool) error {
 	if err := a.db.SaveSettings(settings); err != nil {
 		return err
 	}
-	a.seen.SetAdblock(on)
+	a.turnAdblock(on)
 	return nil
+}
+
+func (a *API) turnAdblock(on bool) {
+	if a.seen.Adblock() == on {
+		return
+	}
+	a.seen.SetAdblock(on)
+	if held, ok := a.platform.(interface{ FlushDNS() }); ok {
+		held.FlushDNS()
+	}
 }
 
 func (a *API) refresh(w http.ResponseWriter, r *http.Request) {
@@ -725,7 +736,41 @@ func (a *API) RulesJSON() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return marshal(map[string]any{"defaultRole": defaultRole, "rules": rules, "allowExit": a.exitAllowed()})
+	domains, err := a.db.DomainRules()
+	if err != nil {
+		return "", err
+	}
+	return marshal(map[string]any{"defaultRole": defaultRole, "rules": rules, "domains": domains, "bundles": a.bundles(nil), "allowExit": a.exitAllowed()})
+}
+
+type bundleView struct {
+	ID       string          `json:"id"`
+	Name     string          `json:"name"`
+	Role     string          `json:"role"`
+	Matched  int             `json:"matched"`
+	Services []bundleService `json:"services"`
+}
+
+type bundleService struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+func (a *API) bundles(open map[string]int) []bundleView {
+	roles, _ := a.db.BundleRoles()
+	out := make([]bundleView, 0, len(steerlist.Bundles))
+	for _, b := range steerlist.Bundles {
+		role := roles[b.ID]
+		if role == "" {
+			role = clientstate.RoleTunnel
+		}
+		view := bundleView{ID: b.ID, Name: b.Name, Role: role, Matched: open[steerlist.BundleMark+b.ID], Services: []bundleService{}}
+		for _, s := range b.Services() {
+			view.Services = append(view.Services, bundleService{ID: s.ID, Name: s.Name})
+		}
+		out = append(out, view)
+	}
+	return out
 }
 
 func (a *API) exitAllowed() bool {
@@ -735,14 +780,42 @@ func (a *API) exitAllowed() bool {
 
 func (a *API) SaveRulesJSON(raw string) error {
 	var body struct {
-		DefaultRole string             `json:"defaultRole"`
-		Rules       []clientstate.Rule `json:"rules"`
+		DefaultRole string                    `json:"defaultRole"`
+		Rules       *[]clientstate.Rule       `json:"rules"`
+		Domains     *[]clientstate.DomainRule `json:"domains"`
+		Bundles     *[]struct {
+			ID   string `json:"id"`
+			Role string `json:"role"`
+		} `json:"bundles"`
 	}
 	if err := json.Unmarshal([]byte(raw), &body); err != nil {
 		return err
 	}
-	if err := a.db.ReplaceRules(body.DefaultRole, body.Rules); err != nil {
-		return err
+	if body.Rules != nil || (body.Domains == nil && body.Bundles == nil) {
+		rules := []clientstate.Rule{}
+		if body.Rules != nil {
+			rules = *body.Rules
+		}
+		if body.DefaultRole == "" {
+			body.DefaultRole, _ = a.db.DefaultRole()
+		}
+		if err := a.db.ReplaceRules(body.DefaultRole, rules); err != nil {
+			return err
+		}
+	}
+	if body.Domains != nil {
+		if err := a.db.ReplaceDomainRules(*body.Domains); err != nil {
+			return err
+		}
+	}
+	if body.Bundles != nil {
+		roles := map[string]string{}
+		for _, b := range *body.Bundles {
+			roles[b.ID] = b.Role
+		}
+		if err := a.db.ReplaceBundleRoles(roles); err != nil {
+			return err
+		}
 	}
 	a.platform.RulesChanged()
 	return nil
@@ -801,7 +874,7 @@ func (a *API) Reset(subscription bool) error {
 		a.platform.HoldAutostart(fresh.Autostart)
 	}
 	a.platform.SetExit(fresh.Egress)
-	a.seen.SetAdblock(fresh.Adblock)
+	a.turnAdblock(fresh.Adblock)
 	a.platform.RulesChanged()
 
 	if !subscription {
@@ -995,14 +1068,24 @@ func (a *API) routing(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
+	domains, err := a.db.DomainRules()
+	if err != nil {
+		fail(w, err)
+		return
+	}
 
 	live := map[string]bool{}
 	iconByPath := map[string]string{}
 	iconByName := map[string]string{}
 	titles := map[string]string{}
+	openByName, openByPath := map[string]int{}, map[string]int{}
 	for _, p := range a.platform.Processes() {
 		name := strings.ToLower(p.Name)
 		live[name] = true
+		openByName[name] += p.Connections
+		if p.Path != "" {
+			openByPath[strings.ToLower(p.Path)] += p.Connections
+		}
 		if p.Title != "" {
 			titles[name] = p.Title
 		}
@@ -1017,8 +1100,20 @@ func (a *API) routing(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	onDisk, _ := a.platform.(interface{ IconOf(path string) string })
+	open := map[string]int{}
+	if counted, ok := a.platform.(interface{ DomainFlows() map[string]int }); ok {
+		open = counted.DomainFlows()
+		for i := range domains {
+			domains[i].Matched = open[domains[i].Domain]
+		}
+	}
 	for i := range rules {
 		rules[i].Running = live[strings.ToLower(rules[i].Process)]
+		if rules[i].Path != "" {
+			rules[i].Matched = openByPath[strings.ToLower(rules[i].Path)]
+		} else {
+			rules[i].Matched = openByName[strings.ToLower(rules[i].Process)]
+		}
 		rules[i].Title = titles[strings.ToLower(rules[i].Process)]
 		if icon, known := iconByPath[strings.ToLower(rules[i].Path)]; known && rules[i].Path != "" {
 			rules[i].Icon = icon
@@ -1033,12 +1128,16 @@ func (a *API) routing(w http.ResponseWriter, r *http.Request) {
 		rules[i].Icon = iconByName[strings.ToLower(rules[i].Process)]
 	}
 
+	_, byDomain := a.platform.(interface{ RoutesByDomain() })
 	ok(w, map[string]any{
 		"defaultRole":    defaultRole,
 		"allowExit":      a.exitAllowed(),
+		"byDomain":       byDomain,
 		"applyMode":      "live",
 		"pendingRestart": false,
 		"rules":          rules,
+		"domains":        domains,
+		"bundles":        a.bundles(open),
 	})
 }
 

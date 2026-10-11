@@ -294,13 +294,7 @@ func (n *Node) dialerFor(ctx context.Context, grant Grant, route string, hops in
 	if hops <= 0 {
 		return local
 	}
-	if route == "" {
-		if grant.Steer && n.steer.any() {
-			return steering{node: n, grant: grant, hops: hops, local: local}
-		}
-		return local
-	}
-	if route == n.cfg.SelfID || route == n.cfg.SelfTag {
+	if route == "" || route == n.cfg.SelfID || route == n.cfg.SelfTag {
 		return local
 	}
 	if !grant.AllowExit {
@@ -356,7 +350,7 @@ func (n *Node) serveConnect(w http.ResponseWriter, r *http.Request) {
 
 	dialCtx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	dialer := n.dialerFor(dialCtx, grant, route, hops, origin{})
-	if n.stale(dst) && endsHere(dialer, dst.Addr()) {
+	if n.stale(dst) && endsHere(dialer) {
 		cancel()
 		w.WriteHeader(http.StatusGone)
 		return

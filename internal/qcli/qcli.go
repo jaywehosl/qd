@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -46,6 +47,8 @@ type Options struct {
 	Resolver  string
 	Exit      func(src, dst netip.AddrPort, udp bool) string
 	Direct    func(pkt []byte) bool
+	Detour    func(dst netip.Addr) bool
+	Outside   func(ctx context.Context, network string, dst netip.AddrPort) (net.Conn, error)
 	Bypass    []netip.Prefix
 	Fast      func()
 	Loud      bool
@@ -486,6 +489,7 @@ func (t *Tunnel) Run(ctx context.Context, src packet.Source) error {
 		Fast:     t.opts.Fast,
 		CatchDNS: t.opts.Resolver != "",
 		Direct:   t.opts.Direct,
+		Detour:   t.detour(),
 		Mark:     t.markOf,
 		Loud:     t.opts.Loud,
 	}).Run(ctx, src, t.road)
@@ -537,7 +541,23 @@ func (t *Tunnel) forgetDeadFlows() {
 	t.keepOnly(alive)
 }
 
+func (t *Tunnel) FlowDsts() []netip.Addr {
+	ns := t.stackNow.Load()
+	if ns == nil {
+		return nil
+	}
+	var out []netip.Addr
+	ns.ShutFlows(func(f netstack.Flow) bool {
+		out = append(out, f.Dst.Addr())
+		return false
+	})
+	return out
+}
+
 func (t *Tunnel) exitOf(f netstack.Flow) string {
+	if t.opts.Detour != nil && t.opts.Detour(f.Dst.Addr()) {
+		return asideTag
+	}
 	return exitTag(currentRoute(&t.route), t.opts.Exit, f, true)
 }
 
@@ -573,7 +593,18 @@ func (t *Tunnel) dialer() routed {
 		resolver: t.opts.Resolver,
 		exit:     t.opts.Exit,
 		took:     t.tookFlow,
+		detour:   t.detour(),
+		outside:  t.opts.Outside,
 	}
+}
+
+const asideTag = "aside"
+
+func (t *Tunnel) detour() func(dst netip.Addr) bool {
+	if t.opts.Outside == nil {
+		return nil
+	}
+	return t.opts.Detour
 }
 
 type routed struct {
@@ -582,6 +613,22 @@ type routed struct {
 	resolver string
 	exit     func(src, dst netip.AddrPort, udp bool) string
 	took     func(f netstack.Flow, tag string)
+	detour   func(dst netip.Addr) bool
+	outside  func(ctx context.Context, network string, dst netip.AddrPort) (net.Conn, error)
+}
+
+func (r routed) aside(ctx context.Context, network string, dst netip.AddrPort) (net.Conn, bool, error) {
+	if r.detour == nil || !r.detour(dst.Addr()) {
+		return nil, false, nil
+	}
+	if ippkt.StandIn.Contains(dst.Addr().Unmap()) {
+		return nil, true, errors.New("a stand-in address means nothing outside the tunnel")
+	}
+	if flow, known := netstack.FlowOf(ctx); known {
+		r.took(flow, asideTag)
+	}
+	conn, err := r.outside(ctx, network, dst)
+	return conn, true, err
 }
 
 func (r routed) with(ctx context.Context) connectdial.Dialer {
@@ -599,12 +646,18 @@ func (r routed) DialTCP(ctx context.Context, dst netip.AddrPort) (net.Conn, erro
 	if dst.Port() == 53 && r.resolver != "" {
 		return dnsOverTCP(r.resolver)
 	}
+	if conn, aside, err := r.aside(ctx, "tcp", dst); aside {
+		return conn, err
+	}
 	return r.with(ctx).DialTCP(ctx, dst)
 }
 
 func (r routed) DialUDP(ctx context.Context, dst netip.AddrPort) (net.Conn, error) {
 	if dst.Port() == 53 && r.resolver != "" {
 		return net.Dial("udp", r.resolver)
+	}
+	if conn, aside, err := r.aside(ctx, "udp", dst); aside {
+		return conn, err
 	}
 	return r.with(ctx).DialUDP(ctx, dst)
 }

@@ -30,7 +30,8 @@ type tunnelConfig struct {
 
 	Token func() string
 
-	OnQuery func(name string) (block bool)
+	OnQuery func(name string)
+	Adblock func() bool
 
 	Peers func() []string
 
@@ -201,9 +202,12 @@ func (t *tunnel) bring(ctx context.Context, servers []string, relays []relay.Lin
 	if t.servesDNS() {
 		plan.DNS = &clientdns.Config{
 			Node: servers[0], Token: t.token(), Ask: nodeTalk.Ask,
-			Blocked: t.cfg.OnQuery,
-			Device:  deviceOf().ID,
-			Exit:    func() bool { return routeTag() == anyExit },
+			Adblock:  t.cfg.Adblock,
+			Seen:     t.cfg.OnQuery,
+			Answered: routeByDomain.Learn,
+			Native:   namedDirect,
+			Device:   deviceOf().ID,
+			Exit:     func() bool { return routeTag() == anyExit },
 		}
 	}
 	plan.Dial = qcli.Options{
@@ -220,6 +224,8 @@ func (t *tunnel) bring(ctx context.Context, servers []string, relays []relay.Lin
 		Fast:      runFast,
 		Exit:      exitFor,
 		Direct:    goesDirect,
+		Detour:    detours,
+		Outside:   outside,
 		Loud:      true,
 		Tickets:   t.cfg.Tickets,
 	}

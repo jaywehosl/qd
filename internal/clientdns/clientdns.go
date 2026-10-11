@@ -3,22 +3,28 @@ package clientdns
 import (
 	"errors"
 	"net"
+	"net/netip"
+	"slices"
 	"sync/atomic"
 	"time"
 
 	"github.com/jaywehosl/qd/internal/dnsproxy"
+	"github.com/jaywehosl/qd/internal/ippkt"
 )
 
 type Ask func(endpoint, op, auth string, body, out any) error
 
 type Config struct {
-	Node    string
-	Token   string
-	Ask     Ask
-	Blocked func(name string) bool
-	Say     func(format string, args ...any)
-	Device  string
-	Exit    func() bool
+	Node     string
+	Token    string
+	Ask      Ask
+	Adblock  func() bool
+	Seen     func(name string)
+	Answered func(name string, addrs []netip.Addr)
+	Native   func(name string) bool
+	Say      func(format string, args ...any)
+	Device   string
+	Exit     func() bool
 }
 
 type Stats struct {
@@ -33,7 +39,10 @@ type Resolver struct {
 	exit    func() bool
 	ask     Ask
 	say     func(string, ...any)
-	blocked func(name string) bool
+	adblock func() bool
+	seen    func(name string)
+	learned func(name string, addrs []netip.Addr)
+	native  func(name string) bool
 
 	cache *dnsproxy.Resolver
 
@@ -51,9 +60,9 @@ func New(cfg Config) (*Resolver, error) {
 		return nil, err
 	}
 
-	r := &Resolver{conn: conn, token: cfg.Token, device: cfg.Device, exit: cfg.Exit, ask: cfg.Ask, say: cfg.Say, blocked: cfg.Blocked}
+	r := &Resolver{conn: conn, token: cfg.Token, device: cfg.Device, exit: cfg.Exit, ask: cfg.Ask, say: cfg.Say, adblock: cfg.Adblock, seen: cfg.Seen, learned: cfg.Answered, native: cfg.Native}
 	r.node.Store(&cfg.Node)
-	r.cache = dnsproxy.New(dnsproxy.Config{Cache: cacheSize, MaxTTL: cacheMaxTTL, Stale: cacheStale, Forward: r.fromNode})
+	r.cache = dnsproxy.New(dnsproxy.Config{Cache: cacheSize, MaxTTL: cacheMaxTTL, Stale: cacheStale, Negative: cacheMaxTTL, Forward: r.fromNode})
 	return r, nil
 }
 
@@ -117,12 +126,6 @@ func (r *Resolver) handle(query []byte, from *net.UDPAddr) {
 		return
 	}
 
-	if r.blocked != nil && r.blocked(name) {
-		r.refused.Add(1)
-		r.conn.WriteToUDP(dnsproxy.NXDomain(query), from)
-		return
-	}
-
 	if qtype == 28 && !r.six.Load() {
 		r.noV6.Add(1)
 		r.conn.WriteToUDP(dnsproxy.NoData(query), from)
@@ -145,16 +148,34 @@ func (r *Resolver) handle(query []byte, from *net.UDPAddr) {
 	} else {
 		r.upstream.Add(1)
 	}
+	if r.seen != nil && len(answer) > 3 && answer[3]&0x0F == 0 {
+		r.seen(name)
+	}
+	addrs := dnsproxy.Addrs(answer)
+	if r.native != nil && r.native(name) && slices.ContainsFunc(addrs, ippkt.StandIn.Contains) {
+		answer, addrs = dnsproxy.NoData(query), nil
+	}
+	if r.learned != nil {
+		r.learned(name, addrs)
+	}
 	r.conn.WriteToUDP(answer, from)
 }
 
 func (r *Resolver) fromNode(query []byte) ([]byte, error) {
 	var answer struct {
-		Answer []byte `json:"answer"`
+		Answer  []byte `json:"answer"`
+		Blocked bool   `json:"blocked"`
 	}
-	body := map[string]any{"query": query, "device": r.device, "exit": r.exit != nil && r.exit()}
+	body := map[string]any{
+		"query": query, "device": r.device,
+		"exit":    r.exit != nil && r.exit(),
+		"adblock": r.adblock != nil && r.adblock(),
+	}
 	if err := r.ask(r.asking(), "dns", r.token, body, &answer); err != nil {
 		return nil, err
+	}
+	if answer.Blocked {
+		r.refused.Add(1)
 	}
 	if len(answer.Answer) < 12 {
 		return nil, errors.New("the node returned nothing")

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jaywehosl/qd/internal/clientstate"
+	"github.com/jaywehosl/qd/internal/steerlist"
 )
 
 const (
@@ -300,7 +301,29 @@ func reloadProcessRules(db *clientstate.DB) {
 	r.Load(def, rules)
 	splitRules(r)
 
-	if n := r.dropRerouted(); n > 0 {
+	named := map[string]string{}
+	if domains, err := db.DomainRulesInForce(); err == nil {
+		for _, d := range domains {
+			named[d.Domain] = d.Role
+		}
+	}
+	bundles, _ := db.BundleRolesInForce()
+	was := map[netip.Addr]string{}
+	if liveTunnel.Load() != nil {
+		for _, a := range openRemotes() {
+			was[a], _ = routeByDomain.RoleOf(a)
+		}
+	}
+	routeByDomain.Load(named, steerlist.Lower(bundles), steerlist.Nets(bundles))
+	go flushSystemDNS()
+	var moved []netip.Addr
+	for a, role := range was {
+		if now, _ := routeByDomain.RoleOf(a); now != role {
+			moved = append(moved, a)
+		}
+	}
+
+	if n := r.dropRerouted() + dropMoved(moved); n > 0 {
 		fmt.Printf("routing  %d connections dropped so the new rule takes hold now\n", n)
 	}
 	if held := liveTunnel.Load(); held != nil {

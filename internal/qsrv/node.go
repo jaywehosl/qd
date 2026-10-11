@@ -38,7 +38,6 @@ const (
 type Grant struct {
 	Client    string
 	AllowExit bool
-	Steer     bool
 	Session   uint32
 	Seat      uint32
 	Peer      bool
@@ -143,7 +142,9 @@ type Node struct {
 	pool  *pool
 	nat   *nat46
 	links *links
-	steer steerTable
+
+	exitRest atomic.Int64
+
 	proxy *connectip.Proxy
 	tmpl  *uritemplate.Template
 	site  http.Handler

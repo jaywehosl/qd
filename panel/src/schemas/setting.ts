@@ -5,8 +5,8 @@ const nonNegativeInt = z.number().int().min(0);
 export const AllSettingSchema = z.object({
   pageSize: z.number().int().min(0).max(1000).optional(),
   refreshMinutes: z.number().optional(),
-  routeList: z.string().optional(),
-  routeServices: z.string().optional(),
+  blockTier: z.string().optional(),
+  blockTif: z.boolean().optional(),
   expireDiff: nonNegativeInt.optional(),
   trafficDiff: nonNegativeInt.max(100).optional(),
   remarkModel: z.string().optional(),

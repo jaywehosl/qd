@@ -5,23 +5,20 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/jaywehosl/qd/internal/adblock"
 	"github.com/jaywehosl/qd/internal/clientstate"
 )
 
 type Visits struct {
-	db   *clientstate.DB
-	list *adblock.List
+	db *clientstate.DB
 
 	on   atomic.Bool
 	ch   chan string
 	done chan struct{}
 }
 
-func NewVisits(db *clientstate.DB, list *adblock.List, adblockOn bool) *Visits {
+func NewVisits(db *clientstate.DB, adblockOn bool) *Visits {
 	v := &Visits{
 		db:   db,
-		list: list,
 		ch:   make(chan string, 512),
 		done: make(chan struct{}),
 	}
@@ -33,18 +30,16 @@ func NewVisits(db *clientstate.DB, list *adblock.List, adblockOn bool) *Visits {
 
 func (v *Visits) SetAdblock(on bool) { v.on.Store(on) }
 
-func (v *Visits) Query(name string) bool {
-	if v.on.Load() && v.list.Blocked(name) {
-		return true
-	}
+func (v *Visits) Adblock() bool { return v.on.Load() }
 
-	if !reverseLookup(name) {
-		select {
-		case v.ch <- name:
-		default:
-		}
+func (v *Visits) Note(name string) {
+	if reverseLookup(name) {
+		return
 	}
-	return false
+	select {
+	case v.ch <- name:
+	default:
+	}
 }
 
 func reverseLookup(name string) bool {

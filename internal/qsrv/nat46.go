@@ -10,12 +10,13 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jaywehosl/qd/internal/ippkt"
 	"github.com/jaywehosl/qd/internal/netstate"
 
 	"github.com/jaywehosl/qd/internal/qsrv/server/netstack"
 )
 
-var synthetic = netip.MustParsePrefix("198.18.0.0/15")
+var synthetic = ippkt.StandIn
 
 const (
 	natSlotBits = 20
@@ -249,14 +250,9 @@ func (n *Node) Remember(ctx context.Context, path string) {
 
 const keepEvery = 20 * time.Second
 
-func endsHere(d netstack.Dialer, dst netip.Addr) bool {
-	switch d := d.(type) {
-	case here:
-		return true
-	case steering:
-		return !d.node.steer.has(dst)
-	}
-	return false
+func endsHere(d netstack.Dialer) bool {
+	_, local := d.(here)
+	return local
 }
 
 func SlotOf(p netip.Prefix) int {

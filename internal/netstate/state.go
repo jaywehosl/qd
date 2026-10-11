@@ -48,7 +48,6 @@ type Group struct {
 	ID            int          `json:"id"`
 	Tag           string       `json:"name"`
 	AllowExit     bool         `json:"allowExit"`
-	RouteDNS      bool         `json:"routeDns"`
 	AllowDev      bool         `json:"allowDev"`
 	AllowCore     bool         `json:"allowCore"`
 	DeviceLimit   int          `json:"deviceLimit"`

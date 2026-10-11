@@ -18,6 +18,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/jaywehosl/qd/internal/clientstate"
+	"github.com/jaywehosl/qd/internal/ippkt"
 )
 
 const (
@@ -149,8 +150,14 @@ func renderSplit() {
 		}
 		mark := strconv.Itoa(socketMark)
 		script += "table inet qd {\n" +
+			"\tset inward4 { type ipv4_addr; flags timeout; }\n" +
+			"\tset inward6 { type ipv6_addr; flags timeout; }\n" +
 			"\tchain out {\n\t\ttype route hook output priority mangle; policy accept;\n" +
+			"\t\tip daddr @inward4 return\n\t\tip6 daddr @inward6 return\n" +
 			"\t\t" + match + " meta mark set " + mark + " ct mark set " + mark + "\n\t}\n" +
+			"\tchain refuse {\n\t\ttype filter hook output priority filter; policy accept;\n" +
+			"\t\tmeta mark " + mark + " ip daddr " + ippkt.StandIn.String() + " meta l4proto tcp reject with tcp reset\n" +
+			"\t\tmeta mark " + mark + " ip daddr " + ippkt.StandIn.String() + " reject\n\t}\n" +
 			"\tchain pre {\n\t\ttype filter hook prerouting priority mangle; policy accept;\n" +
 			"\t\tct mark " + mark + " meta mark set " + mark + "\n\t}\n" +
 			"\tchain post {\n\t\ttype nat hook postrouting priority srcnat; policy accept;\n" +
@@ -164,6 +171,49 @@ func renderSplit() {
 	if out, err := cmd.CombinedOutput(); err != nil && !errors.Is(err, exec.ErrNotFound) {
 		fmt.Printf("routing  nft: %v %s\n", err, strings.TrimSpace(string(out)))
 	}
+	go routeByDomain.Replay()
+}
+
+var inwardLine = make(chan []netip.Addr, 256)
+
+func init() {
+	routeByDomain.Placed = func(role string, addrs []netip.Addr) {
+		if role == clientstate.RoleDirect {
+			return
+		}
+		select {
+		case inwardLine <- append([]netip.Addr{}, addrs...):
+		default:
+		}
+	}
+	go func() {
+		for addrs := range inwardLine {
+			split.mu.Lock()
+			live := split.up && split.mode != splitNone && !split.broken
+			split.mu.Unlock()
+			if !live {
+				continue
+			}
+			var v4, v6 []string
+			for _, a := range addrs {
+				if a = a.Unmap(); a.Is4() {
+					v4 = append(v4, a.String()+" timeout 1h")
+				} else {
+					v6 = append(v6, a.String()+" timeout 1h")
+				}
+			}
+			script := ""
+			if len(v4) > 0 {
+				script += "add element inet qd inward4 { " + strings.Join(v4, ", ") + " }\n"
+			}
+			if len(v6) > 0 {
+				script += "add element inet qd inward6 { " + strings.Join(v6, ", ") + " }\n"
+			}
+			cmd := exec.Command("nft", "-f", "-")
+			cmd.Stdin = strings.NewReader(script)
+			cmd.Run()
+		}
+	}()
 }
 
 func keepSplit() {

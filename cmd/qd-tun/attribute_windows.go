@@ -382,6 +382,38 @@ func dropConnection(r tcpRow) bool {
 	return rc == 0
 }
 
+func openRemotes() []netip.Addr {
+	rows := tcpRowsWithPid()
+	out := make([]netip.Addr, 0, len(rows))
+	for _, row := range rows {
+		if addr := row.remoteAddr; addr != 0 {
+			out = append(out, netip.AddrFrom4([4]byte{byte(addr), byte(addr >> 8), byte(addr >> 16), byte(addr >> 24)}))
+		}
+	}
+	return out
+}
+
+func dropMoved(moved []netip.Addr) int {
+	if len(moved) == 0 {
+		return 0
+	}
+	hit := make(map[netip.Addr]bool, len(moved))
+	for _, a := range moved {
+		hit[a] = true
+	}
+	dropped := 0
+	for _, row := range tcpRowsWithPid() {
+		addr := row.remoteAddr
+		if row.pid == self || addr == 0 {
+			continue
+		}
+		if hit[netip.AddrFrom4([4]byte{byte(addr), byte(addr >> 8), byte(addr >> 16), byte(addr >> 24)})] && dropConnection(row) {
+			dropped++
+		}
+	}
+	return dropped
+}
+
 func (r *procRouter) dropRerouted() int {
 	r.mu.RLock()
 	oldPath, oldName, oldDef := r.prevByPath, r.prevByName, r.prevDef

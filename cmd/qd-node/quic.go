@@ -25,7 +25,6 @@ import (
 type gate struct {
 	mu      sync.RWMutex
 	allowed map[uint32]bool
-	routed  map[uint32]bool
 	dev     map[uint32]bool
 	core    map[uint32]bool
 	told    map[uint32]string
@@ -42,7 +41,7 @@ type seated struct {
 }
 
 func newGate() *gate {
-	return &gate{allowed: map[uint32]bool{}, routed: map[uint32]bool{}, dev: map[uint32]bool{}, core: map[uint32]bool{}, told: map[uint32]string{}, seats: map[uint32]seated{}}
+	return &gate{allowed: map[uint32]bool{}, dev: map[uint32]bool{}, core: map[uint32]bool{}, told: map[uint32]string{}, seats: map[uint32]seated{}}
 }
 
 func (g *gate) list() map[uint32]struct{} {
@@ -67,7 +66,6 @@ func (g *gate) add(id uint32) {
 func (g *gate) del(id uint32) {
 	g.mu.Lock()
 	delete(g.allowed, id)
-	delete(g.routed, id)
 	delete(g.dev, id)
 	delete(g.core, id)
 	delete(g.told, id)
@@ -82,24 +80,10 @@ func (g *gate) exit(id uint32, allow bool) {
 	g.mu.Unlock()
 }
 
-func (g *gate) route(id uint32, allow bool) {
-	g.mu.Lock()
-	if _, held := g.allowed[id]; held {
-		g.routed[id] = allow
-	}
-	g.mu.Unlock()
-}
-
 func (g *gate) exits(id uint32) bool {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 	return g.allowed[id]
-}
-
-func (g *gate) routes(id uint32) bool {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
-	return g.routed[id]
 }
 
 func (g *gate) setNetwork(key string) {
@@ -121,7 +105,7 @@ func (g *gate) verify(raw string) (qsrv.Grant, bool) {
 	if !held {
 		return qsrv.Grant{}, false
 	}
-	return qsrv.Grant{Client: raw, AllowExit: allowExit, Steer: g.routed[id], Session: id, Peer: g.peer[id]}, true
+	return qsrv.Grant{Client: raw, AllowExit: allowExit, Session: id, Peer: g.peer[id]}, true
 }
 
 func tunablesFrom(s store.NetworkSettings) qsrv.Tunables {

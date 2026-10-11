@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -47,6 +48,13 @@ func goesDirect(pkt []byte) bool {
 				if p.Contains(dst) {
 					return true
 				}
+			}
+		}
+	}
+	if routeByDomain.Active() {
+		if dst, ok := ippkt.Dst(pkt); ok {
+			if role, known := routeByDomain.RoleOf(dst); known {
+				return role == clientstate.RoleDirect
 			}
 		}
 	}
@@ -172,3 +180,7 @@ func releaseDriver() {
 		fmt.Printf("windivert the capture driver was asked to unload\n")
 	}
 }
+
+func (p hostPlatform) RoutesByDomain() {}
+
+var outside func(ctx context.Context, network string, dst netip.AddrPort) (net.Conn, error)

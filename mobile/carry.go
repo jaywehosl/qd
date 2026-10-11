@@ -3,12 +3,15 @@ package qdmobile
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/netip"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/jaywehosl/qd/internal/clientdns"
 	"github.com/jaywehosl/qd/internal/clientrun"
+	"github.com/jaywehosl/qd/internal/clientstate"
 	"github.com/jaywehosl/qd/internal/pace"
 	"github.com/jaywehosl/qd/internal/peers"
 	"github.com/jaywehosl/qd/internal/qcli"
@@ -17,6 +20,7 @@ import (
 	"github.com/jaywehosl/qd/internal/qdcrypt"
 	"github.com/jaywehosl/qd/internal/qsrv"
 	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
+	"github.com/jaywehosl/qd/internal/steerlist"
 )
 
 func (c *Client) carry(servers []string, relays []relay.Link, session uint32) error {
@@ -73,16 +77,28 @@ func (c *Client) carry(servers []string, relays []relay.Link, session uint32) er
 			Keep:      c.keeper(),
 			Exit:      c.exitFor,
 			Direct:    c.goesDirect,
+			Detour:    c.detours,
+			Outside:   c.outside,
 			Loud:      loud.Load(),
 			Tickets:   c.db.Tickets(),
 		},
 		Wait: dialWait,
 		DNS: &clientdns.Config{
 			Node: servers[0], Token: c.token(), Ask: c.wire().Ask,
-			Say:     say,
-			Device:  c.device.ID,
-			Exit:    func() bool { return exit.Load() == uint32(qdcrypt.ExitEgress) },
-			Blocked: func(name string) bool { return seen != nil && seen.Query(name) },
+			Say:      say,
+			Device:   c.device.ID,
+			Exit:     func() bool { return exit.Load() == uint32(qdcrypt.ExitEgress) },
+			Adblock:  func() bool { return seen != nil && seen.Adblock() },
+			Answered: c.names.Learn,
+			Native: func(name string) bool {
+				role, known := c.names.RoleOfName(name)
+				return known && role == clientstate.RoleDirect
+			},
+			Seen: func(name string) {
+				if seen != nil {
+					seen.Note(name)
+				}
+			},
 		},
 		Source: func(ctx context.Context, live *qcli.Tunnel) (packet.Source, error) {
 			six, carried := live.Six()
@@ -228,7 +244,40 @@ func (c *Client) route() string {
 	return ""
 }
 
+func (c *Client) loadNames() {
+	rules, err := c.db.DomainRulesInForce()
+	if err != nil {
+		return
+	}
+	named := make(map[string]string, len(rules))
+	for _, rule := range rules {
+		named[rule.Domain] = rule.Role
+	}
+	bundles, _ := c.db.BundleRolesInForce()
+	c.names.Load(named, steerlist.Lower(bundles), steerlist.Nets(bundles))
+}
+
+func (c *Client) detours(dst netip.Addr) bool {
+	role, known := c.names.RoleOf(dst)
+	return known && role == clientstate.RoleDirect
+}
+
+func (c *Client) outside(ctx context.Context, network string, dst netip.AddrPort) (net.Conn, error) {
+	keep := c.keeper()
+	dialer := net.Dialer{Control: func(_, _ string, raw syscall.RawConn) error { return raw.Control(keep) }}
+	return dialer.DialContext(ctx, network, dst.String())
+}
+
 func (c *Client) exitFor(src, dst netip.AddrPort, udp bool) string {
+	if role, known := c.names.RoleOf(dst.Addr()); known {
+		switch role {
+		case clientstate.RoleEgress:
+			return qsrv.AnyExit
+		case clientstate.RoleNoEgress:
+			return ""
+		}
+		return c.route()
+	}
 	if c.marks.forFlow(src, dst, udp) == qdcrypt.ExitEgress {
 		return qsrv.AnyExit
 	}

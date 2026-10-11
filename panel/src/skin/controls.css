@@ -98,6 +98,11 @@ html.is-dark :is(.ds-input, .ds-select, .ds-field input, .ds-field textarea, .ds
   color: var(--text);
 }
 
+.ds-field__error {
+  font-size: var(--size-note);
+  color: #e03a2f;
+}
+
 .ds-switch {
   position: relative;
   width: 40px;

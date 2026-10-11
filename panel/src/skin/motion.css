@@ -94,7 +94,28 @@
   animation: qd-page-in 0.24s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
-:root[data-vt='theme'] .topbar-shell { view-transition-name: none; }
+html.in-phone.nav-low .header-center { view-transition-name: qd-island; }
+
+::view-transition-group(qd-island) {
+  border-radius: 19px;
+  background: var(--island);
+  animation-duration: 0.3s;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+::view-transition-image-pair(qd-island) {
+  border-radius: 19px;
+  overflow: clip;
+}
+
+::view-transition-old(qd-island),
+::view-transition-new(qd-island) {
+  height: 100%;
+  object-fit: none;
+}
+
+:root[data-vt='theme'] .topbar-shell,
+:root[data-vt='theme'].in-phone.nav-low .header-center { view-transition-name: none; }
 
 :root[data-vt='theme']::view-transition-old(root) {
   animation: qd-fade-out 0.2s ease both;

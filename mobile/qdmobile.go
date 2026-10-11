@@ -10,10 +10,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/jaywehosl/qd/internal/adblock"
 	"github.com/jaywehosl/qd/internal/clientapi"
 	"github.com/jaywehosl/qd/internal/clientdns"
 	"github.com/jaywehosl/qd/internal/clientstate"
+	"github.com/jaywehosl/qd/internal/domainroute"
 	"github.com/jaywehosl/qd/internal/panel"
 	"github.com/jaywehosl/qd/internal/qcli"
 	"github.com/jaywehosl/qd/internal/qcli/packet"
@@ -62,6 +62,7 @@ type Client struct {
 	protector Protector
 	talk      *qwire.Dialer
 	marks     *marks
+	names     *domainroute.Table
 	key       *qdcrypt.Key
 	session   uint32
 	mtu       int
@@ -91,6 +92,7 @@ type Client struct {
 	apps    []clientapi.Process
 	appsAt  time.Time
 	listing bool
+	listed  sync.Once
 	seat    *panel.Seat
 }
 
@@ -132,9 +134,11 @@ func Open(stateDir string, host Host, protector Protector, deviceID, model, name
 	}
 	c.rate.Store(int64(settings.FixedRate))
 	c.profile.Store(&settings.BBRProfile)
-	c.seen = clientapi.NewVisits(db, adblock.Default(), settings.Adblock)
+	c.seen = clientapi.NewVisits(db, settings.Adblock)
 	c.marks = newMarks(host)
 	c.marks.reload(db)
+	c.names = domainroute.New()
+	c.loadNames()
 
 	if raw, err := hex.DecodeString(settings.NetworkKey); err == nil && len(raw) == qdcrypt.KeySize {
 		var k qdcrypt.Key

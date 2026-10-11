@@ -17,8 +17,6 @@
   gap: var(--step-4);
 }
 
-html.is-dark .rt-rules,
-
 .rt-default__text {
   display: flex;
   flex-direction: column;
@@ -379,6 +377,73 @@ html.is-dark .rt-rules,
   image-rendering: -webkit-optimize-contrast;
 }
 
+.rt-bundle__id {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--step-4);
+}
+
+.rt-bundle__id > .rt-rule__name { flex: 0 0 132px; }
+
+.rt-stack {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding-left: 7px;
+}
+
+.rt-stack__one {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  margin-left: -7px;
+  border-radius: 6px;
+  background: var(--card);
+  box-shadow: 0 0 0 1.5px var(--card);
+  color: var(--text);
+  font-size: 18px;
+}
+
+.rt-stack__one img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.rt-stack__one .rt-night,
+html.is-dark .rt-stack__one .rt-day { display: none; }
+html.is-dark .rt-stack__one .rt-night { display: block; }
+html.is-dark .rt-stack__one.is-mono img { filter: invert(1); }
+
+.rt-stack__more {
+  width: auto;
+  min-width: 30px;
+  height: 22px;
+  padding: 0 6px 0 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--text) 16%, var(--card));
+  color: var(--bold);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+html.in-phone .rt-bundle__id { flex-direction: column; align-items: flex-start; gap: var(--step-2); }
+html.in-phone .rt-bundle__id > .rt-rule__name { flex: none; }
+
+.rt-domain__icon {
+  display: grid;
+  place-items: center;
+  font-size: 16px;
+  color: var(--text);
+}
+
 .rt-proc__icon--blank {
   border-radius: 5px;
   background: var(--card);
@@ -396,7 +461,10 @@ html.in-phone .rt-rule { gap: var(--step-2); }
 html.in-phone .rt-rule__id { flex-direction: column; align-items: flex-start; gap: 0; }
 html.in-phone .rt-rule__id > * { flex: 0 0 auto; max-width: 100%; }
 html.in-phone .rt-danger { flex-direction: column; align-items: stretch; }
-html.in-phone .rt-danger__actions { justify-content: flex-start; }
+html.in-phone .rt-danger__actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+html.in-phone .rt-danger__actions .ds-btn { padding-inline: 6px; }
+html.in-phone .rt-rules { overflow: visible; }
+html.in-phone .rt-rule > .ds-tag:not(.ds-tag--warning) { display: none; }
 html.in-phone .rt-proc { gap: var(--step-2); padding: 9px var(--step-2); }
 html.in-phone .up-head { position: static; transform: none; padding: 0; margin-top: var(--step-2); }
 html.in-phone .up-head .cx-power__main {
