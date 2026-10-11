@@ -22,6 +22,7 @@ import (
 	"time"
 
 	quic "github.com/quic-go/quic-go"
+	"github.com/quic-go/quic-go/http3"
 
 	"github.com/jaywehosl/qd/internal/netstate"
 	"github.com/jaywehosl/qd/internal/qdcrypt"
@@ -374,8 +375,9 @@ func printStats(node *qsrv.Node) {
 	runtime.ReadMemStats(&mem)
 	bbr, brutal := quic.CongestionSenders()
 	outlets, links := qsrv.Dropped()
-	fmt.Printf("sessions=%d transits=%d refused=%d goroutines=%d heap=%dMB sys=%dMB senders bbr=%d brutal=%d dropped outlet=%d link=%d\n",
-		sessions, transits, refused, runtime.NumGoroutine(), mem.HeapAlloc>>20, mem.Sys>>20, bbr, brutal, outlets, links)
+	_, missed := quic.DatagramStats()
+	fmt.Printf("sessions=%d transits=%d refused=%d goroutines=%d heap=%dMB sys=%dMB senders bbr=%d brutal=%d dropped outlet=%d link=%d shed=%d missed=%d unread=%d\n",
+		sessions, transits, refused, runtime.NumGoroutine(), mem.HeapAlloc>>20, mem.Sys>>20, bbr, brutal, outlets, links, quic.DatagramsShed(), missed, http3.StreamDatagramsDropped())
 
 	for _, s := range node.Sessions() {
 		if s.PktUp == 0 && s.PktDown == 0 {

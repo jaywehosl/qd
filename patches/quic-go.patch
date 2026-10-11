@@ -1,5 +1,5 @@
---- a/connection.go	2026-10-02 13:14:41.950672400 +0300
-+++ b/connection.go	2026-10-02 13:14:42.955716400 +0300
+--- a/connection.go
++++ b/connection.go
 @@ -8,6 +8,7 @@
  	"fmt"
  	"io"
@@ -84,6 +84,15 @@
  	)
  	c.rttStats = utils.NewRTTStats()
  	c.connFlowController = flowcontrol.NewConnectionFlowController(
+@@ -556,7 +570,7 @@
+ 
+ 	c.receivedPacketHandler = *ackhandler.NewReceivedPacketHandler(c.logger)
+ 
+-	c.datagramQueue = newDatagramQueue(c.scheduleSending, c.logger)
++	c.datagramQueue = newDatagramQueue(c.scheduleSending, c.conn != nil && c.conn.capabilities().GSO, c.logger)
+ 	c.connState.Version = c.version
+ }
+ 
 @@ -1943,6 +1957,10 @@
  		err = c.connIDGenerator.Retire(frame.SequenceNumber, destConnID, rcvTime.Add(3*c.rttStats.PTO(false)))
  	case *wire.HandshakeDoneFrame:
@@ -113,7 +122,73 @@
  	c.connFlowController.UpdateSendWindow(params.InitialMaxData)
  	c.rttStats.SetMaxAckDelay(params.MaxAckDelay)
  	c.connIDGenerator.SetMaxActiveConnIDs(params.ActiveConnectionIDLimit)
-@@ -3095,6 +3117,7 @@
+@@ -2563,6 +2585,7 @@
+ 		ecn := c.sentPacketHandler.ECNMode(true)
+ 		if _, err := c.appendOneShortHeaderPacket(buf, c.maxPacketSize(), ecn, now); err != nil {
+ 			if err == errNothingToPack {
++				c.sentPacketHandler.AppLimited()
+ 				buf.Release()
+ 				return nil
+ 			}
+@@ -2593,23 +2616,35 @@
+ 	}
+ }
+ 
++const maxGSOSegments = 64
++
+ func (c *Conn) sendPacketsWithGSO(now monotime.Time) error {
+ 	buf := getLargePacketBuffer()
+ 	maxSize := c.maxPacketSize()
++	var segment protocol.ByteCount
+ 
+ 	ecn := c.sentPacketHandler.ECNMode(true)
+ 	for {
+ 		var dontSendMore bool
++		var spill *packetBuffer
++		start := buf.Len()
+ 		size, err := c.appendOneShortHeaderPacket(buf, maxSize, ecn, now)
+ 		if err != nil {
+ 			if err != errNothingToPack {
+ 				return err
+ 			}
++			c.sentPacketHandler.AppLimited()
+ 			if buf.Len() == 0 {
+ 				buf.Release()
+ 				return nil
+ 			}
+ 			dontSendMore = true
++		} else if start == 0 {
++			segment = size
++		} else if size > segment {
++			spill = getLargePacketBuffer()
++			spill.Data = append(spill.Data, buf.Data[start:]...)
++			buf.Data = buf.Data[:start]
+ 		}
+ 
+ 		if !dontSendMore {
+@@ -2627,14 +2662,18 @@
+ 
+ 		// Append another packet if
+ 		// 1. The congestion controller and pacer allow sending more
+-		// 2. The last packet appended was a full-size packet
++		// 2. The last packet appended has the size of the first one in this batch
+ 		// 3. The next packet will have the same ECN marking
+ 		// 4. We still have enough space for another full-size packet in the buffer
+-		if !dontSendMore && size == maxSize && nextECN == ecn && buf.Len()+maxSize <= buf.Cap() {
++		if !dontSendMore && spill == nil && size == segment && nextECN == ecn &&
++			buf.Len()+maxSize <= buf.Cap() && buf.Len() < maxGSOSegments*segment {
+ 			continue
+ 		}
+ 
+-		c.sendQueue.Send(buf, uint16(maxSize), ecn)
++		c.sendQueue.Send(buf, uint16(segment), ecn)
++		if spill != nil {
++			c.sendQueue.SendWaiting(spill, uint16(size), ecn)
++		}
+ 
+ 		if dontSendMore {
+ 			return nil
+@@ -3095,6 +3134,7 @@
  		200*time.Millisecond, // initial RTT estimate
  		func() {
  			runner := (*packetHandlerMap)(t)
@@ -121,7 +196,7 @@
  			c.connIDGenerator.AddConnRunner(
  				runner,
  				connRunnerCallbacks{
-@@ -3107,6 +3130,41 @@
+@@ -3107,6 +3147,41 @@
  	), nil
  }
  
@@ -163,7 +238,7 @@
  // HandshakeComplete blocks until the handshake completes (or fails).
  // For the client, data sent before completion of the handshake is encrypted with 0-RTT keys.
  // For the server, data sent before completion of the handshake is encrypted with 1-RTT keys,
-@@ -3147,3 +3205,33 @@
+@@ -3147,3 +3222,33 @@
  func estimateMaxPayloadSize(mtu protocol.ByteCount) protocol.ByteCount {
  	return mtu - 1 /* type byte */ - 20 /* maximum connection ID length */ - 16 /* tag size */
  }
@@ -197,15 +272,17 @@
 +	})
 +	c.qdFreqSeq++
 +}
---- a/datagram_queue.go	2026-10-02 13:14:41.648334900 +0300
-+++ b/datagram_queue.go	2026-10-02 13:14:42.955716400 +0300
-@@ -3,15 +3,38 @@
+--- a/datagram_queue.go
++++ b/datagram_queue.go
+@@ -3,21 +3,71 @@
  import (
  	"context"
  	"sync"
 +	"sync/atomic"
++	"time"
  
 +	"github.com/quic-go/quic-go/internal/ackhandler"
++	"github.com/quic-go/quic-go/internal/monotime"
  	"github.com/quic-go/quic-go/internal/utils"
  	"github.com/quic-go/quic-go/internal/utils/ringbuffer"
  	"github.com/quic-go/quic-go/internal/wire"
@@ -217,7 +294,12 @@
 +var (
 +	datagramsDropped atomic.Uint64
 +	datagramsRcvd    atomic.Uint64
++	datagramsShed    atomic.Uint64
 +)
++
++func DatagramsShed() uint64 { return datagramsShed.Load() }
++
++var DatagramFlow func(data []byte) uint32
 +
 +// DatagramStats возвращает число принятых и молча отброшенных (переполнение
 +// очереди приёма) датаграмм.
@@ -235,12 +317,206 @@
 +	// отправителя (stop-and-go), rcv молча дропал при burst. Раздувать тоже нельзя:
 +	// длинная очередь = bufferbloat (пакет ждёт дренажа → RTT под нагрузкой растёт).
 +	// Ориентир — покрыть burst обработки, а не BDP (за in-flight отвечает congestion).
-+	maxDatagramSendQueueLen = 256
++	maxDatagramSendQueueLen = 1024
 +	maxDatagramRcvQueueLen  = 1024
++	maxDatagramSojourn      = 60 * time.Millisecond
++	datagramGather          = time.Millisecond
  )
  
++type queuedDatagram struct {
++	f  *wire.DatagramFrame
++	at monotime.Time
++}
++
++type datagramFlow struct {
++	q    ringbuffer.RingBuffer[queuedDatagram]
++	last monotime.Time
++}
++
++const maxDatagramFlows = 256
++
  type datagramQueue struct {
-@@ -104,8 +127,13 @@
+-	sendMx    sync.Mutex
+-	sendQueue ringbuffer.RingBuffer[*wire.DatagramFrame]
+-	sent      chan struct{} // used to notify Add that a datagram was dequeued
++	sendMx sync.Mutex
++	flows  map[uint32]*datagramFlow
++	active []uint32
++	queued int
++	peeked *wire.DatagramFrame
++
++	gather  bool
++	waiting bool
++	timer   *time.Timer
+ 
+ 	rcvMx    sync.Mutex
+ 	rcvQueue [][]byte
+@@ -31,11 +81,12 @@
+ 	logger utils.Logger
+ }
+ 
+-func newDatagramQueue(hasData func(), logger utils.Logger) *datagramQueue {
++func newDatagramQueue(hasData func(), gather bool, logger utils.Logger) *datagramQueue {
+ 	return &datagramQueue{
+ 		hasData: hasData,
++		gather:  gather,
++		flows:   map[uint32]*datagramFlow{},
+ 		rcvd:    make(chan struct{}, 1),
+-		sent:    make(chan struct{}, 1),
+ 		closed:  make(chan struct{}),
+ 		logger:  logger,
+ 	}
+@@ -45,51 +96,123 @@
+ // Up to 32 DATAGRAM frames will be queued.
+ // Once that limit is reached, Add blocks until the queue size has reduced.
+ func (h *datagramQueue) Add(f *wire.DatagramFrame) error {
++	select {
++	case <-h.closed:
++		return h.closeErr
++	default:
++	}
++	var key uint32
++	if DatagramFlow != nil {
++		key = DatagramFlow(f.Data)
++	}
+ 	h.sendMx.Lock()
+-
+-	for {
+-		if h.sendQueue.Len() < maxDatagramSendQueueLen {
+-			h.sendQueue.PushBack(f)
+-			h.sendMx.Unlock()
+-			h.hasData()
+-			return nil
++	if h.queued >= maxDatagramSendQueueLen {
++		h.shedFattest()
++	}
++	flow := h.flows[key]
++	if flow == nil {
++		if len(h.flows) >= maxDatagramFlows {
++			for k, idle := range h.flows {
++				if idle.q.Empty() {
++					delete(h.flows, k)
++				}
++			}
+ 		}
+-		select {
+-		case <-h.sent: // drain the queue so we don't loop immediately
+-		default:
++		flow = &datagramFlow{}
++		h.flows[key] = flow
++	}
++	if flow.q.Empty() {
++		h.active = append(h.active, key)
++	}
++	now := monotime.Now()
++	hot := h.gather && now.Sub(flow.last) < datagramGather
++	flow.last = now
++	flow.q.PushBack(queuedDatagram{f: f, at: now})
++	h.queued++
++	if hot && !h.waiting {
++		h.waiting = true
++		if h.timer == nil {
++			h.timer = time.AfterFunc(datagramGather, h.flush)
++		} else {
++			h.timer.Reset(datagramGather)
+ 		}
+-		h.sendMx.Unlock()
+-		select {
+-		case <-h.closed:
+-			return h.closeErr
+-		case <-h.sent:
++	}
++	h.sendMx.Unlock()
++	if !hot {
++		h.hasData()
++	}
++	return nil
++}
++
++func (h *datagramQueue) flush() {
++	h.sendMx.Lock()
++	h.waiting = false
++	h.sendMx.Unlock()
++	h.hasData()
++}
++
++func (h *datagramQueue) shedFattest() {
++	at, most := -1, 0
++	for i, key := range h.active {
++		if n := h.flows[key].q.Len(); n > most {
++			at, most = i, n
+ 		}
+-		h.sendMx.Lock()
++	}
++	if at < 0 {
++		return
++	}
++	flow := h.flows[h.active[at]]
++	_ = flow.q.PopFront()
++	h.queued--
++	datagramsShed.Add(1)
++	if flow.q.Empty() {
++		h.active = append(h.active[:at], h.active[at+1:]...)
+ 	}
+ }
+ 
+-// Peek gets the next DATAGRAM frame for sending.
+-// If actually sent out, Pop needs to be called before the next call to Peek.
+ func (h *datagramQueue) Peek() *wire.DatagramFrame {
+ 	h.sendMx.Lock()
+ 	defer h.sendMx.Unlock()
+-	if h.sendQueue.Empty() {
+-		return nil
++	now := monotime.Now()
++	for len(h.active) > 0 {
++		flow := h.flows[h.active[0]]
++		for !flow.q.Empty() {
++			head := flow.q.PeekFront()
++			if now.Sub(head.at) <= maxDatagramSojourn {
++				h.peeked = head.f
++				return head.f
++			}
++			_ = flow.q.PopFront()
++			h.queued--
++			datagramsShed.Add(1)
++		}
++		h.active = h.active[1:]
+ 	}
+-	return h.sendQueue.PeekFront()
++	h.peeked = nil
++	return nil
+ }
+ 
+ func (h *datagramQueue) Pop() {
+ 	h.sendMx.Lock()
+ 	defer h.sendMx.Unlock()
+-	_ = h.sendQueue.PopFront()
+-	select {
+-	case h.sent <- struct{}{}:
+-	default:
++	if len(h.active) == 0 || h.peeked == nil {
++		return
++	}
++	key := h.active[0]
++	flow := h.flows[key]
++	if flow.q.Empty() || flow.q.PeekFront().f != h.peeked {
++		h.peeked = nil
++		return
++	}
++	h.peeked = nil
++	_ = flow.q.PopFront()
++	h.queued--
++	h.active = h.active[1:]
++	if !flow.q.Empty() {
++		h.active = append(h.active, key)
+ 	}
+ }
+ 
+-// HandleDatagramFrame handles a received DATAGRAM frame.
+ func (h *datagramQueue) HandleDatagramFrame(f *wire.DatagramFrame) {
+ 	data := make([]byte, len(f.Data))
+ 	copy(data, f.Data)
+@@ -104,8 +227,13 @@
  		}
  	}
  	h.rcvMx.Unlock()
@@ -338,8 +614,8 @@
 +	h.ackQueued = true
 +	h.ackAlarm = 0
 +}
---- a/internal/ackhandler/sent_packet_handler.go	2026-10-02 13:14:42.050421900 +0300
-+++ b/internal/ackhandler/sent_packet_handler.go	2026-10-02 13:14:42.929856800 +0300
+--- a/internal/ackhandler/sent_packet_handler.go
++++ b/internal/ackhandler/sent_packet_handler.go
 @@ -3,9 +3,13 @@
  import (
  	"errors"
@@ -444,7 +720,7 @@
  		return nil
  	}
  
-@@ -1028,6 +1043,7 @@
+@@ -1028,9 +1043,16 @@
  }
  
  func (h *sentPacketHandler) SetMaxDatagramSize(s protocol.ByteCount) {
@@ -452,7 +728,16 @@
  	h.congestion.SetMaxDatagramSize(s)
  }
  
-@@ -1131,13 +1147,70 @@
++func (h *sentPacketHandler) AppLimited() {
++	if c, ok := h.congestion.(interface{ OnAppLimited(protocol.ByteCount) }); ok {
++		c.OnAppLimited(h.bytesInFlight)
++	}
++}
++
+ func (h *sentPacketHandler) isAmplificationLimited() bool {
+ 	if h.peerAddressValidated {
+ 		return false
+@@ -1131,13 +1153,70 @@
  	for pn := range h.appDataPackets.history.PathProbes() {
  		h.appDataPackets.history.RemovePathProbe(pn)
  	}
@@ -1450,9 +1735,9 @@
 +func timeDeltaFromBytesAndBandwidth(bytes protocol.ByteCount, bandwidth Bandwidth) time.Duration {
 +	return time.Duration(bytes*8) * time.Second / time.Duration(bandwidth)
 +}
---- a/internal/congestion/bbr/bbr_sender.go	1970-01-01 03:00:00.000000000 +0300
-+++ b/internal/congestion/bbr/bbr_sender.go	2026-10-02 13:14:42.942622800 +0300
-@@ -0,0 +1,1088 @@
+--- a/internal/congestion/bbr/bbr_sender.go
++++ b/internal/congestion/bbr/bbr_sender.go
+@@ -0,0 +1,1107 @@
 +package bbr
 +
 +import (
@@ -1510,6 +1795,8 @@
 +	minRttExpiry = 10 * time.Second
 +	// The minimum time the connection can spend in PROBE_RTT mode.
 +	probeRttTime = 200 * time.Millisecond
++
++	probeRttCwndGain = 0.75
 +	// If the bandwidth does not increase by the factor of |kStartupGrowthTarget|
 +	// within |kRoundTripsWithoutGrowthBeforeExitingStartup| rounds, the connection
 +	// will exit the STARTUP mode.
@@ -1708,6 +1995,9 @@
 +
 +	// Set to true upon exiting quiescence.
 +	exitingQuiescence bool
++
++	appLimitedSinceLastProbeRtt bool
++	minRttSinceLastProbeRtt     time.Duration
 +
 +	// Time at which PROBE_RTT has to be exited.  Setting it to zero indicates
 +	// that the time is yet unknown as the number of packets in flight has not
@@ -1908,11 +2198,15 @@
 +	b.lastSentPacket = packetNumber
 +	b.bytesInFlight = bytesInFlight
 +
-+	if bytesInFlight == 0 {
++	priorInFlight := bytesInFlight
++	if isRetransmittable {
++		priorInFlight -= bytes
++	}
++	if priorInFlight == 0 && b.sampler.IsAppLimited() {
 +		b.exitingQuiescence = true
 +	}
 +
-+	b.sampler.OnPacketSent(sentTime, packetNumber, bytes, bytesInFlight, isRetransmittable)
++	b.sampler.OnPacketSent(sentTime, packetNumber, bytes, priorInFlight, isRetransmittable)
 +}
 +
 +// CanSend implements the SendAlgorithm interface.
@@ -2001,8 +2295,6 @@
 +	// empty. If acked_packets is empty, it's the send state of the largest
 +	// packet in lost_packets.
 +	var lastPacketSendState sendTimeState
-+
-+	b.maybeAppLimited(priorInFlight)
 +
 +	// Update bytesInFlight
 +	b.bytesInFlight = priorInFlight
@@ -2158,15 +2450,25 @@
 +
 +// The target congestion window during PROBE_RTT.
 +func (b *bbrSender) probeRttCongestionWindow() protocol.ByteCount {
-+	return b.minCongestionWindow
++	return b.getTargetCongestionWindow(probeRttCwndGain)
 +}
 +
 +func (b *bbrSender) maybeUpdateMinRtt(now monotime.Time, sampleMinRtt time.Duration) bool {
 +	// Do not expire min_rtt if none was ever available.
++	if b.minRttSinceLastProbeRtt == 0 || sampleMinRtt < b.minRttSinceLastProbeRtt {
++		b.minRttSinceLastProbeRtt = sampleMinRtt
++	}
 +	minRttExpired := b.minRtt != 0 && now.After(b.minRttTimestamp.Add(minRttExpiry))
 +	if minRttExpired || sampleMinRtt < b.minRtt || b.minRtt == 0 {
-+		b.minRtt = sampleMinRtt
++		if minRttExpired && b.appLimitedSinceLastProbeRtt {
++			minRttExpired = false
++			b.minRtt = b.minRttSinceLastProbeRtt
++		} else {
++			b.minRtt = sampleMinRtt
++		}
 +		b.minRttTimestamp = now
++		b.minRttSinceLastProbeRtt = 0
++		b.appLimitedSinceLastProbeRtt = false
 +	}
 +
 +	return minRttExpired
@@ -2277,10 +2579,12 @@
 +	}
 +}
 +
-+func (b *bbrSender) maybeAppLimited(bytesInFlight protocol.ByteCount) {
-+	if bytesInFlight < b.getTargetCongestionWindow(1) {
-+		b.sampler.OnAppLimited()
++func (b *bbrSender) OnAppLimited(bytesInFlight protocol.ByteCount) {
++	if bytesInFlight >= b.GetCongestionWindow() {
++		return
 +	}
++	b.appLimitedSinceLastProbeRtt = true
++	b.sampler.OnAppLimited()
 +}
 +
 +// Transitions from STARTUP to DRAIN and from DRAIN to PROBE_BW if
@@ -3325,8 +3629,8 @@
  	if p.MinAckDelay != nil {
  		b = p.marshalVarintParam(b, minAckDelayParameterID, uint64(*p.MinAckDelay/time.Microsecond))
  	}
---- a/packet_packer.go	2026-10-02 13:14:42.420498000 +0300
-+++ b/packet_packer.go	2026-10-02 13:14:42.688917700 +0300
+--- a/packet_packer.go
++++ b/packet_packer.go
 @@ -116,6 +116,8 @@
  }
  
@@ -3336,7 +3640,36 @@
  	srcConnID     protocol.ConnectionID
  	getDestConnID func() protocol.ConnectionID
  
-@@ -918,6 +920,9 @@
+@@ -651,19 +653,26 @@
+ 	}
+ 
+ 	if p.datagramQueue != nil {
+-		if f := p.datagramQueue.Peek(); f != nil {
++		for {
++			f := p.datagramQueue.Peek()
++			if f == nil {
++				break
++			}
+ 			size := f.Length(v)
+ 			if size <= maxPayloadSize-pl.length { // DATAGRAM frame fits
+ 				pl.frames = append(pl.frames, ackhandler.Frame{Frame: f})
+ 				pl.length += size
+ 				p.datagramQueue.Pop()
+-			} else if pl.ack == nil {
++				continue
++			}
++			if pl.ack == nil && len(pl.frames) == 0 {
+ 				// The DATAGRAM frame doesn't fit, and the packet doesn't contain an ACK.
+ 				// Discard this frame. There's no point in retrying this in the next packet,
+ 				// as it's unlikely that the available packet size will increase.
+ 				p.datagramQueue.Pop()
+ 			}
+ 			// If the DATAGRAM frame was too large and the packet contained an ACK, we'll try to send it out later.
++			break
+ 		}
+ 	}
+ 
+@@ -918,6 +927,9 @@
  	if err != nil {
  		return shortHeaderPacket{}, err
  	}
@@ -3346,9 +3679,31 @@
  	payloadOffset := protocol.ByteCount(len(raw))
  
  	raw, err = p.appendPacketPayload(raw, pl, paddingLen, v)
---- a/send_queue.go	2026-10-02 13:14:42.437200100 +0300
-+++ b/send_queue.go	2026-10-02 13:14:42.956715400 +0300
-@@ -87,12 +87,16 @@
+--- a/send_queue.go
++++ b/send_queue.go
+@@ -8,6 +8,7 @@
+ 
+ type sender interface {
+ 	Send(p *packetBuffer, gsoSize uint16, ecn protocol.ECN)
++	SendWaiting(p *packetBuffer, gsoSize uint16, ecn protocol.ECN)
+ 	SendProbe(*packetBuffer, net.Addr, packetInfo)
+ 	Run() error
+ 	WouldBlock() bool
+@@ -62,6 +63,13 @@
+ 	}
+ }
+ 
++func (h *sendQueue) SendWaiting(p *packetBuffer, gsoSize uint16, ecn protocol.ECN) {
++	select {
++	case h.queue <- queueEntry{buf: p, gsoSize: gsoSize, ecn: ecn}:
++	case <-h.runStopped:
++	}
++}
++
+ func (h *sendQueue) SendProbe(p *packetBuffer, addr net.Addr, info packetInfo) {
+ 	h.conn.WriteTo(p.Data, addr, info)
+ }
+@@ -87,12 +95,16 @@
  			// make sure that all queued packets are actually sent out
  			shouldClose = true
  		case e := <-h.queue:
@@ -3660,3 +4015,41 @@
  	return p.tr, true
  }
  
+--- a/http3/state_tracking_stream.go
++++ b/http3/state_tracking_stream.go
+@@ -5,11 +5,16 @@
+ 	"errors"
+ 	"os"
+ 	"sync"
++	"sync/atomic"
+ 
+ 	"github.com/quic-go/quic-go"
+ )
+ 
+-const streamDatagramQueueLen = 32
++const streamDatagramQueueLen = 1024
++
++var streamDatagramsDropped atomic.Uint64
++
++func StreamDatagramsDropped() uint64 { return streamDatagramsDropped.Load() }
+ 
+ // stateTrackingStream is an implementation of quic.Stream that delegates
+ // to an underlying stream
+@@ -139,6 +144,7 @@
+ 		return
+ 	}
+ 	if len(s.queue) >= streamDatagramQueueLen {
++		streamDatagramsDropped.Add(1)
+ 		return
+ 	}
+ 	s.queue = append(s.queue, data)
+--- a/internal/ackhandler/interfaces.go
++++ b/internal/ackhandler/interfaces.go
+@@ -24,6 +24,7 @@
+ 	// It is used for pacing packets.
+ 	TimeUntilSend() monotime.Time
+ 	SetMaxDatagramSize(count protocol.ByteCount)
++	AppLimited()
+ 
+ 	// only to be called once the handshake is complete
+ 	QueueProbePacket(protocol.EncryptionLevel) bool /* was a packet queued */

@@ -5,3 +5,5 @@ package qsrv
 import "net"
 
 func (n *Node) checkBuffers(*net.UDPConn, int) {}
+
+func (n *Node) roomForTCP() {}

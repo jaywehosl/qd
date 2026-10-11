@@ -145,7 +145,7 @@ func (n *Node) runStack(ctx context.Context, s *live, tun netstack.Tunnel) {
 		}
 	}()
 
-	stack, err := netstack.New(steered{node: n, grant: s.grant, s: s, hops: defaultHops}, n.Tunables().MTU)
+	stack, err := netstack.New(steered{node: n, grant: s.grant, s: s, hops: defaultHops}, n.Tunables().MTU, false)
 	if err != nil {
 		return
 	}

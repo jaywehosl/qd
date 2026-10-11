@@ -576,7 +576,7 @@ type flowMark struct {
 }
 
 func (t *Tunnel) stack() (*netstack.Stack, error) {
-	return netstack.New(t.dialer(), t.opts.MTU)
+	return netstack.New(t.dialer(), t.opts.MTU, true)
 }
 
 func (t *Tunnel) dialer() routed {

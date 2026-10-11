@@ -578,15 +578,18 @@ UNITJOURNAL
 
 tune_buffers() {
     local want=4194304
-    local now
+    local now pages low
     now=$(sysctl -n net.core.rmem_max 2>/dev/null || echo 0)
-    if [ "$now" -ge "$want" ]; then
+    pages=$(( $(awk '/^MemTotal:/ {print $2}' /proc/meminfo) * 1024 / $(getconf PAGESIZE) ))
+    low=$(sysctl -n net.ipv4.tcp_mem 2>/dev/null | awk '{print $2}')
+    if [ "$now" -ge "$want" ] && [ "${low:-0}" -ge $((pages / 4)) ]; then
         return 0
     fi
 
     cat >/etc/sysctl.d/99-qd.conf <<SYSCTLCONF
 net.core.rmem_max = $want
 net.core.wmem_max = $want
+net.ipv4.tcp_mem = $((pages / 8)) $((pages / 4)) $((pages * 3 / 8))
 SYSCTLCONF
     sysctl -p /etc/sysctl.d/99-qd.conf >/dev/null 2>&1 || true
     say "socket buffer ceiling raised from $now to $(sysctl -n net.core.rmem_max 2>/dev/null)"

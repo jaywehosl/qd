@@ -121,7 +121,7 @@ export default function DatapathTab({ allSetting, updateSetting }: DatapathTabPr
           description={t('pages.settings.streamWindowDesc')}
         >
           <div className="setting-pair">
-            <Input type="number" min={64} {...num('streamWindowKb', 2048)} />
+            <Input type="number" min={64} {...num('streamWindowKb', 512)} />
             <Input type="number" min={64} {...num('maxStreamWindowKb', 6144)} />
           </div>
         </SettingListItem>
@@ -132,8 +132,8 @@ export default function DatapathTab({ allSetting, updateSetting }: DatapathTabPr
           description={t('pages.settings.connWindowDesc')}
         >
           <div className="setting-pair">
-            <Input type="number" min={64} {...num('connWindowKb', 3072)} />
-            <Input type="number" min={64} {...num('maxConnWindowKb', 15360)} />
+            <Input type="number" min={64} {...num('connWindowKb', 98304)} />
+            <Input type="number" min={64} {...num('maxConnWindowKb', 98304)} />
           </div>
         </SettingListItem>
 

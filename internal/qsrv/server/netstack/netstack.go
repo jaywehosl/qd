@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net"
 	"net/netip"
 	"sync"
@@ -14,6 +15,7 @@ import (
 	"gvisor.dev/gvisor/pkg/buffer"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/adapters/gonet"
+	"gvisor.dev/gvisor/pkg/tcpip/checksum"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
 	"gvisor.dev/gvisor/pkg/tcpip/link/channel"
 	"gvisor.dev/gvisor/pkg/tcpip/network/ipv4"
@@ -29,6 +31,7 @@ const (
 	nicID       = 1
 	maxInFlight = 2048
 	dialTimeout = 15 * time.Second
+	ipTTL       = 64
 )
 
 type Tunnel interface {
@@ -49,12 +52,14 @@ type Stack struct {
 	dialer   Dialer
 	pinger   Pinger
 	wmu      sync.Mutex
+	out      Tunnel
+	flat     []byte
 	flows    sync.Map
 	nextFlow atomic.Uint64
 	mtu      int
 }
 
-func New(d Dialer, mtu int) (*Stack, error) {
+func New(d Dialer, mtu int, near bool) (*Stack, error) {
 	s := stack.New(stack.Options{
 		NetworkProtocols: []stack.NetworkProtocolFactory{
 			ipv4.NewProtocol, ipv6.NewProtocol,
@@ -64,10 +69,14 @@ func New(d Dialer, mtu int) (*Stack, error) {
 		},
 	})
 	sndBuf := tcpip.TCPSendBufferSizeRangeOption{Min: 4 << 10, Default: 4 << 20, Max: 16 << 20}
+	rcvBuf := tcpip.TCPReceiveBufferSizeRangeOption{Min: 4 << 10, Default: 4 << 20, Max: 16 << 20}
+	if near {
+		sndBuf = tcpip.TCPSendBufferSizeRangeOption{Min: 4 << 10, Default: 512 << 10, Max: 512 << 10}
+		rcvBuf = tcpip.TCPReceiveBufferSizeRangeOption{Min: 4 << 10, Default: 1 << 20, Max: 1 << 20}
+	}
 	if err := s.SetTransportProtocolOption(tcp.ProtocolNumber, &sndBuf); err != nil {
 		return nil, fmt.Errorf("tcp send buffer: %v", err)
 	}
-	rcvBuf := tcpip.TCPReceiveBufferSizeRangeOption{Min: 4 << 10, Default: 4 << 20, Max: 16 << 20}
 	if err := s.SetTransportProtocolOption(tcp.ProtocolNumber, &rcvBuf); err != nil {
 		return nil, fmt.Errorf("tcp recv buffer: %v", err)
 	}
@@ -121,6 +130,14 @@ func (s *Stack) DebugStats() string {
 func (s *Stack) Run(ctx context.Context, t Tunnel) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	s.wmu.Lock()
+	s.out = t
+	s.wmu.Unlock()
+	defer func() {
+		s.wmu.Lock()
+		s.out = nil
+		s.wmu.Unlock()
+	}()
 	go s.egress(ctx, t)
 	return s.ingress(ctx, t)
 }
@@ -155,10 +172,8 @@ func (s *Stack) ingress(ctx context.Context, t Tunnel) error {
 		default:
 			continue
 		}
-		data := make([]byte, n)
-		copy(data, buf[:n])
 		pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
-			Payload: buffer.MakeWithData(data),
+			Payload: buffer.MakeWithData(buf[:n]),
 		})
 		s.ep.InjectInbound(proto, pkt)
 		pkt.DecRef()
@@ -172,9 +187,9 @@ func (s *Stack) egress(ctx context.Context, t Tunnel) {
 		if pkt == nil {
 			return
 		}
-		b := pkt.ToBuffer()
 		s.wmu.Lock()
-		_, err := t.WritePacket(b.Flatten())
+		s.flat = flatten(s.flat[:0], pkt)
+		_, err := t.WritePacket(s.flat)
 		s.wmu.Unlock()
 		pkt.DecRef()
 		if err != nil {
@@ -184,6 +199,20 @@ func (s *Stack) egress(ctx context.Context, t Tunnel) {
 			}
 		}
 	}
+}
+
+func flatten(dst []byte, pkt *stack.PacketBuffer) []byte {
+	views, skip := pkt.AsViewList()
+	for v := views.Front(); v != nil; v = v.Next() {
+		part := v.AsSlice()
+		if skip >= len(part) {
+			skip -= len(part)
+			continue
+		}
+		dst = append(dst, part[skip:]...)
+		skip = 0
+	}
+	return dst
 }
 
 func (s *Stack) handleTCP(r *tcp.ForwarderRequest) {
@@ -219,7 +248,7 @@ func (s *Stack) handleTCP(r *tcp.ForwarderRequest) {
 	}()
 }
 
-func (s *Stack) handleUDP(r *udp.ForwarderRequest) {
+func (s *Stack) handleUDP(r *udp.ForwarderRequest) bool {
 	id := r.ID()
 	dst := netip.AddrPortFrom(toNetip(id.LocalAddress), id.LocalPort)
 
@@ -228,9 +257,9 @@ func (s *Stack) handleUDP(r *udp.ForwarderRequest) {
 	var wq waiter.Queue
 	ep, tcperr := r.CreateEndpoint(&wq)
 	if tcperr != nil {
-		return
+		return false
 	}
-	inbound := gonet.NewUDPConn(s.stack, &wq, ep)
+	inbound := gonet.NewUDPConn(&wq, ep)
 	flow := &udpFlow{in: inbound}
 	release := func() {}
 	if s.opened != nil {
@@ -257,8 +286,82 @@ func (s *Stack) handleUDP(r *udp.ForwarderRequest) {
 		if dst.Port() == 53 {
 			idle = dnsIdle
 		}
-		pipeIdle(inbound, outbound, idle)
+		pipeIdle(&udpDown{Conn: inbound, s: s, id: id}, outbound, idle)
 	}()
+	return true
+}
+
+type udpDown struct {
+	net.Conn
+	s   *Stack
+	id  stack.TransportEndpointID
+	seq uint16
+}
+
+func (d *udpDown) Write(p []byte) (int, error) {
+	if d.s.sendUDP(d.id, &d.seq, p) {
+		return len(p), nil
+	}
+	return d.Conn.Write(p)
+}
+
+func (s *Stack) sendUDP(id stack.TransportEndpointID, seq *uint16, p []byte) bool {
+	v4 := id.LocalAddress.Len() == header.IPv4AddressSize
+	head := header.IPv6MinimumSize
+	if v4 {
+		head = header.IPv4MinimumSize
+	}
+	size := head + header.UDPMinimumSize + len(p)
+	if size > s.mtu {
+		return false
+	}
+
+	s.wmu.Lock()
+	defer s.wmu.Unlock()
+	if s.out == nil {
+		return false
+	}
+	if cap(s.flat) < size {
+		s.flat = make([]byte, 0, 65536)
+	}
+	b := s.flat[:size]
+
+	length := uint16(header.UDPMinimumSize + len(p))
+	u := header.UDP(b[head:])
+	u.Encode(&header.UDPFields{SrcPort: id.LocalPort, DstPort: id.RemotePort, Length: length})
+	copy(b[head+header.UDPMinimumSize:], p)
+	sum := u.CalculateChecksum(checksum.Combine(
+		header.PseudoHeaderChecksum(udp.ProtocolNumber, id.LocalAddress, id.RemoteAddress, length),
+		checksum.Checksum(p, 0),
+	))
+	if sum != math.MaxUint16 {
+		sum = ^sum
+	}
+	u.SetChecksum(sum)
+
+	if v4 {
+		*seq++
+		ip := header.IPv4(b)
+		ip.Encode(&header.IPv4Fields{
+			TotalLength: uint16(size),
+			ID:          *seq,
+			TTL:         ipTTL,
+			Protocol:    uint8(udp.ProtocolNumber),
+			SrcAddr:     id.LocalAddress,
+			DstAddr:     id.RemoteAddress,
+		})
+		ip.SetChecksum(^ip.CalculateChecksum())
+	} else {
+		header.IPv6(b).Encode(&header.IPv6Fields{
+			PayloadLength:     length,
+			TransportProtocol: udp.ProtocolNumber,
+			HopLimit:          ipTTL,
+			SrcAddr:           id.LocalAddress,
+			DstAddr:           id.RemoteAddress,
+		})
+	}
+	s.out.WritePacket(b)
+	return true
 }
 
 type udpFlow struct {
@@ -429,8 +532,7 @@ func (s *Stack) Reset(t Tunnel, drain time.Duration) {
 		if pkt == nil {
 			continue
 		}
-		b := pkt.ToBuffer()
-		_, _ = t.WritePacket(b.Flatten())
+		_, _ = t.WritePacket(flatten(nil, pkt))
 		pkt.DecRef()
 	}
 	s.stack.Wait()

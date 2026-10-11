@@ -58,10 +58,10 @@ type Tunables struct {
 func DefaultTunables() Tunables {
 	return Tunables{
 		MaxStreams:   65536,
-		StreamWindow: 2 << 20,
+		StreamWindow: 512 << 10,
 		MaxStreamWin: 6 << 20,
-		ConnWindow:   3 << 20,
-		MaxConnWin:   15 << 20,
+		ConnWindow:   96 << 20,
+		MaxConnWin:   96 << 20,
 		IdleTimeout:  90 * time.Second,
 		KeepAlive:    15 * time.Second,
 		SocketBuffer: 2 << 20,
@@ -332,6 +332,7 @@ func (n *Node) Run(ctx context.Context) error {
 	udp.SetReadBuffer(t.SocketBuffer)
 	udp.SetWriteBuffer(t.SocketBuffer)
 	n.checkBuffers(udp, t.SocketBuffer)
+	n.roomForTCP()
 
 	defer n.links.closeAll()
 

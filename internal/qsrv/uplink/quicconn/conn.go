@@ -377,10 +377,10 @@ func DefaultConfig() *quic.Config {
 		EnableDatagrams:                true,
 		MaxIdleTimeout:                 90 * time.Second,
 		KeepAlivePeriod:                15 * time.Second,
-		InitialStreamReceiveWindow:     2 << 20,
-		MaxStreamReceiveWindow:         6 << 20,
-		InitialConnectionReceiveWindow: 3 << 20,
-		MaxConnectionReceiveWindow:     15 << 20,
+		InitialStreamReceiveWindow:     512 << 10,
+		MaxStreamReceiveWindow:         8 << 20,
+		InitialConnectionReceiveWindow: 256 << 20,
+		MaxConnectionReceiveWindow:     256 << 20,
 	}
 }
 

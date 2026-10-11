@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -14,7 +15,8 @@ import (
 
 const (
 	outletSlot   = 2048
-	outletQueue  = 512
+	outletQueue  = 2048
+	outletYield  = 128
 	outletBuffer = 2 << 20
 )
 
@@ -136,6 +138,9 @@ func (o *outlet) read() {
 		copy(pkt, big[:n])
 		select {
 		case f.in <- pkt:
+			if len(f.in) >= outletYield {
+				runtime.Gosched()
+			}
 		default:
 			outletDrops.Add(1)
 			giveBack(pkt)
