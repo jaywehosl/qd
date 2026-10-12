@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"net/netip"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -25,10 +26,12 @@ import (
 )
 
 const (
-	localIP     = "10.7.0.2"
-	localPrefix = 24
-	dnsIP       = "10.7.0.53"
-	safeMTU     = 1392
+	localIP      = "10.7.0.2"
+	localPrefix  = 24
+	dnsIP        = "10.7.0.53"
+	safeMTU      = 1392
+	localSegment = 15900
+	coreThreads  = 4
 
 	readers = 1
 )
@@ -104,6 +107,7 @@ func SetZone(name string) {
 
 func Open(stateDir string, host Host, protector Protector, deviceID, model, name string) (*Client, error) {
 	update.Kind = "android"
+	runtime.GOMAXPROCS(min(runtime.NumCPU(), coreThreads))
 	markJournal(stateDir)
 	say("open: state=%s version=%s", stateDir, update.Version)
 

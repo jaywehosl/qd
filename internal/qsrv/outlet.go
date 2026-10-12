@@ -128,6 +128,10 @@ func (o *outlet) read() {
 		if f == nil {
 			continue
 		}
+		if sink := f.sink.Load(); sink != nil {
+			(*sink)(big[:n])
+			continue
+		}
 
 		var pkt []byte
 		if n <= outletSlot {
@@ -162,6 +166,20 @@ type outFlow struct {
 	once  sync.Once
 	leave func()
 	until atomic.Int64
+	sink  atomic.Pointer[func([]byte)]
+}
+
+func (f *outFlow) Feed(sink func(pkt []byte)) <-chan struct{} {
+	f.sink.Store(&sink)
+	for {
+		select {
+		case pkt := <-f.in:
+			sink(pkt)
+			giveBack(pkt)
+		default:
+			return f.quit
+		}
+	}
 }
 
 func (f *outFlow) Read(p []byte) (int, error) {

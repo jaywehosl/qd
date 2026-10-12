@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -75,6 +76,13 @@ func newTunnel(cfg tunnelConfig) *tunnel {
 	}
 	holdToken(cfg.Key)
 	return &tunnel{cfg: cfg}
+}
+
+func localSegment() int {
+	if runtime.GOOS == "windows" {
+		return 65535
+	}
+	return 0
 }
 
 func (t *tunnel) Running() bool {
@@ -217,6 +225,7 @@ func (t *tunnel) bring(ctx context.Context, servers []string, relays []relay.Lin
 		Device:    deviceOf().ID,
 		Route:     routeTag(),
 		MTU:       t.cfg.MTU,
+		Jumbo:     localSegment(),
 		Brutal:    rateNow(),
 		BBR:       profileNow(),
 		Workers:   t.cfg.Workers,

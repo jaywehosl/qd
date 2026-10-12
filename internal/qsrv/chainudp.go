@@ -87,6 +87,7 @@ type dgramConn struct {
 	quit chan struct{}
 	once sync.Once
 	wmu  sync.Mutex
+	sink atomic.Pointer[func([]byte)]
 
 	abort func()
 	done  func()
@@ -127,7 +128,23 @@ func (d *dgramConn) fromStream() {
 	}
 }
 
+func (d *dgramConn) Feed(sink func(pkt []byte)) <-chan struct{} {
+	d.sink.Store(&sink)
+	for {
+		select {
+		case b := <-d.in:
+			sink(b)
+		default:
+			return d.quit
+		}
+	}
+}
+
 func (d *dgramConn) deliver(b []byte) {
+	if sink := d.sink.Load(); sink != nil {
+		(*sink)(b)
+		return
+	}
 	select {
 	case d.in <- b:
 	case <-d.quit:
@@ -225,6 +242,34 @@ func (n *Node) relayDatagrams(w http.ResponseWriter, hs http3.HTTPStreamer, out 
 		}
 		return true
 	}
+	down := func(b []byte) bool {
+		err := str.SendDatagram(b)
+		if tooLarge(err) {
+			_, err = str.Write(frame(b))
+		}
+		if err != nil {
+			return false
+		}
+		if s != nil {
+			s.cameDown(len(b))
+		}
+		return true
+	}
+	var lastIn atomic.Int64
+	lastIn.Store(time.Now().UnixNano())
+	var gone <-chan struct{}
+	if fed, ok := out.(interface {
+		Feed(func([]byte)) <-chan struct{}
+	}); ok {
+		gone = fed.Feed(func(b []byte) {
+			if !down(b) {
+				out.Close()
+				return
+			}
+			lastIn.Store(time.Now().UnixNano())
+		})
+	}
+
 	go func() {
 		defer out.Close()
 		for {
@@ -244,6 +289,21 @@ func (n *Node) relayDatagrams(w http.ResponseWriter, hs http3.HTTPStreamer, out 
 		}
 	}()
 
+	if gone != nil {
+		tick := time.NewTicker(flowQuiet / 4)
+		defer tick.Stop()
+		for {
+			select {
+			case <-gone:
+				return
+			case <-tick.C:
+				if time.Since(time.Unix(0, max(lastIn.Load(), lastOut.Load()))) > flowQuiet {
+					return
+				}
+			}
+		}
+	}
+
 	buf := make([]byte, 65535)
 	for {
 		out.SetReadDeadline(time.Now().Add(flowQuiet))
@@ -255,15 +315,8 @@ func (n *Node) relayDatagrams(w http.ResponseWriter, hs http3.HTTPStreamer, out 
 			}
 			return
 		}
-		err = str.SendDatagram(buf[:read])
-		if tooLarge(err) {
-			_, err = str.Write(frame(buf[:read]))
-		}
-		if err != nil {
+		if !down(buf[:read]) {
 			return
-		}
-		if s != nil {
-			s.cameDown(read)
 		}
 	}
 }

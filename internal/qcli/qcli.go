@@ -41,6 +41,7 @@ type Options struct {
 	Device    string
 	Route     string
 	MTU       int
+	Jumbo     int
 	Brutal    int
 	BBR       string
 	Workers   int
@@ -492,6 +493,7 @@ func (t *Tunnel) Run(ctx context.Context, src packet.Source) error {
 		Detour:   t.detour(),
 		Mark:     t.markOf,
 		Loud:     t.opts.Loud,
+		Jumbo:    uint16(max(t.opts.Jumbo-40, 0)),
 	}).Run(ctx, src, t.road)
 }
 
@@ -576,7 +578,11 @@ type flowMark struct {
 }
 
 func (t *Tunnel) stack() (*netstack.Stack, error) {
-	return netstack.New(t.dialer(), t.opts.MTU, true)
+	mtu := t.opts.MTU
+	if t.opts.Jumbo > 0 {
+		mtu = t.opts.Jumbo
+	}
+	return netstack.New(t.dialer(), mtu, true)
 }
 
 func (t *Tunnel) dialer() routed {

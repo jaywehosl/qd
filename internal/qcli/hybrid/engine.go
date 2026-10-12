@@ -47,6 +47,7 @@ type Options struct {
 	Detour   func(dst netip.Addr) bool
 	Mark     func(pkt []byte) uint64
 	Loud     bool
+	Jumbo    uint16
 	Gateway  netip.Addr
 	Gateway6 netip.Addr
 }
@@ -209,6 +210,9 @@ func (e *Engine) pumpOutbound(ctx context.Context, rd packet.Reader, src packet.
 			if catch || ippkt.IsTCP(p.Data) || (e.Detour != nil && ippkt.IsUDP(p.Data) && e.Detour(dst)) {
 				e.cTCP.Add(1)
 				e.Meter.carried(len(p.Data))
+				if e.Jumbo != 0 {
+					ippkt.GrowMSS(p.Data, e.Jumbo)
+				}
 				tt.push(p.Data)
 				continue
 			}
@@ -334,21 +338,27 @@ type tcpTunnel struct {
 }
 
 func (t *tcpTunnel) take(pkt []byte, into chan []byte) bool {
+	var held []byte
 	if len(pkt) > tcpSlot {
-		return false
+		held = append([]byte(nil), pkt...)
+	} else {
+		slot := t.pool.Get().(*[tcpSlot]byte)
+		held = slot[:copy(slot[:], pkt)]
 	}
-	slot := t.pool.Get().(*[tcpSlot]byte)
-	n := copy(slot[:], pkt)
 	select {
-	case into <- slot[:n]:
+	case into <- held:
 		return true
 	default:
-		t.pool.Put(slot)
+		t.give(held)
 		return false
 	}
 }
 
-func (t *tcpTunnel) give(b []byte) { t.pool.Put((*[tcpSlot]byte)(b[:tcpSlot])) }
+func (t *tcpTunnel) give(b []byte) {
+	if cap(b) == tcpSlot {
+		t.pool.Put((*[tcpSlot]byte)(b[:tcpSlot]))
+	}
+}
 
 func (t *tcpTunnel) push(pkt []byte) {
 	if t.take(pkt, t.ch) {

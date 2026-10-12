@@ -69,6 +69,7 @@ func (c *Client) carry(servers []string, relays []relay.Link, session uint32) er
 			Device:    c.device.ID,
 			Route:     c.route(),
 			MTU:       mtu,
+			Jumbo:     localSegment,
 			Workers:   readers,
 			Brutal:    int(c.rate.Load()),
 			BBR:       c.bbr(),

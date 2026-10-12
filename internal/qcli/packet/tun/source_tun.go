@@ -126,6 +126,7 @@ func (s *Source) Send(pkts []packet.Packet) error {
 	}
 	defer s.busy.Done()
 
+	var failed error
 	for i := range pkts {
 		if len(pkts[i].Data) == 0 {
 			continue
@@ -138,12 +139,18 @@ func (s *Source) Send(pkts []packet.Packet) error {
 			if errors.Is(err, unix.EINTR) {
 				continue
 			}
-			if errors.Is(err, unix.EAGAIN) || errors.Is(err, unix.EWOULDBLOCK) {
-				s.dropped.Add(1)
-				break
+			if errors.Is(err, unix.EBADF) {
+				return fmt.Errorf("tun: write: %w", err)
 			}
-			return fmt.Errorf("tun: write: %w", err)
+			s.dropped.Add(1)
+			if !errors.Is(err, unix.EAGAIN) && !errors.Is(err, unix.EWOULDBLOCK) {
+				failed = err
+			}
+			break
 		}
+	}
+	if failed != nil {
+		return fmt.Errorf("tun: write: %w", failed)
 	}
 	return nil
 }

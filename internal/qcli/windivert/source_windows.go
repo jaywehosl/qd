@@ -120,6 +120,8 @@ func (r *reader) Recv(ctx context.Context) ([]packet.Packet, error) {
 	return out, nil
 }
 
+const sendBytesMax = 1 << 20
+
 type writer struct {
 	s     *Source
 	buf   []byte
@@ -128,7 +130,11 @@ type writer struct {
 
 func (w *writer) Send(pkts []packet.Packet) error {
 	for len(pkts) > 0 {
-		n := min(len(pkts), BatchMax)
+		n, size := 0, 0
+		for n < len(pkts) && n < BatchMax && (n == 0 || size+len(pkts[n].Data) <= sendBytesMax) {
+			size += len(pkts[n].Data)
+			n++
+		}
 		if err := w.sendChunk(pkts[:n]); err != nil {
 			return err
 		}

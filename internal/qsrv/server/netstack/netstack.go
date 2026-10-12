@@ -418,7 +418,22 @@ func pipeIdle(a, b net.Conn, idle time.Duration) {
 		}
 		done <- struct{}{}
 	}
-	go cp(a, b)
+	if fed, ok := b.(interface {
+		Feed(func([]byte)) <-chan struct{}
+	}); ok {
+		gone := fed.Feed(func(p []byte) {
+			last.Store(time.Now().UnixNano())
+			if _, err := a.Write(p); err != nil {
+				b.Close()
+			}
+		})
+		go func() {
+			<-gone
+			done <- struct{}{}
+		}()
+	} else {
+		go cp(a, b)
+	}
 	go cp(b, a)
 
 	tick := time.NewTicker(idle / 4)

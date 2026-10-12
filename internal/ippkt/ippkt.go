@@ -125,6 +125,37 @@ func SrcPort(pkt []byte) (uint16, bool) {
 	return binary.BigEndian.Uint16(rest[0:2]), true
 }
 
+func GrowMSS(pkt []byte, mss uint16) {
+	proto, rest, ok := after(pkt, 20)
+	if !ok || proto != protoTCP || rest[13]&0x12 != 0x02 {
+		return
+	}
+	end := int(rest[12]>>4) * 4
+	if end > len(rest) {
+		return
+	}
+	for at := 20; at+1 < end; {
+		kind, size := rest[at], int(rest[at+1])
+		if kind == 0 {
+			return
+		}
+		if kind == 1 {
+			at++
+			continue
+		}
+		if size < 2 || at+size > end {
+			return
+		}
+		if kind == 2 && size == 4 {
+			if binary.BigEndian.Uint16(rest[at+2:]) < mss {
+				binary.BigEndian.PutUint16(rest[at+2:], mss)
+			}
+			return
+		}
+		at += size
+	}
+}
+
 func IsDNS(pkt []byte) bool {
 	proto, rest, ok := after(pkt, 8)
 	return ok && (proto == protoUDP || proto == protoTCP) && binary.BigEndian.Uint16(rest[2:4]) == 53
