@@ -22,10 +22,10 @@ export class AllSetting {
   brutalMbit = 0;
   bbrProfile = 'standard';
   maxStreams = 65536;
-  streamWindowKb = 2048;
-  maxStreamWindowKb = 6144;
-  connWindowKb = 3072;
-  maxConnWindowKb = 15360;
+  streamWindowKb = 512;
+  maxStreamWindowKb = 16384;
+  connWindowKb = 98304;
+  maxConnWindowKb = 98304;
   idleSeconds = 90;
   keepAliveSeconds = 15;
   socketBufferKb = 2048;

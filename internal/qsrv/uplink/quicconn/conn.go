@@ -378,7 +378,7 @@ func DefaultConfig() *quic.Config {
 		MaxIdleTimeout:                 90 * time.Second,
 		KeepAlivePeriod:                15 * time.Second,
 		InitialStreamReceiveWindow:     512 << 10,
-		MaxStreamReceiveWindow:         8 << 20,
+		MaxStreamReceiveWindow:         16 << 20,
 		InitialConnectionReceiveWindow: 256 << 20,
 		MaxConnectionReceiveWindow:     256 << 20,
 	}

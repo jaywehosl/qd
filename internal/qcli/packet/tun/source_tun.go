@@ -26,6 +26,8 @@ type Source struct {
 
 	buf   []byte
 	batch []packet.Packet
+
+	scratch []byte
 }
 
 const (
@@ -119,6 +121,18 @@ func (s *Source) wait(ctx context.Context) error {
 }
 
 const pollStep = 200
+
+func (s *Source) Compose(fill func(dst []byte) ([]byte, bool)) (bool, bool) {
+	buf, ok := fill(s.scratch[:0])
+	if !ok || len(buf) == 0 {
+		return false, false
+	}
+	s.scratch = buf
+	_ = s.Send([]packet.Packet{{Data: buf}})
+	return true, false
+}
+
+func (s *Source) Flush() error { return nil }
 
 func (s *Source) Send(pkts []packet.Packet) error {
 	if !s.enter() {

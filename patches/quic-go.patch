@@ -1,14 +1,16 @@
 --- a/connection.go
 +++ b/connection.go
-@@ -8,6 +8,7 @@
+@@ -8,7 +8,9 @@
  	"fmt"
  	"io"
  	"net"
 +	"os"
  	"reflect"
++	"runtime"
  	"slices"
  	"sync"
-@@ -123,6 +124,10 @@
+ 	"sync/atomic"
+@@ -123,6 +125,10 @@
  //   - [StatelessResetError]: when we receive a stateless reset
  //   - [VersionNegotiationError]: returned by the client, when there's no version overlap between the peers
  type Conn struct {
@@ -19,17 +21,21 @@
  	// Destination connection ID used during the handshake.
  	// Used to check source connection ID on incoming packets.
  	handshakeDestConnID protocol.ConnectionID
-@@ -210,6 +215,9 @@
+@@ -210,6 +216,13 @@
  	// pacingDeadline is the time when the next packet should be sent
  	pacingDeadline monotime.Time
  
 +	qdFreqSeq   uint64
 +	qdFreqDelay time.Duration
++	qdFreqEvery uint64
++	qdFreqBytes uint64
++	qdFreqAt    monotime.Time
++	qdFreqWant  uint64
 +
  	peerParams *wire.TransportParameters
  
  	timer *time.Timer
-@@ -289,10 +297,11 @@
+@@ -289,10 +302,11 @@
  	} else {
  		s.logID = destConnID.String()
  	}
@@ -43,7 +49,7 @@
  		s.queueControlFrame,
  	)
  	s.connIDGenerator = newConnIDGenerator(
-@@ -346,6 +355,8 @@
+@@ -346,6 +360,8 @@
  		InitialSourceConnectionID: srcConnID,
  		RetrySourceConnectionID:   retrySrcConnID,
  		EnableResetStreamAt:       conf.EnableStreamResetPartialDelivery,
@@ -52,7 +58,7 @@
  	}
  	if s.config.EnableDatagrams {
  		params.MaxDatagramFrameSize = wire.MaxDatagramSize
-@@ -418,10 +429,11 @@
+@@ -418,10 +434,11 @@
  		}
  		s.qlogger.RecordEvent(startedConnectionEvent(srcAddr, destAddr))
  	}
@@ -66,7 +72,7 @@
  		s.queueControlFrame,
  	)
  	s.connIDGenerator = newConnIDGenerator(
-@@ -472,6 +484,8 @@
+@@ -472,6 +489,8 @@
  		ActiveConnectionIDLimit:   protocol.MaxActiveConnectionIDs,
  		InitialSourceConnectionID: srcConnID,
  		EnableResetStreamAt:       conf.EnableStreamResetPartialDelivery,
@@ -75,7 +81,7 @@
  	}
  	if s.config.EnableDatagrams {
  		params.MaxDatagramFrameSize = wire.MaxDatagramSize
-@@ -518,7 +532,7 @@
+@@ -518,7 +537,7 @@
  	c.frameParser = *wire.NewFrameParser(
  		c.config.EnableDatagrams,
  		c.config.EnableStreamResetPartialDelivery,
@@ -84,7 +90,7 @@
  	)
  	c.rttStats = utils.NewRTTStats()
  	c.connFlowController = flowcontrol.NewConnectionFlowController(
-@@ -556,7 +570,7 @@
+@@ -556,7 +575,7 @@
  
  	c.receivedPacketHandler = *ackhandler.NewReceivedPacketHandler(c.logger)
  
@@ -93,7 +99,7 @@
  	c.connState.Version = c.version
  }
  
-@@ -1943,6 +1957,10 @@
+@@ -1943,6 +1962,10 @@
  		err = c.connIDGenerator.Retire(frame.SequenceNumber, destConnID, rcvTime.Add(3*c.rttStats.PTO(false)))
  	case *wire.HandshakeDoneFrame:
  		err = c.handleHandshakeDoneFrame(rcvTime)
@@ -104,7 +110,35 @@
  	default:
  		err = fmt.Errorf("unexpected frame type: %s", reflect.ValueOf(&frame).Elem().Type().Name())
  	}
-@@ -2135,6 +2153,7 @@
+@@ -1955,6 +1978,7 @@
+ 	// Discard packets once the amount of queued packets is larger than
+ 	// the channel size, protocol.MaxConnUnprocessedPackets
+ 	if c.receivedPackets.Len() >= protocol.MaxConnUnprocessedPackets {
++		packetsOverrun.Add(1)
+ 		if c.qlogger != nil {
+ 			var datagramID qlog.DatagramID
+ 			if wire.IsLongHeaderPacket(p.data[0]) {
+@@ -1970,12 +1994,19 @@
+ 		return
+ 	}
+ 	c.receivedPackets.PushBack(p)
++	queued := c.receivedPackets.Len()
++	if n := int64(queued); n > packetsBacklog.Load() {
++		packetsBacklog.Store(n)
++	}
+ 	c.receivedPacketMx.Unlock()
+ 
+ 	select {
+ 	case c.notifyReceivedPacket <- struct{}{}:
+ 	default:
+ 	}
++	if queued >= protocol.MaxConnUnprocessedPackets/2 {
++		runtime.Gosched()
++	}
+ }
+ 
+ func (c *Conn) handleConnectionCloseFrame(frame *wire.ConnectionCloseFrame) error {
+@@ -2135,6 +2166,7 @@
  			c.sentPacketHandler.SetMaxDatagramSize(mtu)
  		}
  	}
@@ -112,7 +146,7 @@
  	return c.cryptoStreamHandler.SetLargest1RTTAcked(frame.LargestAcked())
  }
  
-@@ -2423,6 +2442,9 @@
+@@ -2423,6 +2455,9 @@
  	c.keepAliveInterval = min(c.config.KeepAlivePeriod, c.idleTimeout/2)
  	c.streamsMap.HandleTransportParameters(params)
  	c.frameParser.SetAckDelayExponent(params.AckDelayExponent)
@@ -122,7 +156,7 @@
  	c.connFlowController.UpdateSendWindow(params.InitialMaxData)
  	c.rttStats.SetMaxAckDelay(params.MaxAckDelay)
  	c.connIDGenerator.SetMaxActiveConnIDs(params.ActiveConnectionIDLimit)
-@@ -2563,6 +2585,7 @@
+@@ -2563,6 +2598,7 @@
  		ecn := c.sentPacketHandler.ECNMode(true)
  		if _, err := c.appendOneShortHeaderPacket(buf, c.maxPacketSize(), ecn, now); err != nil {
  			if err == errNothingToPack {
@@ -130,7 +164,7 @@
  				buf.Release()
  				return nil
  			}
-@@ -2593,23 +2616,35 @@
+@@ -2593,23 +2629,35 @@
  	}
  }
  
@@ -166,7 +200,7 @@
  		}
  
  		if !dontSendMore {
-@@ -2627,14 +2662,18 @@
+@@ -2627,14 +2675,18 @@
  
  		// Append another packet if
  		// 1. The congestion controller and pacer allow sending more
@@ -188,7 +222,7 @@
  
  		if dontSendMore {
  			return nil
-@@ -3095,6 +3134,7 @@
+@@ -3095,6 +3147,7 @@
  		200*time.Millisecond, // initial RTT estimate
  		func() {
  			runner := (*packetHandlerMap)(t)
@@ -196,7 +230,7 @@
  			c.connIDGenerator.AddConnRunner(
  				runner,
  				connRunnerCallbacks{
-@@ -3107,6 +3147,41 @@
+@@ -3107,6 +3160,41 @@
  	), nil
  }
  
@@ -238,12 +272,17 @@
  // HandshakeComplete blocks until the handshake completes (or fails).
  // For the client, data sent before completion of the handshake is encrypted with 0-RTT keys.
  // For the server, data sent before completion of the handshake is encrypted with 1-RTT keys,
-@@ -3147,3 +3222,33 @@
+@@ -3147,3 +3235,52 @@
  func estimateMaxPayloadSize(mtu protocol.ByteCount) protocol.ByteCount {
  	return mtu - 1 /* type byte */ - 20 /* maximum connection ID length */ - 16 /* tag size */
  }
 +
-+const qdAckThreshold = 9
++const (
++	qdAckThreshold    = 9
++	qdAckThresholdMax = 63
++	qdAckPacket       = 1250
++	qdAckWindow       = 200 * time.Millisecond
++)
 +
 +func qdOn(name string) bool { return os.Getenv(name) != "off" }
 +
@@ -260,13 +299,27 @@
 +		return
 +	}
 +	want := min(max(c.rttStats.SmoothedRTT()/4, *c.peerParams.MinAckDelay), c.peerParams.MaxAckDelay)
-+	if last := c.qdFreqDelay; last != 0 && want*4 > last*3 && want*4 < last*5 {
++	if c.qdFreqWant == 0 {
++		c.qdFreqWant = qdAckThreshold
++	}
++	now := monotime.Now()
++	if took := now.Sub(c.qdFreqAt); took >= qdAckWindow {
++		sent := c.connStats.BytesSent.Load()
++		if !c.qdFreqAt.IsZero() {
++			perMs := float64(sent-c.qdFreqBytes) / qdAckPacket / float64(took.Milliseconds())
++			c.qdFreqWant = uint64(min(max(perMs, qdAckThreshold), qdAckThresholdMax))
++		}
++		c.qdFreqBytes, c.qdFreqAt = sent, now
++	}
++	every := c.qdFreqWant
++	steady := c.qdFreqEvery != 0 && every < c.qdFreqEvery*2 && every*2 > c.qdFreqEvery
++	if last := c.qdFreqDelay; steady && last != 0 && want*4 > last*3 && want*4 < last*5 {
 +		return
 +	}
-+	c.qdFreqDelay = want
++	c.qdFreqDelay, c.qdFreqEvery = want, every
 +	c.framer.QueueControlFrame(&wire.AckFrequencyFrame{
 +		SequenceNumber:        c.qdFreqSeq,
-+		AckElicitingThreshold: qdAckThreshold,
++		AckElicitingThreshold: every,
 +		RequestMaxAckDelay:    want,
 +		ReorderingThreshold:   1,
 +	})
@@ -274,7 +327,7 @@
 +}
 --- a/datagram_queue.go
 +++ b/datagram_queue.go
-@@ -3,21 +3,71 @@
+@@ -3,21 +3,85 @@
  import (
  	"context"
  	"sync"
@@ -298,6 +351,20 @@
 +)
 +
 +func DatagramsShed() uint64 { return datagramsShed.Load() }
++
++var (
++	packetsOverrun atomic.Uint64
++	packetsBacklog atomic.Int64
++	packetsLate    atomic.Int64
++)
++
++func ReceiveLate() time.Duration { return time.Duration(packetsLate.Swap(0)) }
++
++func ReceiveBacklog() (overrun uint64, peak int) {
++	return packetsOverrun.Load(), int(packetsBacklog.Swap(0))
++}
++
++func LossStats() (lost, sent uint64) { return ackhandler.QDLoss() }
 +
 +var DatagramFlow func(data []byte) uint32
 +
@@ -351,7 +418,7 @@
  
  	rcvMx    sync.Mutex
  	rcvQueue [][]byte
-@@ -31,11 +81,12 @@
+@@ -31,11 +95,12 @@
  	logger utils.Logger
  }
  
@@ -366,7 +433,7 @@
  		closed:  make(chan struct{}),
  		logger:  logger,
  	}
-@@ -45,51 +96,123 @@
+@@ -45,51 +110,123 @@
  // Up to 32 DATAGRAM frames will be queued.
  // Once that limit is reached, Add blocks until the queue size has reduced.
  func (h *datagramQueue) Add(f *wire.DatagramFrame) error {
@@ -516,7 +583,7 @@
  func (h *datagramQueue) HandleDatagramFrame(f *wire.DatagramFrame) {
  	data := make([]byte, len(f.Data))
  	copy(data, f.Data)
-@@ -104,8 +227,13 @@
+@@ -104,8 +241,13 @@
  		}
  	}
  	h.rcvMx.Unlock()
@@ -669,7 +736,15 @@
  	case protocol.Encryption0RTT:
  		// This function is only called when 0-RTT is rejected,
  		// and not when the client drops 0-RTT keys when the handshake completes.
-@@ -435,10 +439,12 @@
+@@ -290,6 +294,7 @@
+ 		return
+ 	}
+ 	if isAckEliciting {
++		qdSentPackets.Add(1)
+ 		pnSpace.lastAckElicitingPacketTime = t
+ 		h.bytesInFlight += size
+ 		p.includedInBytesInFlight = true
+@@ -435,10 +440,12 @@
  	if encLevel == protocol.Encryption1RTT {
  		h.detectLostPathProbes(rcvTime)
  	}
@@ -682,7 +757,7 @@
  		}
  		if p.EncryptionLevel == protocol.Encryption1RTT {
  			acked1RTTPacket = true
-@@ -448,6 +454,9 @@
+@@ -448,6 +455,9 @@
  			putPacket(p.packet)
  		}
  	}
@@ -692,7 +767,7 @@
  
  	// detect spurious losses for application data packets, if the ACK was not reordered
  	if encLevel == protocol.Encryption1RTT && largestAcked == pnSpace.largestAcked {
-@@ -785,6 +794,7 @@
+@@ -785,6 +795,7 @@
  }
  
  func (h *sentPacketHandler) detectLostPackets(now monotime.Time, encLevel protocol.EncryptionLevel) {
@@ -700,15 +775,16 @@
  	pnSpace := h.getPacketNumberSpace(encLevel)
  	pnSpace.lossTime = 0
  
-@@ -856,6 +866,7 @@
+@@ -856,6 +867,8 @@
  				if !p.IsPathMTUProbePacket {
  					h.congestion.OnCongestionEvent(pn, p.Length, priorInFlight)
  				}
 +				h.qdLost = append(h.qdLost, congestion.LostPacketInfo{PacketNumber: pn, BytesLost: p.Length})
++				qdLostPackets.Add(1)
  				if encLevel == protocol.Encryption1RTT && h.ecnTracker != nil {
  					h.ecnTracker.LostPacket(pn)
  				}
-@@ -884,7 +895,11 @@
+@@ -884,7 +897,11 @@
  			})
  		}
  		// Early retransmit or time loss detection
@@ -720,7 +796,7 @@
  		return nil
  	}
  
-@@ -1028,9 +1043,16 @@
+@@ -1028,9 +1045,16 @@
  }
  
  func (h *sentPacketHandler) SetMaxDatagramSize(s protocol.ByteCount) {
@@ -737,7 +813,7 @@
  func (h *sentPacketHandler) isAmplificationLimited() bool {
  	if h.peerAddressValidated {
  		return false
-@@ -1131,13 +1153,70 @@
+@@ -1131,13 +1155,74 @@
  	for pn := range h.appDataPackets.history.PathProbes() {
  		h.appDataPackets.history.RemovePathProbe(pn)
  	}
@@ -792,6 +868,10 @@
 +}
 +
 +var qdBBRMade, qdBrutalMade atomic.Uint64
++
++var qdLostPackets, qdSentPackets atomic.Uint64
++
++func QDLoss() (lost, sent uint64) { return qdLostPackets.Load(), qdSentPackets.Load() }
 +
 +func QDSenders() (bbr, brutal uint64) { return qdBBRMade.Load(), qdBrutalMade.Load() }
 +
@@ -1737,7 +1817,7 @@
 +}
 --- a/internal/congestion/bbr/bbr_sender.go
 +++ b/internal/congestion/bbr/bbr_sender.go
-@@ -0,0 +1,1190 @@
+@@ -0,0 +1,1116 @@
 +package bbr
 +
 +import (
@@ -1798,8 +1878,6 @@
 +
 +	probeRttCwndGain = 0.75
 +
-+	lossCapShare      = 50
-+	lossCapProbeEvery = 4
 +	// If the bandwidth does not increase by the factor of |kStartupGrowthTarget|
 +	// within |kRoundTripsWithoutGrowthBeforeExitingStartup| rounds, the connection
 +	// will exit the STARTUP mode.
@@ -2001,15 +2079,6 @@
 +
 +	appLimitedSinceLastProbeRtt bool
 +	minRttSinceLastProbeRtt     time.Duration
-+
-+	roundSent, roundAcked, roundLost protocol.ByteCount
-+	roundStart                       monotime.Time
-+	roundProbed, lastRoundProbed     bool
-+	lossCap                          Bandwidth
-+	lossNoise                        bool
-+	quietLossy                       int
-+	cappedCycles                     int
-+	restCycle                        bool
 +
 +	// Time at which PROBE_RTT has to be exited.  Setting it to zero indicates
 +	// that the time is yet unknown as the number of packets in flight has not
@@ -2355,9 +2424,6 @@
 +	// Handle logic specific to PROBE_BW mode.
 +	if b.mode == bbrModeProbeBw {
 +		b.updateGainCyclePhase(eventTime, priorInFlight, len(lostPackets) != 0)
-+		if b.pacingGain > 1 {
-+			b.roundProbed = true
-+		}
 +	}
 +
 +	// Handle logic specific to STARTUP and DRAIN modes.
@@ -2394,7 +2460,6 @@
 +	b.sampler.RemoveObsoletePackets(leastUnacked)
 +
 +	if isRoundStart {
-+		b.closeRound(eventTime)
 +		b.numLossEventsInRound = 0
 +		b.bytesLostInRound = 0
 +	}
@@ -2420,54 +2485,7 @@
 +
 +// Get the current bandwidth estimate. Note that Bandwidth is in bits per second.
 +func (b *bbrSender) bandwidthEstimate() Bandwidth {
-+	best := b.maxBandwidth.GetBest()
-+	if b.lossCap != 0 && b.lossCap < best {
-+		return b.lossCap
-+	}
-+	return best
-+}
-+
-+func (b *bbrSender) closeRound(now monotime.Time) {
-+	sent := b.sampler.TotalBytesSent() - b.roundSent
-+	acked := b.sampler.TotalBytesAcked() - b.roundAcked
-+	lost := b.sampler.TotalBytesLost() - b.roundLost
-+	took := now.Sub(b.roundStart)
-+	fresh := b.roundStart.IsZero()
-+	thisProbed := b.roundProbed
-+	probed := thisProbed || b.lastRoundProbed
-+	b.lastRoundProbed, b.roundProbed = thisProbed, false
-+	b.roundSent, b.roundAcked, b.roundLost = b.sampler.TotalBytesSent(), b.sampler.TotalBytesAcked(), b.sampler.TotalBytesLost()
-+	b.roundStart = now
-+	if fresh || b.mode != bbrModeProbeBw || took <= 0 || sent == 0 {
-+		return
-+	}
-+
-+	estimate := b.bandwidthEstimate()
-+	if BandwidthFromDelta(sent, took)*10 < estimate*9 {
-+		return
-+	}
-+	if lost*lossCapShare <= sent {
-+		b.quietLossy = 0
-+		b.lossNoise = false
-+		if thisProbed {
-+			b.lossCap = 0
-+		}
-+		return
-+	}
-+	if b.lossNoise {
-+		return
-+	}
-+	if b.lossCap != 0 && !probed {
-+		b.quietLossy++
-+		if b.quietLossy >= 2 {
-+			b.lossCap, b.lossNoise, b.quietLossy = 0, true, 0
-+			return
-+		}
-+	}
-+	capTo := max(min(BandwidthFromDelta(acked, took), estimate), b.maxBandwidth.GetBest()/2)
-+	if b.lossCap == 0 || capTo < b.lossCap {
-+		b.lossCap = capTo
-+	}
++	return b.maxBandwidth.GetBest()
 +}
 +
 +func (b *bbrSender) bandwidthForPacer() protocol.ByteCount {
@@ -2613,19 +2631,7 @@
 +			b.bytesInFlight > b.getTargetCongestionWindow(1) {
 +			return
 +		}
-+		gain := pacingGain[b.cycleCurrentOffset]
-+		if b.lossCap == 0 {
-+			b.cappedCycles, b.restCycle = 0, false
-+		} else {
-+			if b.cycleCurrentOffset == 0 {
-+				b.cappedCycles++
-+				b.restCycle = b.cappedCycles%lossCapProbeEvery != 0
-+			}
-+			if b.restCycle {
-+				gain = 1
-+			}
-+		}
-+		b.pacingGain = gain
++		b.pacingGain = pacingGain[b.cycleCurrentOffset]
 +	}
 +}
 +
@@ -2963,7 +2969,7 @@
 +
 +const (
 +	maxBurstPackets               = 10
-+	maxBurstPacingDelayMultiplier = 1
++	maxBurstPacingDelayMultiplier = 2
 +)
 +
 +// Pacer implements a token bucket pacing algorithm.
@@ -3636,8 +3642,17 @@
 +type SendAlgorithmEx interface {
 +	OnCongestionEventEx(priorInFlight protocol.ByteCount, eventTime monotime.Time, ackedPackets []AckedPacketInfo, lostPackets []LostPacketInfo)
 +}
---- a/internal/protocol/params.go	2026-10-02 13:14:42.319596200 +0300
-+++ b/internal/protocol/params.go	2026-10-02 13:14:42.898472400 +0300
+--- a/internal/protocol/params.go
++++ b/internal/protocol/params.go
+@@ -46,7 +46,7 @@
+ const MaxServerUnprocessedPackets = 1024
+ 
+ // MaxConnUnprocessedPackets is the max number of packets stored in each connection that are not yet processed.
+-const MaxConnUnprocessedPackets = 256
++const MaxConnUnprocessedPackets = 4096
+ 
+ // SkipPacketInitialPeriod is the initial period length used for packet number skipping to prevent an Optimistic ACK attack.
+ // Every time a packet number is skipped, the period is doubled, up to SkipPacketMaxPeriod.
 @@ -78,7 +78,7 @@
  
  // MaxStreamFrameSorterGaps is the maximum number of gaps between received StreamFrames
@@ -3869,9 +3884,9 @@
 +	}
 +	return err
 +}
---- a/send_transient_windows.go	1970-01-01 03:00:00.000000000 +0300
-+++ b/send_transient_windows.go	2026-10-02 13:14:42.778797500 +0300
-@@ -0,0 +1,38 @@
+--- a/send_transient_windows.go
++++ b/send_transient_windows.go
+@@ -0,0 +1,42 @@
 +//go:build windows
 +
 +package quic
@@ -3896,8 +3911,12 @@
 +	transientPause = 250 * time.Microsecond
 +)
 +
-+func isTransientSendErr(err error) bool {
++func isBusySendErr(err error) bool {
 +	return errors.Is(err, windows.WSAENOBUFS) || errors.Is(err, windows.WSAEWOULDBLOCK)
++}
++
++func isTransientSendErr(err error) bool {
++	return isBusySendErr(err) || errors.Is(err, windows.WSAEINVAL)
 +}
 +
 +func retrySend(send func() error, err error) error {
@@ -3910,9 +3929,9 @@
 +	}
 +	return err
 +}
---- a/sys_conn_uso_windows.go	1970-01-01 03:00:00.000000000 +0300
-+++ b/sys_conn_uso_windows.go	2026-10-02 13:14:42.792868600 +0300
-@@ -0,0 +1,126 @@
+--- a/sys_conn_uso_windows.go
++++ b/sys_conn_uso_windows.go
+@@ -0,0 +1,210 @@
 +//go:build windows
 +
 +package quic
@@ -3927,16 +3946,28 @@
 +
 +	"golang.org/x/sys/windows"
 +
++	"github.com/quic-go/quic-go/internal/monotime"
 +	"github.com/quic-go/quic-go/internal/protocol"
 +)
 +
-+const qdUDPSendMsgSize = 2
++const (
++	qdUDPSendMsgSize = 2
++	qdUDPCoalesced   = 3
++	qdCoalescedMax   = 65527
++)
 +
 +type usoConn struct {
 +	*basicConn
 +	raw syscall.RawConn
 +	v6  bool
 +	off atomic.Bool
++	ran atomic.Bool
++
++	conn    OOBCapablePacketConn
++	scratch []byte
++	oob     []byte
++	pending []receivedPacket
++	next    int
 +}
 +
 +func qdWrapUSO(c OOBCapablePacketConn, supportsDF bool) rawConn {
@@ -3955,7 +3986,71 @@
 +		return b
 +	}
 +	local, _ := c.LocalAddr().(*net.UDPAddr)
-+	return &usoConn{basicConn: b, raw: raw, v6: local == nil || local.IP.To4() == nil}
++	u := &usoConn{basicConn: b, raw: raw, v6: local == nil || local.IP.To4() == nil}
++	if err := raw.Control(func(fd uintptr) {
++		serr = windows.SetsockoptInt(windows.Handle(fd), windows.IPPROTO_UDP, qdUDPCoalesced, qdCoalescedMax)
++	}); err == nil && serr == nil {
++		u.conn = c
++		u.scratch = make([]byte, 65535)
++		u.oob = make([]byte, 64)
++	}
++	return u
++}
++
++func (c *usoConn) ReadPacket() (receivedPacket, error) {
++	if c.conn == nil {
++		return c.basicConn.ReadPacket()
++	}
++	for c.next >= len(c.pending) {
++		c.pending = c.pending[:0]
++		c.next = 0
++		n, oobn, _, addr, err := c.conn.ReadMsgUDP(c.scratch, c.oob)
++		if err != nil {
++			return receivedPacket{}, err
++		}
++		now := monotime.Now()
++		data := c.scratch[:n]
++		segment := qdCoalescedSegment(c.oob[:oobn])
++		if segment <= 0 || segment > n {
++			segment = n
++		}
++		for {
++			size := min(segment, len(data))
++			if size <= protocol.MaxPacketBufferSize {
++				buffer := getPacketBuffer()
++				buffer.Data = append(buffer.Data, data[:size]...)
++				c.pending = append(c.pending, receivedPacket{remoteAddr: addr, rcvTime: now, data: buffer.Data, buffer: buffer})
++			}
++			data = data[size:]
++			if len(data) == 0 {
++				break
++			}
++		}
++	}
++	p := c.pending[c.next]
++	c.pending[c.next] = receivedPacket{}
++	c.next++
++	return p, nil
++}
++
++func qdCoalescedSegment(oob []byte) int {
++	const word = int(unsafe.Sizeof(uintptr(0)))
++	const head = (word + 8 + word - 1) &^ (word - 1)
++	for len(oob) >= head+4 {
++		size := int(*(*uintptr)(unsafe.Pointer(&oob[0])))
++		if size < head+4 || size > len(oob) {
++			return 0
++		}
++		if *(*int32)(unsafe.Pointer(&oob[word])) == windows.IPPROTO_UDP && *(*int32)(unsafe.Pointer(&oob[word+4])) == qdUDPCoalesced {
++			return int(*(*uint32)(unsafe.Pointer(&oob[head])))
++		}
++		next := (size + word - 1) &^ (word - 1)
++		if next >= len(oob) {
++			return 0
++		}
++		oob = oob[next:]
++	}
++	return 0
 +}
 +
 +func (c *usoConn) capabilities() connCapabilities {
@@ -3968,7 +4063,11 @@
 +	}
 +	if !c.off.Load() {
 +		n, err := c.sendSegmented(b, addr, gsoSize)
-+		if err == nil || isTransientSendErr(err) {
++		if err == nil {
++			c.ran.Store(true)
++			return n, nil
++		}
++		if isBusySendErr(err) {
 +			return n, err
 +		}
 +	}
@@ -3976,11 +4075,15 @@
 +	for len(b) > 0 {
 +		seg := b[:min(len(b), int(gsoSize))]
 +		if _, err := c.WriteTo(seg, addr); err != nil {
-+			return 0, err
++			if err = retrySend(func() error { _, err := c.WriteTo(seg, addr); return err }, err); err != nil {
++				return 0, err
++			}
 +		}
 +		b = b[len(seg):]
 +	}
-+	c.off.Store(true)
++	if !c.ran.Load() {
++		c.off.Store(true)
++	}
 +	return total, nil
 +}
 +
@@ -4136,3 +4239,623 @@
  
  	// only to be called once the handshake is complete
  	QueueProbePacket(protocol.EncryptionLevel) bool /* was a packet queued */
+--- a/send_stream.go
++++ b/send_stream.go
+@@ -47,7 +47,8 @@
+ 	cancellationFlagged bool
+ 	completed           bool // set when this stream has been reported to the streamSender as completed
+ 
+-	dataForWriting []byte // during a Write() call, this slice is the part of p that still needs to be sent out
++	dataForWriting []byte
++	held           *[]byte
+ 	nextFrame      *wire.StreamFrame
+ 
+ 	writeChan chan struct{}
+@@ -63,6 +64,13 @@
+ 	_ sendStreamFrameHandler   = &SendStream{}
+ )
+ 
++const sendBufferSize = 128 << 10
++
++var sendBuffers = sync.Pool{New: func() any {
++	b := make([]byte, sendBufferSize)
++	return &b
++}}
++
+ func newSendStream(
+ 	ctx context.Context,
+ 	streamID protocol.StreamID,
+@@ -125,67 +133,37 @@
+ 		return false, 0, nil
+ 	}
+ 
+-	s.dataForWriting = p
+-
+ 	var (
+-		deadlineTimer  *time.Timer
+-		bytesWritten   int
+-		notifiedSender bool
++		deadlineTimer *time.Timer
++		bytesWritten  int
+ 	)
+ 	for {
+-		var copied bool
+-		var deadline monotime.Time
+-		// As soon as dataForWriting becomes smaller than a certain size x, we copy all the data to a STREAM frame (s.nextFrame),
+-		// which can then be popped the next time we assemble a packet.
+-		// This allows us to return Write() when all data but x bytes have been sent out.
+-		// When the user now calls Close(), this is much more likely to happen before we popped that last STREAM frame,
+-		// allowing us to set the FIN bit on that frame (instead of sending an empty STREAM frame with FIN).
+-		if s.canBufferStreamFrame() && len(s.dataForWriting) > 0 {
+-			if s.nextFrame == nil {
+-				f := wire.GetStreamFrame()
+-				f.Offset = s.writeOffset
+-				f.StreamID = s.streamID
+-				f.DataLenPresent = true
+-				f.Data = f.Data[:len(s.dataForWriting)]
+-				copy(f.Data, s.dataForWriting)
+-				s.nextFrame = f
+-			} else {
+-				l := len(s.nextFrame.Data)
+-				s.nextFrame.Data = s.nextFrame.Data[:l+len(s.dataForWriting)]
+-				copy(s.nextFrame.Data[l:], s.dataForWriting)
++		if s.shutdownErr != nil || s.resetErr != nil {
++			break
++		}
++		if n := s.hold(p[bytesWritten:]); n > 0 {
++			bytesWritten += n
++			s.mutex.Unlock()
++			s.sender.onHasStreamData(s.streamID, s)
++			s.mutex.Lock()
++			if bytesWritten == len(p) {
++				break
+ 			}
+-			s.dataForWriting = nil
+-			bytesWritten = len(p)
+-			copied = true
+-		} else {
+-			bytesWritten = len(p) - len(s.dataForWriting)
+-			deadline = s.deadline
+-			if !deadline.IsZero() {
+-				if !monotime.Now().Before(deadline) {
+-					s.dataForWriting = nil
+-					return false, bytesWritten, errDeadline
+-				}
+-				if deadlineTimer == nil {
+-					deadlineTimer = time.NewTimer(monotime.Until(deadline))
+-					defer deadlineTimer.Stop()
+-				} else {
+-					deadlineTimer.Reset(monotime.Until(deadline))
+-				}
++			continue
++		}
++		deadline := s.deadline
++		if !deadline.IsZero() {
++			if !monotime.Now().Before(deadline) {
++				return false, bytesWritten, errDeadline
+ 			}
+-			if s.dataForWriting == nil || s.shutdownErr != nil || s.resetErr != nil {
+-				break
++			if deadlineTimer == nil {
++				deadlineTimer = time.NewTimer(monotime.Until(deadline))
++				defer deadlineTimer.Stop()
++			} else {
++				deadlineTimer.Reset(monotime.Until(deadline))
+ 			}
+ 		}
+-
+ 		s.mutex.Unlock()
+-		if !notifiedSender {
+-			s.sender.onHasStreamData(s.streamID, s) // must be called without holding the mutex
+-			notifiedSender = true
+-		}
+-		if copied {
+-			s.mutex.Lock()
+-			break
+-		}
+ 		if deadline.IsZero() {
+ 			<-s.writeChan
+ 		} else {
+@@ -210,12 +188,33 @@
+ 	return false, bytesWritten, nil
+ }
+ 
+-func (s *SendStream) canBufferStreamFrame() bool {
+-	var l protocol.ByteCount
+-	if s.nextFrame != nil {
+-		l = s.nextFrame.DataLen()
++func (s *SendStream) hold(p []byte) int {
++	if s.held == nil {
++		s.held = sendBuffers.Get().(*[]byte)
++		s.dataForWriting = (*s.held)[:0]
++	}
++	buf := *s.held
++	used := len(s.dataForWriting)
++	n := min(len(p), len(buf)-used)
++	if n == 0 {
++		return 0
++	}
++	start := cap(buf) - cap(s.dataForWriting)
++	if start+used+n > len(buf) {
++		copy(buf, s.dataForWriting)
++		start = 0
++	}
++	copy(buf[start+used:], p[:n])
++	s.dataForWriting = buf[start : start+used+n]
++	return n
++}
++
++func (s *SendStream) drop() {
++	if s.held != nil {
++		sendBuffers.Put(s.held)
++		s.held = nil
+ 	}
+-	return l+protocol.ByteCount(len(s.dataForWriting)) <= protocol.MaxPacketBufferSize
++	s.dataForWriting = nil
+ }
+ 
+ // popStreamFrame returns the next STREAM frame that is supposed to be sent on this stream
+@@ -370,14 +369,14 @@
+ 	if protocol.ByteCount(len(s.dataForWriting)) <= maxBytes {
+ 		f.Data = f.Data[:len(s.dataForWriting)]
+ 		copy(f.Data, s.dataForWriting)
+-		s.dataForWriting = nil
++		s.drop()
+ 		s.signalWrite()
+ 		return
+ 	}
+ 	f.Data = f.Data[:maxBytes]
+ 	copy(f.Data, s.dataForWriting)
+ 	s.dataForWriting = s.dataForWriting[maxBytes:]
+-	if s.canBufferStreamFrame() {
++	if len(s.dataForWriting) <= sendBufferSize/2 {
+ 		s.signalWrite()
+ 	}
+ }
+@@ -448,7 +447,7 @@
+ 	s.mutex.Lock()
+ 	defer s.mutex.Unlock()
+ 
+-	s.reliableSize = s.writeOffset
++	s.reliableSize = s.writeOffset + protocol.ByteCount(len(s.dataForWriting))
+ 	if s.nextFrame != nil {
+ 		s.reliableSize += s.nextFrame.DataLen()
+ 	}
+@@ -465,6 +464,7 @@
+ 		s.nextFrame.PutBack()
+ 		s.nextFrame = nil
+ 	}
++	s.drop()
+ }
+ 
+ // CancelWrite aborts sending on this stream.
+--- a/sys_conn_oob.go
++++ b/sys_conn_oob.go
+@@ -25,7 +25,7 @@
+ 
+ const (
+ 	ecnMask       = 0x3
+-	oobBufferSize = 128
++	oobBufferSize = 192
+ )
+ 
+ // Contrary to what the naming suggests, the ipv{4,6}.Message is not dependent on the IP version.
+@@ -73,6 +73,10 @@
+ 	messages []ipv4.Message
+ 	buffers  [batchSize]*packetBuffer
+ 
++	gro     bool
++	pending []receivedPacket
++	next    int
++
+ 	cap connCapabilities
+ }
+ 
+@@ -94,6 +98,7 @@
+ 	if err := rawConn.Control(func(fd uintptr) {
+ 		errECNIPv4 = unix.SetsockoptInt(int(fd), unix.IPPROTO_IP, unix.IP_RECVTOS, 1)
+ 		errECNIPv6 = unix.SetsockoptInt(int(fd), unix.IPPROTO_IPV6, unix.IPV6_RECVTCLASS, 1)
++		enableReceiveTime(int(fd))
+ 
+ 		if needsPacketInfo {
+ 			errPIIPv4 = unix.SetsockoptInt(int(fd), unix.IPPROTO_IP, ipv4PKTINFO, 1)
+@@ -154,12 +159,67 @@
+ 	for i := range batchSize {
+ 		oobConn.messages[i].OOB = make([]byte, oobBufferSize)
+ 	}
++	if enableGRO(rawConn) {
++		oobConn.gro = true
++		for i := range batchSize {
++			oobConn.messages[i].Buffers[0] = make([]byte, coalescedSize)
++		}
++	}
+ 	return oobConn, nil
+ }
+ 
++const coalescedSize = 65535
++
++func (c *oobConn) readCoalesced() (receivedPacket, error) {
++	for c.next >= len(c.pending) {
++		c.pending = c.pending[:0]
++		c.next = 0
++		msgs := c.messages[:batchSize]
++		n, err := c.batchConn.ReadBatch(msgs, 0)
++		if n == 0 || err != nil {
++			return receivedPacket{}, err
++		}
++		now := monotime.Now()
++		for i := range n {
++			msg := &msgs[i]
++			head := receivedPacket{remoteAddr: msg.Addr, rcvTime: now}
++			segment, err := parseControl(msg.OOB[:msg.NN], &head)
++			if err != nil {
++				return receivedPacket{}, err
++			}
++			data := msg.Buffers[0][:msg.N]
++			if segment <= 0 || segment > len(data) {
++				segment = len(data)
++			}
++			for {
++				size := min(segment, len(data))
++				if size <= protocol.MaxPacketBufferSize {
++					buffer := getPacketBuffer()
++					buffer.Data = append(buffer.Data, data[:size]...)
++					p := head
++					p.data = buffer.Data
++					p.buffer = buffer
++					c.pending = append(c.pending, p)
++				}
++				data = data[size:]
++				if len(data) == 0 {
++					break
++				}
++			}
++		}
++	}
++	p := c.pending[c.next]
++	c.pending[c.next] = receivedPacket{}
++	c.next++
++	return p, nil
++}
++
+ var invalidCmsgOnceV4, invalidCmsgOnceV6 sync.Once
+ 
+ func (c *oobConn) ReadPacket() (receivedPacket, error) {
++	if c.gro {
++		return c.readCoalesced()
++	}
+ 	if len(c.messages) == int(c.readPos) { // all messages read. Read the next batch of messages.
+ 		c.messages = c.messages[:batchSize]
+ 		// replace buffers data buffers up to the packet that has been consumed during the last ReadBatch call
+@@ -182,23 +242,40 @@
+ 	buffer := c.buffers[c.readPos]
+ 	c.readPos++
+ 
+-	data := msg.OOB[:msg.NN]
+ 	p := receivedPacket{
+ 		remoteAddr: msg.Addr,
+ 		rcvTime:    monotime.Now(),
+ 		data:       msg.Buffers[0][:msg.N],
+ 		buffer:     buffer,
+ 	}
++	if _, err := parseControl(msg.OOB[:msg.NN], &p); err != nil {
++		return receivedPacket{}, err
++	}
++	return p, nil
++}
++
++func parseControl(data []byte, p *receivedPacket) (int, error) {
++	var segment int
+ 	for len(data) > 0 {
+ 		hdr, body, remainder, err := unix.ParseOneSocketControlMessage(data)
+ 		if err != nil {
+-			return receivedPacket{}, err
++			return 0, err
++		}
++		if size := coalescedSegment(hdr.Level, hdr.Type, body); size > 0 {
++			segment = size
++		}
++		if hdr.Level == unix.SOL_SOCKET {
++			if held, ok := heldSince(hdr.Type, body); ok {
++				if int64(held) > packetsLate.Load() {
++					packetsLate.Store(int64(held))
++				}
++			}
+ 		}
+ 		if hdr.Level == unix.IPPROTO_IP {
+ 			switch hdr.Type {
+ 			case msgTypeIPTOS:
+ 				if len(body) != 1 {
+-					return receivedPacket{}, errors.New("invalid IPTOS size")
++					return 0, errors.New("invalid IPTOS size")
+ 				}
+ 				p.ecn = protocol.ParseECNHeaderBits(body[0] & ecnMask)
+ 			case ipv4PKTINFO:
+@@ -218,7 +295,7 @@
+ 			switch hdr.Type {
+ 			case unix.IPV6_TCLASS:
+ 				if len(body) != 4 {
+-					return receivedPacket{}, errors.New("invalid IPV6_TCLASS size")
++					return 0, errors.New("invalid IPV6_TCLASS size")
+ 				}
+ 				bits := uint8(binary.NativeEndian.Uint32(body)) & ecnMask
+ 				p.ecn = protocol.ParseECNHeaderBits(bits)
+@@ -240,7 +317,7 @@
+ 		}
+ 		data = remainder
+ 	}
+-	return p, nil
++	return segment, nil
+ }
+ 
+ // WritePacket writes a new packet.
+--- a/sys_conn_helper_linux.go
++++ b/sys_conn_helper_linux.go
+@@ -9,6 +9,7 @@
+ 	"os"
+ 	"strconv"
+ 	"syscall"
++	"time"
+ 	"unsafe"
+ 
+ 	"golang.org/x/sys/unix"
+@@ -23,6 +24,22 @@
+ 
+ const batchSize = 8 // needs to smaller than MaxUint8 (otherwise the type of oobConn.readPos has to be changed)
+ 
++func enableReceiveTime(fd int) {
++	_ = unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_TIMESTAMPNS, 1)
++}
++
++func heldSince(kind int32, body []byte) (time.Duration, bool) {
++	if kind != unix.SO_TIMESTAMPNS || len(body) != 16 {
++		return 0, false
++	}
++	at := time.Unix(int64(binary.NativeEndian.Uint64(body)), int64(binary.NativeEndian.Uint64(body[8:])))
++	held := time.Since(at)
++	if held < 0 || held > time.Second {
++		return 0, false
++	}
++	return held, true
++}
++
+ var kernelVersionMajor int
+ 
+ func init() {
+@@ -80,6 +97,29 @@
+ 	return serr == nil
+ }
+ 
++func enableGRO(conn syscall.RawConn) bool {
++	var serr error
++	if err := conn.Control(func(fd uintptr) {
++		serr = unix.SetsockoptInt(int(fd), unix.IPPROTO_UDP, unix.UDP_GRO, 1)
++	}); err != nil {
++		return false
++	}
++	return serr == nil
++}
++
++func coalescedSegment(level, kind int32, body []byte) int {
++	if level != unix.IPPROTO_UDP || kind != unix.UDP_GRO {
++		return 0
++	}
++	switch len(body) {
++	case 2:
++		return int(binary.NativeEndian.Uint16(body))
++	case 4:
++		return int(binary.NativeEndian.Uint32(body))
++	}
++	return 0
++}
++
+ func appendUDPSegmentSizeMsg(b []byte, size uint16) []byte {
+ 	startLen := len(b)
+ 	const dataLen = 2 // payload is a uint16
+--- a/sys_conn_helper_darwin.go
++++ b/sys_conn_helper_darwin.go
+@@ -6,6 +6,7 @@
+ 	"encoding/binary"
+ 	"net/netip"
+ 	"syscall"
++	"time"
+ 
+ 	"golang.org/x/sys/unix"
+ )
+@@ -36,3 +37,11 @@
+ func isGSOEnabled(syscall.RawConn) bool { return false }
+ 
+ func isECNEnabled() bool { return !isECNDisabledUsingEnv() }
++
++func enableReceiveTime(int) {}
++
++func heldSince(int32, []byte) (time.Duration, bool) { return 0, false }
++
++func enableGRO(syscall.RawConn) bool { return false }
++
++func coalescedSegment(int32, int32, []byte) int { return 0 }
+--- a/sys_conn_helper_freebsd.go
++++ b/sys_conn_helper_freebsd.go
+@@ -5,6 +5,7 @@
+ import (
+ 	"net/netip"
+ 	"syscall"
++	"time"
+ 
+ 	"golang.org/x/sys/unix"
+ )
+@@ -31,3 +32,11 @@
+ func isGSOEnabled(syscall.RawConn) bool { return false }
+ 
+ func isECNEnabled() bool { return !isECNDisabledUsingEnv() }
++
++func enableReceiveTime(int) {}
++
++func heldSince(int32, []byte) (time.Duration, bool) { return 0, false }
++
++func enableGRO(syscall.RawConn) bool { return false }
++
++func coalescedSegment(int32, int32, []byte) int { return 0 }
+--- a/receive_stream.go
++++ b/receive_stream.go
+@@ -126,6 +126,12 @@
+ 	return false
+ }
+ 
++const (
++	readGather    = 64 << 10
++	readLinger    = 500 * time.Microsecond
++	readBulkFrame = 1000
++)
++
+ func (s *ReceiveStream) readImpl(p []byte) (hasStreamWindowUpdate bool, hasConnWindowUpdate bool, _ int, _ error) {
+ 	if s.currentFrameIsLast && s.currentFrame == nil {
+ 		s.errorRead = true
+@@ -141,11 +147,27 @@
+ 
+ 	var bytesRead int
+ 	var deadlineTimer *time.Timer
++	var bulk, lingered bool
++	var linger *time.Timer
+ 	for bytesRead < len(p) {
+ 		if s.currentFrame == nil || s.readPosInFrame >= len(s.currentFrame) {
+ 			s.dequeueNextFrame()
+ 		}
+ 		if s.currentFrame == nil && bytesRead > 0 {
++			if bulk && !lingered && bytesRead < readGather && !s.currentFrameIsLast && s.closeForShutdownErr == nil {
++				if linger == nil {
++					linger = time.NewTimer(readLinger)
++					defer linger.Stop()
++				}
++				s.mutex.Unlock()
++				select {
++				case <-s.readChan:
++				case <-linger.C:
++					lingered = true
++				}
++				s.mutex.Lock()
++				continue
++			}
+ 			return hasStreamWindowUpdate, hasConnWindowUpdate, bytesRead, s.closeForShutdownErr
+ 		}
+ 
+@@ -194,6 +216,7 @@
+ 			return hasStreamWindowUpdate, hasConnWindowUpdate, bytesRead, fmt.Errorf("BUG: readPosInFrame (%d) > frame.DataLen (%d) in stream.Read", s.readPosInFrame, len(s.currentFrame))
+ 		}
+ 		m := copy(p[bytesRead:], s.currentFrame[s.readPosInFrame:])
++		bulk = len(s.currentFrame) >= readBulkFrame
+ 
+ 		// when a RESET_STREAM was received, the flow controller was already
+ 		// informed about the final offset for this stream
+--- a/frame_sorter.go
++++ b/frame_sorter.go
+@@ -29,6 +29,9 @@
+ 	queue   map[protocol.ByteCount]frameSorterEntry
+ 	readPos protocol.ByteCount
+ 	gaps    *list.List[byteInterval]
++
++	run     []frameSorterEntry
++	runHead int
+ }
+ 
+ var errDuplicateStreamData = errors.New("duplicate stream data")
+@@ -58,6 +61,14 @@
+ 		return errDuplicateStreamData
+ 	}
+ 
++	if len(s.queue) == 0 && s.gaps.Len() == 1 {
++		if gap := s.gaps.Front(); gap.Value.Start == offset && offset+protocol.ByteCount(len(data)) < gap.Value.End {
++			gap.Value.Start = offset + protocol.ByteCount(len(data))
++			s.run = append(s.run, frameSorterEntry{Data: data, DoneCb: doneCb})
++			return nil
++		}
++	}
++
+ 	start := offset
+ 	end := offset + protocol.ByteCount(len(data))
+ 
+@@ -217,7 +228,35 @@
+ 	}
+ }
+ 
++func (s *frameSorter) at(pos protocol.ByteCount) (frameSorterEntry, bool) {
++	if entry, ok := s.queue[pos]; ok {
++		return entry, true
++	}
++	offset := s.readPos
++	for _, entry := range s.run[s.runHead:] {
++		if offset == pos {
++			return entry, true
++		}
++		if offset > pos {
++			break
++		}
++		offset += protocol.ByteCount(len(entry.Data))
++	}
++	return frameSorterEntry{}, false
++}
++
+ func (s *frameSorter) Pop() (protocol.ByteCount, []byte, func()) {
++	if s.runHead < len(s.run) {
++		entry := s.run[s.runHead]
++		s.run[s.runHead] = frameSorterEntry{}
++		s.runHead++
++		if s.runHead == len(s.run) {
++			s.run, s.runHead = s.run[:0], 0
++		}
++		offset := s.readPos
++		s.readPos += protocol.ByteCount(len(entry.Data))
++		return offset, entry.Data, entry.DoneCb
++	}
+ 	entry, ok := s.queue[s.readPos]
+ 	if !ok {
+ 		return s.readPos, nil, nil
+@@ -233,7 +272,7 @@
+ 
+ // HasMoreData says if there is any more data queued at *any* offset.
+ func (s *frameSorter) HasMoreData() bool {
+-	return len(s.queue) > 0
++	return len(s.queue) > 0 || s.runHead < len(s.run)
+ }
+ 
+ var errTooLittleData = errors.New("too little data")
+@@ -251,7 +290,7 @@
+ 	pos := offset
+ 	remaining := len(p)
+ 	for remaining > 0 {
+-		entry, ok := s.queue[pos]
++		entry, ok := s.at(pos)
+ 		if !ok {
+ 			return errTooLittleData
+ 		}
+@@ -266,7 +305,7 @@
+ 	pos = offset
+ 	var copied int
+ 	for copied < len(p) {
+-		entry := s.queue[pos] // the entry is guaranteed to exist from the check above
++		entry, _ := s.at(pos)
+ 		copied += copy(p[copied:], entry.Data)
+ 		pos += protocol.ByteCount(len(entry.Data))
+ 	}
+--- a/internal/mocks/ackhandler/sent_packet_handler.go
++++ b/internal/mocks/ackhandler/sent_packet_handler.go
+@@ -565,6 +565,8 @@
+ 	return c
+ }
+ 
++func (m *MockSentPacketHandler) AppLimited() {}
++
+ // SetMaxDatagramSize mocks base method.
+ func (m *MockSentPacketHandler) SetMaxDatagramSize(count protocol.ByteCount) {
+ 	m.ctrl.T.Helper()
+--- a/http3/request_writer.go
++++ b/http3/request_writer.go
+@@ -22,7 +22,7 @@
+ 	"github.com/quic-go/quic-go/qlogwriter"
+ )
+ 
+-const bodyCopyBufferSize = 8 * 1024
++const bodyCopyBufferSize = 64 * 1024
+ 
+ type requestWriter struct {
+ 	mutex     sync.Mutex

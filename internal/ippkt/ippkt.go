@@ -125,7 +125,7 @@ func SrcPort(pkt []byte) (uint16, bool) {
 	return binary.BigEndian.Uint16(rest[0:2]), true
 }
 
-func GrowMSS(pkt []byte, mss uint16) {
+func SetMSS(pkt []byte, mss uint16) {
 	proto, rest, ok := after(pkt, 20)
 	if !ok || proto != protoTCP || rest[13]&0x12 != 0x02 {
 		return
@@ -147,9 +147,7 @@ func GrowMSS(pkt []byte, mss uint16) {
 			return
 		}
 		if kind == 2 && size == 4 {
-			if binary.BigEndian.Uint16(rest[at+2:]) < mss {
-				binary.BigEndian.PutUint16(rest[at+2:], mss)
-			}
+			binary.BigEndian.PutUint16(rest[at+2:], mss)
 			return
 		}
 		at += size

@@ -42,6 +42,7 @@ type Options struct {
 	Route     string
 	MTU       int
 	Jumbo     int
+	Segment   int
 	Brutal    int
 	BBR       string
 	Workers   int
@@ -493,7 +494,7 @@ func (t *Tunnel) Run(ctx context.Context, src packet.Source) error {
 		Detour:   t.detour(),
 		Mark:     t.markOf,
 		Loud:     t.opts.Loud,
-		Jumbo:    uint16(max(t.opts.Jumbo-40, 0)),
+		Jumbo:    t.segment(),
 	}).Run(ctx, src, t.road)
 }
 
@@ -575,6 +576,13 @@ const flowSweep = 512
 type flowMark struct {
 	src, dst netip.AddrPort
 	udp      bool
+}
+
+func (t *Tunnel) segment() uint16 {
+	if t.opts.Segment > 0 {
+		return uint16(t.opts.Segment)
+	}
+	return uint16(max(t.opts.Jumbo-40, 0))
 }
 
 func (t *Tunnel) stack() (*netstack.Stack, error) {

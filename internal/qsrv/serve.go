@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/jaywehosl/qd/internal/costream"
 	"io"
 	"net"
 	"net/http"
@@ -402,14 +403,14 @@ func (n *Node) serveConnect(w http.ResponseWriter, r *http.Request) {
 
 	done := make(chan struct{})
 	go func() {
-		io.Copy(tallied(out, s, true), r.Body)
+		costream.Relay(tallied(out, s, true), r.Body)
 		if cw, ok := out.(interface{ CloseWrite() error }); ok {
 			cw.CloseWrite()
 		}
 		close(done)
 	}()
 
-	io.Copy(tallied(flushWriter{w}, s, false), out)
+	costream.Relay(tallied(flushWriter{w}, s, false), out)
 	<-done
 }
 

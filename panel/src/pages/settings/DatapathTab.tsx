@@ -122,7 +122,7 @@ export default function DatapathTab({ allSetting, updateSetting }: DatapathTabPr
         >
           <div className="setting-pair">
             <Input type="number" min={64} {...num('streamWindowKb', 512)} />
-            <Input type="number" min={64} {...num('maxStreamWindowKb', 6144)} />
+            <Input type="number" min={64} {...num('maxStreamWindowKb', 16384)} />
           </div>
         </SettingListItem>
 

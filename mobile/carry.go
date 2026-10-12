@@ -69,7 +69,8 @@ func (c *Client) carry(servers []string, relays []relay.Link, session uint32) er
 			Device:    c.device.ID,
 			Route:     c.route(),
 			MTU:       mtu,
-			Jumbo:     localSegment,
+			Jumbo:     localMTU,
+			Segment:   localSegment,
 			Workers:   readers,
 			Brutal:    int(c.rate.Load()),
 			BBR:       c.bbr(),
@@ -103,7 +104,7 @@ func (c *Client) carry(servers []string, relays []relay.Link, session uint32) er
 		},
 		Source: func(ctx context.Context, live *qcli.Tunnel) (packet.Source, error) {
 			six, carried := live.Six()
-			fd, err := c.hold(live.Assigned()[0], six, mtu, append(live.Peers(), live.RelayPeers()...))
+			fd, err := c.hold(live.Assigned()[0], six, localMTU, append(live.Peers(), live.RelayPeers()...))
 			if err != nil {
 				return nil, err
 			}

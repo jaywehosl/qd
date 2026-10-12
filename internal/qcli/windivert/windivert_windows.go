@@ -26,6 +26,7 @@ const (
 
 const (
 	ParamQueueLength uint32 = 0
+	ParamQueueSize   uint32 = 2
 	ShutdownBoth     uint32 = 0x3
 	EventSocketBind  uint8  = 3
 	EventSocketClose uint8  = 7

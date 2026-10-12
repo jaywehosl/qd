@@ -17,6 +17,7 @@ import (
 const (
 	recvBufBytes  = 2 * 1024 * 1024
 	queueLenBoost = 8192
+	queueSizeMax  = 32 << 20
 )
 
 var (
@@ -45,6 +46,7 @@ func Open(dllPath, filter string, flags uint64) (*Source, error) {
 		return nil, err
 	}
 	_ = setParam(h, ParamQueueLength, queueLenBoost)
+	_ = setParam(h, ParamQueueSize, queueSizeMax)
 
 	s := &Source{h: h}
 	s.rd = s.NewReader()
@@ -141,6 +143,31 @@ func (w *writer) Send(pkts []packet.Packet) error {
 		pkts = pkts[n:]
 	}
 	return nil
+}
+
+func (w *writer) Compose(fill func(dst []byte) ([]byte, bool)) (bool, bool) {
+	start := len(w.buf)
+	buf, ok := fill(w.buf)
+	if !ok || len(buf) == start {
+		return false, false
+	}
+	w.buf = buf
+	var a Address
+	a.SetLayer(LayerNetwork)
+	a.SetOutbound(false)
+	a.SetIfIdx(w.s.lastIfIdx.Load())
+	w.addrs = append(w.addrs, a)
+	return true, len(w.addrs) >= BatchMax || len(w.buf) >= sendBytesMax
+}
+
+func (w *writer) Flush() error {
+	if len(w.addrs) == 0 {
+		return nil
+	}
+	_, err := sendEx(w.s.h, w.buf, w.addrs)
+	w.buf = w.buf[:0]
+	w.addrs = w.addrs[:0]
+	return err
 }
 
 func (w *writer) sendChunk(pkts []packet.Packet) error {

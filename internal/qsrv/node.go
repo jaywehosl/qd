@@ -59,7 +59,7 @@ func DefaultTunables() Tunables {
 	return Tunables{
 		MaxStreams:   65536,
 		StreamWindow: 512 << 10,
-		MaxStreamWin: 6 << 20,
+		MaxStreamWin: 16 << 20,
 		ConnWindow:   96 << 20,
 		MaxConnWin:   96 << 20,
 		IdleTimeout:  90 * time.Second,

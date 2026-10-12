@@ -383,7 +383,7 @@
       "maxStreams": "Streams per client",
       "maxStreamsDesc": "How many flows one connection may hold open at once. A browser alone takes hundreds, and on an exit node every client transits through a single connection. Raise it before the client count does.",
       "streamWindow": "Stream window",
-      "streamWindowDesc": "Starting and largest receive window of one flow, in kilobytes. Above the bandwidth-delay product it only buys latency.",
+      "streamWindowDesc": "Starting and largest receive window of one flow, in kilobytes. A flow rides out a lost packet without stopping while the largest window is about three times its bandwidth-delay product.",
       "connWindow": "Connection window",
       "connWindowDesc": "Starting and largest receive window shared by all flows of one client, in kilobytes.",
       "socketBuffer": "Socket buffer",

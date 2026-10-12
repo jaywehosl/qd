@@ -376,8 +376,10 @@ func printStats(node *qsrv.Node) {
 	bbr, brutal := quic.CongestionSenders()
 	outlets, links := qsrv.Dropped()
 	_, missed := quic.DatagramStats()
-	fmt.Printf("sessions=%d transits=%d refused=%d goroutines=%d heap=%dMB sys=%dMB senders bbr=%d brutal=%d dropped outlet=%d link=%d shed=%d missed=%d unread=%d\n",
-		sessions, transits, refused, runtime.NumGoroutine(), mem.HeapAlloc>>20, mem.Sys>>20, bbr, brutal, outlets, links, quic.DatagramsShed(), missed, http3.StreamDatagramsDropped())
+	overrun, backlog := quic.ReceiveBacklog()
+	lost, sent := quic.LossStats()
+	fmt.Printf("sessions=%d transits=%d refused=%d goroutines=%d heap=%dMB sys=%dMB senders bbr=%d brutal=%d dropped outlet=%d link=%d shed=%d missed=%d unread=%d overrun=%d backlog=%d late=%dms lost=%d sent=%d\n",
+		sessions, transits, refused, runtime.NumGoroutine(), mem.HeapAlloc>>20, mem.Sys>>20, bbr, brutal, outlets, links, quic.DatagramsShed(), missed, http3.StreamDatagramsDropped(), overrun, backlog, quic.ReceiveLate().Milliseconds(), lost, sent)
 
 	for _, s := range node.Sessions() {
 		if s.PktUp == 0 && s.PktDown == 0 {

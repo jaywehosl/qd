@@ -9,6 +9,60 @@ import (
 	"time"
 )
 
+const (
+	relaySmall = 32 << 10
+	relayLarge = 128 << 10
+)
+
+var (
+	smallBufs = sync.Pool{New: func() any { return new([relaySmall]byte) }}
+	largeBufs = sync.Pool{New: func() any { return new([relayLarge]byte) }}
+)
+
+func Relay(dst io.Writer, src io.Reader) (int64, error) {
+	small := smallBufs.Get().(*[relaySmall]byte)
+	buf := small[:]
+	var large *[relayLarge]byte
+	defer func() {
+		smallBufs.Put(small)
+		if large != nil {
+			largeBufs.Put(large)
+		}
+	}()
+	var total int64
+	full := 0
+	for {
+		n, err := src.Read(buf)
+		if n > 0 {
+			wrote, werr := dst.Write(buf[:n])
+			total += int64(wrote)
+			if werr != nil {
+				return total, werr
+			}
+			if wrote < n {
+				return total, io.ErrShortWrite
+			}
+		}
+		if err != nil {
+			if err == io.EOF {
+				err = nil
+			}
+			return total, err
+		}
+		if large == nil {
+			if n == len(buf) {
+				full++
+			} else {
+				full = 0
+			}
+			if full >= 2 {
+				large = largeBufs.Get().(*[relayLarge]byte)
+				buf = large[:]
+			}
+		}
+	}
+}
+
 type shared struct {
 	r      io.ReadCloser
 	w      io.WriteCloser

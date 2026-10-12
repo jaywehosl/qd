@@ -75,10 +75,20 @@ func New(opts Options) *Engine {
 func (e *Engine) Run(ctx context.Context, src packet.Source, tun Tunnel) error {
 	errc := make(chan error, e.Workers+4)
 
+	ms, multi := src.(packet.MultiSource)
+	var writer packet.Writer = src
+	if multi {
+		writer = ms.NewWriter()
+	}
+	composer, ok := writer.(packet.Composer)
+	if !ok {
+		return errors.New("hybrid: the packet source cannot compose batches")
+	}
+
 	tt := &tcpTunnel{
-		ch:    make(chan []byte, 8192),
-		out:   make(chan []byte, 16384),
+		out:   make(chan []byte, 4096),
 		pool:  &e.tcpPool,
+		big:   &e.bufPool,
 		meter: e.Meter,
 		beat:  startPulse(ctx, errc),
 		done:  ctx.Done(),
@@ -86,15 +96,11 @@ func (e *Engine) Run(ctx context.Context, src packet.Source, tun Tunnel) error {
 		sent:  make(chan struct{}),
 	}
 
-	ms, multi := src.(packet.MultiSource)
-	var writer packet.Writer = src
-	if multi {
-		writer = ms.NewWriter()
-	}
+	detach := e.Stack.Attach(tt)
 	go func() {
 		defer e.hurry()()
 		defer close(tt.sent)
-		tt.injector(writer)
+		tt.deliver(e.Stack, composer)
 	}()
 
 	defer func() {
@@ -104,8 +110,8 @@ func (e *Engine) Run(ctx context.Context, src packet.Source, tun Tunnel) error {
 		case <-tt.sent:
 		case <-time.After(resetDrain):
 		}
+		detach()
 	}()
-	go func() { errc <- e.Stack.Run(ctx, tt) }()
 
 	if multi && e.Workers > 1 {
 		log.Printf("capture on %d threads, reordering possible", e.Workers)
@@ -167,8 +173,7 @@ func (e *Engine) logStats(ctx context.Context, tt *tcpTunnel, src packet.Source)
 			if teller, ok := src.(interface{ Dropped() uint64 }); ok {
 				sunk = teller.Dropped()
 			}
-			log.Printf("  bridge: push=%d drop=%d read=%d | inject=%d batches=%d (avg %.1f pkt/syscall) outDrop=%d writeErr=%d tunDrop=%d | datagram DROPPED=%.2f%%",
-				tt.cPush.Load(), tt.cDrop.Load(), tt.cRead.Load(),
+			log.Printf("  bridge: inject=%d batches=%d (avg %.1f pkt/syscall) outDrop=%d writeErr=%d tunDrop=%d | datagram DROPPED=%.2f%%",
 				tt.cWrite.Load(), tt.cBatches.Load(), avgBatch,
 				tt.cOutDrop.Load(), tt.cWriteErr.Load(), sunk, pct)
 			log.Printf("  stack: %s", e.Stack.DebugStats())
@@ -211,9 +216,9 @@ func (e *Engine) pumpOutbound(ctx context.Context, rd packet.Reader, src packet.
 				e.cTCP.Add(1)
 				e.Meter.carried(len(p.Data))
 				if e.Jumbo != 0 {
-					ippkt.GrowMSS(p.Data, e.Jumbo)
+					ippkt.SetMSS(p.Data, e.Jumbo)
 				}
-				tt.push(p.Data)
+				e.Stack.Inject(p.Data)
 				continue
 			}
 			if expired := e.expired(p.Data); expired != nil {
@@ -237,6 +242,7 @@ func (e *Engine) pumpOutbound(ctx context.Context, rd packet.Reader, src packet.
 				reinject = append(reinject, packet.Packet{Data: icmp, Dir: packet.Inbound})
 			}
 		}
+		e.Stack.Flush()
 		if len(reinject) > 0 {
 			beat.begin()
 			err := src.Send(reinject)
@@ -324,11 +330,11 @@ func (e *Engine) prep(data []byte, batch *[]packet.Packet) {
 }
 
 type tcpTunnel struct {
-	ch   chan []byte
 	out  chan []byte
 	pool *sync.Pool
+	big  *sync.Pool
 
-	cPush, cDrop, cRead, cWrite, cWriteErr, cOutDrop, cBatches atomic.Uint64
+	cWrite, cWriteErr, cOutDrop, cBatches atomic.Uint64
 
 	meter *Meter
 	beat  *pulse
@@ -337,119 +343,119 @@ type tcpTunnel struct {
 	sent  chan struct{}
 }
 
-func (t *tcpTunnel) take(pkt []byte, into chan []byte) bool {
-	var held []byte
-	if len(pkt) > tcpSlot {
-		held = append([]byte(nil), pkt...)
-	} else {
-		slot := t.pool.Get().(*[tcpSlot]byte)
-		held = slot[:copy(slot[:], pkt)]
-	}
-	select {
-	case into <- held:
-		return true
-	default:
-		t.give(held)
-		return false
-	}
-}
-
 func (t *tcpTunnel) give(b []byte) {
-	if cap(b) == tcpSlot {
+	switch cap(b) {
+	case tcpSlot:
 		t.pool.Put((*[tcpSlot]byte)(b[:tcpSlot]))
+	case bufSlot:
+		t.big.Put((*[bufSlot]byte)(b[:bufSlot]))
 	}
 }
 
-func (t *tcpTunnel) push(pkt []byte) {
-	if t.take(pkt, t.ch) {
-		t.cPush.Add(1)
-	} else {
-		t.cDrop.Add(1)
-	}
-}
-
-func (t *tcpTunnel) ReadPacket(b []byte) (int, error) {
-	var data []byte
-	select {
-	case data = <-t.ch:
-	case <-t.done:
-		return 0, context.Canceled
-	}
-	n := copy(b, data)
-	t.give(data)
-	t.cRead.Add(1)
-	return n, nil
+func (t *tcpTunnel) ReadPacket([]byte) (int, error) {
+	<-t.done
+	return 0, context.Canceled
 }
 
 func (t *tcpTunnel) WritePacket(b []byte) ([]byte, error) {
-	if !t.take(b, t.out) {
+	var held []byte
+	switch {
+	case len(b) > bufSlot:
+		held = append([]byte(nil), b...)
+	case len(b) > tcpSlot:
+		slot := t.big.Get().(*[bufSlot]byte)
+		held = slot[:copy(slot[:], b)]
+	default:
+		slot := t.pool.Get().(*[tcpSlot]byte)
+		held = slot[:copy(slot[:], b)]
+	}
+	select {
+	case t.out <- held:
+	default:
+		t.give(held)
 		t.cOutDrop.Add(1)
 	}
 	return nil, nil
 }
 
-const injectGather = 300 * time.Microsecond
-
-func (t *tcpTunnel) injector(w packet.Writer) {
-	batch := make([]packet.Packet, 0, maxInboundBatch)
-	timer := time.NewTimer(time.Hour)
-	defer timer.Stop()
-	if !timer.Stop() {
-		<-timer.C
-	}
-
-	last := false
-	for {
-		var first []byte
-		select {
-		case d := <-t.out:
-			first = d
-		default:
-			if last {
-				return
-			}
-			select {
-			case <-t.quit:
-				last = true
-				continue
-			case d := <-t.out:
-				first = d
-			}
+func (t *tcpTunnel) deliver(st *netstack.Stack, w packet.Composer) {
+	pending := 0
+	flush := func() {
+		if pending == 0 {
+			return
 		}
-		batch = append(batch[:0], packet.Packet{Data: first, Dir: packet.Inbound})
-
-		timer.Reset(injectGather)
-	drain:
-		for len(batch) < maxInboundBatch {
-			select {
-			case d, ok := <-t.out:
-				if !ok {
-					break drain
-				}
-				batch = append(batch, packet.Packet{Data: d, Dir: packet.Inbound})
-			case <-timer.C:
-				break drain
-			}
-		}
-		if !timer.Stop() {
-			select {
-			case <-timer.C:
-			default:
-			}
-		}
-
 		t.beat.begin()
-		err := w.Send(batch)
+		err := w.Flush()
 		t.beat.end()
 		if err != nil {
 			t.cWriteErr.Add(1)
 		} else {
-			t.cWrite.Add(uint64(len(batch)))
-			t.meter.delivered(batch)
+			t.cWrite.Add(uint64(pending))
 		}
 		t.cBatches.Add(1)
-		for _, p := range batch {
-			t.give(p.Data)
+		pending = 0
+	}
+	size := 0
+	take := func(dst []byte) ([]byte, bool) {
+		out, ok := st.Take(dst)
+		size = len(out) - len(dst)
+		return out, ok
+	}
+	put := func(d []byte) {
+		added, full := w.Compose(func(dst []byte) ([]byte, bool) { return append(dst, d...), true })
+		if added {
+			pending++
+			t.meter.In.Add(1)
+			t.meter.BytesIn.Add(uint64(len(d)))
+		}
+		t.give(d)
+		if full {
+			flush()
+		}
+	}
+
+	last := false
+	for {
+		if !last {
+			select {
+			case <-st.Ready():
+			case d := <-t.out:
+				put(d)
+			case <-t.quit:
+				last = true
+			}
+		}
+		for {
+			moved := false
+			for {
+				added, full := w.Compose(take)
+				if !added {
+					break
+				}
+				moved = true
+				pending++
+				t.meter.In.Add(1)
+				t.meter.BytesIn.Add(uint64(size))
+				if full {
+					flush()
+				}
+			}
+			for more := true; more; {
+				select {
+				case d := <-t.out:
+					put(d)
+					moved = true
+				default:
+					more = false
+				}
+			}
+			flush()
+			if !moved {
+				break
+			}
+		}
+		if last {
+			return
 		}
 	}
 }

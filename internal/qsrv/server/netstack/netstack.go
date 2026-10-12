@@ -3,6 +3,8 @@ package netstack
 import (
 	"context"
 	"fmt"
+	"github.com/jaywehosl/qd/internal/costream"
+	"gvisor.dev/gvisor/pkg/tcpip/stack/gro"
 	"io"
 	"log"
 	"math"
@@ -55,6 +57,9 @@ type Stack struct {
 	out      Tunnel
 	flat     []byte
 	flows    sync.Map
+	ready    chan struct{}
+	gmu      sync.Mutex
+	gro      gro.GRO
 	nextFlow atomic.Uint64
 	mtu      int
 }
@@ -97,7 +102,10 @@ func New(d Dialer, mtu int, near bool) (*Stack, error) {
 		{Destination: header.IPv6EmptySubnet, NIC: nicID},
 	})
 
-	st := &Stack{stack: s, ep: ep, dialer: d, mtu: mtu}
+	st := &Stack{stack: s, ep: ep, dialer: d, mtu: mtu, ready: make(chan struct{}, 1)}
+	st.gro.Dispatcher = merged{ep}
+	st.gro.Init(true)
+	ep.AddNotify(st)
 	st.pinger, _ = d.(Pinger)
 
 	tcpFwd := tcp.NewForwarder(s, 0, maxInFlight, st.handleTCP)
@@ -142,6 +150,83 @@ func (s *Stack) Run(ctx context.Context, t Tunnel) error {
 	return s.ingress(ctx, t)
 }
 
+type merged struct{ ep *channel.Endpoint }
+
+func (m merged) DeliverNetworkPacket(proto tcpip.NetworkProtocolNumber, pkt *stack.PacketBuffer) {
+	m.ep.InjectInbound(proto, pkt)
+}
+
+func (m merged) DeliverLinkPacket(tcpip.NetworkProtocolNumber, *stack.PacketBuffer) {}
+
+func (s *Stack) WriteNotify() {
+	select {
+	case s.ready <- struct{}{}:
+	default:
+	}
+}
+
+func (s *Stack) Ready() <-chan struct{} { return s.ready }
+
+func (s *Stack) Take(dst []byte) ([]byte, bool) {
+	pkt := s.ep.Read()
+	if pkt == nil {
+		return dst, false
+	}
+	dst = flatten(dst, pkt)
+	pkt.DecRef()
+	return dst, true
+}
+
+func (s *Stack) Attach(t Tunnel) func() {
+	s.wmu.Lock()
+	s.out = t
+	s.wmu.Unlock()
+	return func() {
+		s.wmu.Lock()
+		s.out = nil
+		s.wmu.Unlock()
+	}
+}
+
+func (s *Stack) Inject(b []byte) {
+	if len(b) == 0 {
+		return
+	}
+	if s.pinger != nil && (isEcho4(b) || isEcho6(b)) {
+		s.wmu.Lock()
+		t := s.out
+		s.wmu.Unlock()
+		if t != nil {
+			s.inject(b, t)
+		}
+		return
+	}
+	var proto tcpip.NetworkProtocolNumber
+	switch b[0] >> 4 {
+	case 4:
+		proto = header.IPv4ProtocolNumber
+	case 6:
+		proto = header.IPv6ProtocolNumber
+	default:
+		return
+	}
+	pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
+		Payload: buffer.MakeWithData(b),
+	})
+	pkt.NetworkProtocolNumber = proto
+	pkt.RXChecksumValidated = true
+	s.gmu.Lock()
+	s.gro.Enqueue(pkt)
+	s.gmu.Unlock()
+	pkt.DecRef()
+}
+
+func (s *Stack) Flush() {
+	s.gmu.Lock()
+	s.gro.Flush()
+	s.gmu.Unlock()
+}
+
 func (s *Stack) ingress(ctx context.Context, t Tunnel) error {
 	buf := make([]byte, 65536+header.IPv4MaximumHeaderSize)
 	for {
@@ -155,29 +240,33 @@ func (s *Stack) ingress(ctx context.Context, t Tunnel) error {
 		if n == 0 {
 			continue
 		}
-		if s.pinger != nil && isEcho4(buf[:n]) {
-			go s.echo(t, append([]byte(nil), buf[:n]...))
-			continue
-		}
-		if s.pinger != nil && isEcho6(buf[:n]) {
-			go s.echo6(t, append([]byte(nil), buf[:n]...))
-			continue
-		}
-		var proto tcpip.NetworkProtocolNumber
-		switch buf[0] >> 4 {
-		case 4:
-			proto = header.IPv4ProtocolNumber
-		case 6:
-			proto = header.IPv6ProtocolNumber
-		default:
-			continue
-		}
-		pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
-			Payload: buffer.MakeWithData(buf[:n]),
-		})
-		s.ep.InjectInbound(proto, pkt)
-		pkt.DecRef()
+		s.inject(buf[:n], t)
 	}
+}
+
+func (s *Stack) inject(b []byte, t Tunnel) {
+	if s.pinger != nil && isEcho4(b) {
+		go s.echo(t, append([]byte(nil), b...))
+		return
+	}
+	if s.pinger != nil && isEcho6(b) {
+		go s.echo6(t, append([]byte(nil), b...))
+		return
+	}
+	var proto tcpip.NetworkProtocolNumber
+	switch b[0] >> 4 {
+	case 4:
+		proto = header.IPv4ProtocolNumber
+	case 6:
+		proto = header.IPv6ProtocolNumber
+	default:
+		return
+	}
+	pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
+		Payload: buffer.MakeWithData(b),
+	})
+	s.ep.InjectInbound(proto, pkt)
+	pkt.DecRef()
 }
 
 func (s *Stack) egress(ctx context.Context, t Tunnel) {
@@ -501,7 +590,7 @@ func (s shutBoth) Close() error {
 func pipe(a, b net.Conn) {
 	done := make(chan struct{}, 2)
 	cp := func(dst, src net.Conn) {
-		_, _ = io.Copy(dst, src)
+		_, _ = costream.Relay(dst, src)
 		if cw, ok := dst.(interface{ CloseWrite() error }); ok {
 			_ = cw.CloseWrite()
 		} else {

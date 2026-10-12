@@ -30,7 +30,8 @@ const (
 	localPrefix  = 24
 	dnsIP        = "10.7.0.53"
 	safeMTU      = 1392
-	localSegment = 15900
+	localMTU     = 65535
+	localSegment = 15860
 	coreThreads  = 4
 
 	readers = 1

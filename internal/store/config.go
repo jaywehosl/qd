@@ -442,7 +442,7 @@ func defaultNetworkSettings() NetworkSettings {
 		BBRProfile:       "standard",
 		MaxStreams:       65536,
 		StreamWindow:     512,
-		MaxStreamWindow:  6144,
+		MaxStreamWindow:  16384,
 		ConnWindow:       98304,
 		MaxConnWindow:    98304,
 		IdleSeconds:      90,
@@ -518,8 +518,10 @@ func (s NetworkSettings) sane() NetworkSettings {
 	if s.MaxStreams < 16 {
 		s.MaxStreams = fallback.MaxStreams
 	}
-	if s.StreamWindow == 2048 && s.MaxStreamWindow == 6144 && s.ConnWindow == 3072 && s.MaxConnWindow == 15360 {
-		s.StreamWindow, s.ConnWindow, s.MaxConnWindow = fallback.StreamWindow, fallback.ConnWindow, fallback.MaxConnWindow
+	untouched := s.StreamWindow == 2048 && s.ConnWindow == 3072 && s.MaxConnWindow == 15360
+	untouched = untouched || (s.StreamWindow == 512 && s.ConnWindow == 98304 && s.MaxConnWindow == 98304)
+	if untouched && s.MaxStreamWindow == 6144 {
+		s.StreamWindow, s.MaxStreamWindow, s.ConnWindow, s.MaxConnWindow = fallback.StreamWindow, fallback.MaxStreamWindow, fallback.ConnWindow, fallback.MaxConnWindow
 	}
 	if s.StreamWindow < 64 {
 		s.StreamWindow = fallback.StreamWindow

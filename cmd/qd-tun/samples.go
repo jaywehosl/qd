@@ -78,8 +78,10 @@ func collectSamples(db *clientstate.DB, tun *tunnel, stop <-chan struct{}) {
 			say := time.Duration(window).Seconds()
 			if say > 0 && (windowIn > 0 || windowOut > 0) {
 				_, lost := quic.DatagramStats()
-				fmt.Printf("speed    %.1f Mbit down, %.1f Mbit up over the last %.0fs; datagrams shed %d, missed %d, unread %d\n",
-					float64(windowIn)*8/say/1e6, float64(windowOut)*8/say/1e6, say, quic.DatagramsShed(), lost, http3.StreamDatagramsDropped())
+				overrun, backlog := quic.ReceiveBacklog()
+				gone, sent := quic.LossStats()
+				fmt.Printf("speed    %.1f Mbit down, %.1f Mbit up over the last %.0fs; datagrams shed %d, missed %d, unread %d; packets overrun %d, backlog %d, lost %d of %d\n",
+					float64(windowIn)*8/say/1e6, float64(windowOut)*8/say/1e6, say, quic.DatagramsShed(), lost, http3.StreamDatagramsDropped(), overrun, backlog, gone, sent)
 			}
 			spoken, window, windowIn, windowOut = stamp, 0, 0, 0
 		}

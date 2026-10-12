@@ -37,3 +37,8 @@ type Reader interface {
 type Writer interface {
 	Send(pkts []Packet) error
 }
+
+type Composer interface {
+	Compose(fill func(dst []byte) ([]byte, bool)) (added, full bool)
+	Flush() error
+}
