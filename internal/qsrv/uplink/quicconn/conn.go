@@ -16,8 +16,6 @@ import (
 	quic "github.com/quic-go/quic-go"
 
 	"github.com/jaywehosl/qd/internal/pace"
-	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
-	"github.com/jaywehosl/qd/internal/roots"
 )
 
 const defaultMaxDatagram = 1200
@@ -330,27 +328,6 @@ func (d Dialer) open(ctx context.Context, who candidate) (*Conn, error) {
 	c := &Conn{qc: qc, tr: tr, pc: pc, remote: who.addr, keep: d.Keep}
 	c.maxDgram.Store(defaultMaxDatagram)
 	return c, nil
-}
-
-func OverRelay(ctx context.Context, sess *relay.Session, authority string, conf *quic.Config, tickets tls.ClientSessionCache) (*Conn, error) {
-	host, _, err := net.SplitHostPort(authority)
-	if err != nil {
-		return nil, err
-	}
-	pc := relay.NewPacketConn(sess)
-	if err := sess.Start(); err != nil {
-		return nil, err
-	}
-	if err := sess.Ready(ctx); err != nil {
-		sess.Stop()
-		return nil, err
-	}
-	qc, err := DialPacketConn(ctx, pc, relay.Peer, &tls.Config{ServerName: host, ClientSessionCache: tickets, RootCAs: roots.Pool()}, conf)
-	if err != nil {
-		sess.Stop()
-		return nil, err
-	}
-	return qc, nil
 }
 
 func DialPacketConn(ctx context.Context, pc net.PacketConn, raddr net.Addr, tlsConf *tls.Config, quicConf *quic.Config) (*Conn, error) {

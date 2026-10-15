@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/netip"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -24,7 +25,7 @@ type Config struct {
 	Native   func(name string) bool
 	Say      func(format string, args ...any)
 	Device   string
-	Exit     func() bool
+	Exit     func(name string) bool
 }
 
 type Stats struct {
@@ -36,7 +37,7 @@ type Resolver struct {
 	node    atomic.Pointer[string]
 	token   string
 	device  string
-	exit    func() bool
+	exit    func(name string) bool
 	ask     Ask
 	say     func(string, ...any)
 	adblock func() bool
@@ -126,6 +127,11 @@ func (r *Resolver) handle(query []byte, from *net.UDPAddr) {
 		return
 	}
 
+	if strings.EqualFold(strings.TrimSuffix(name, "."), "use-application-dns.net") {
+		r.conn.WriteToUDP(dnsproxy.NXDomain(query), from)
+		return
+	}
+
 	if qtype == 28 && !r.six.Load() {
 		r.noV6.Add(1)
 		r.conn.WriteToUDP(dnsproxy.NoData(query), from)
@@ -166,9 +172,10 @@ func (r *Resolver) fromNode(query []byte) ([]byte, error) {
 		Answer  []byte `json:"answer"`
 		Blocked bool   `json:"blocked"`
 	}
+	name, _, _ := dnsproxy.Question(query)
 	body := map[string]any{
 		"query": query, "device": r.device,
-		"exit":    r.exit != nil && r.exit(),
+		"exit":    r.exit != nil && r.exit(name),
 		"adblock": r.adblock != nil && r.adblock(),
 	}
 	if err := r.ask(r.asking(), "dns", r.token, body, &answer); err != nil {

@@ -5,7 +5,6 @@ import "time"
 const (
 	Stagger       = 250 * time.Millisecond
 	QUICHeadStart = time.Second
-	RelayStart    = 2500 * time.Millisecond
 	LateFor       = 6 * time.Second
 	DialWait      = 20 * time.Second
 	ControlWait   = 8 * time.Second

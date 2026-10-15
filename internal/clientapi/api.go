@@ -16,7 +16,6 @@ import (
 
 	"github.com/jaywehosl/qd/internal/clientstate"
 	"github.com/jaywehosl/qd/internal/qdcrypt"
-	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
 	"github.com/jaywehosl/qd/internal/steerlist"
 	"github.com/jaywehosl/qd/internal/update"
 )
@@ -33,7 +32,6 @@ type API struct {
 	mu     sync.Mutex
 	netKey *qdcrypt.Key
 	peers  []string
-	relays []relay.Link
 
 	upMu     sync.Mutex
 	offer    *offerAt
@@ -209,13 +207,6 @@ func (a *API) Import(uri string) error {
 		return err
 	}
 
-	a.mu.Lock()
-	a.relays = link.Relays
-	a.mu.Unlock()
-	if len(link.Relays) > 0 {
-		fmt.Printf("relay    link carries %d relay(s), first via %s\n", len(link.Relays), link.Relays[0].Authority)
-	}
-
 	if link.NetworkKey != "" {
 		if err := a.adoptNetworkKey(link.NetworkKey); err != nil {
 			return err
@@ -353,36 +344,8 @@ func (a *API) adoptNetworkDefaults(answer Standing) {
 	a.adoptExit(answer)
 	a.adoptRefresh(answer)
 	a.adoptEntrypoints(answer)
-	a.adoptRelays(answer)
 	a.adoptPeers(answer)
 	a.adoptAdmin(answer)
-}
-
-func (a *API) adoptRelays(answer Standing) {
-	links := make([]relay.Link, 0, len(answer.Relays))
-	for _, r := range answer.Relays {
-		if r.Weblink != "" && r.Authority != "" {
-			links = append(links, r)
-		}
-	}
-	a.mu.Lock()
-	changed := len(links) != len(a.relays)
-	a.relays = links
-	a.mu.Unlock()
-	if changed && len(links) > 0 {
-		fmt.Printf("relay    subscription carries %d relay(s), first via %s\n", len(links), links[0].Authority)
-	}
-	a.platform.SyncControlRelays(links)
-}
-
-func (a *API) Relays() []relay.Link {
-	a.mu.Lock()
-	held := append([]relay.Link{}, a.relays...)
-	a.mu.Unlock()
-	if len(held) > 0 {
-		return held
-	}
-	return a.db.RelayLinks()
 }
 
 func (a *API) adoptAdmin(answer Standing) {
@@ -598,7 +561,7 @@ func (a *API) Connect() error {
 		a.platform.SetExit(settings.Egress && sub.AllowExit)
 	}
 
-	if err := a.platform.Start(lane, a.Relays(), qdcrypt.SessionID(sub.Key)); err != nil {
+	if err := a.platform.Start(lane, qdcrypt.SessionID(sub.Key)); err != nil {
 		if prev, _ := a.failed.Swap(err.Error()).(string); prev != err.Error() && !errors.Is(err, ErrStopped) {
 			a.db.Notify("warning", "Could not bring the tunnel up: "+err.Error(), time.Now().UnixMilli())
 		}
@@ -891,7 +854,7 @@ func (a *API) Reset(subscription bool) error {
 	}
 
 	a.mu.Lock()
-	a.netKey, a.peers, a.relays = nil, nil, nil
+	a.netKey, a.peers = nil, nil
 	a.mu.Unlock()
 	a.upMu.Lock()
 	a.offer, a.upFailed, a.upErr = nil, "", ""

@@ -1,7 +1,7 @@
 import { useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { Card, Input, Select } from '@/components/ds';
+import { Card, Input, Select, Switch } from '@/components/ds';
 import { SettingListItem } from '@/components/ui';
 import type { AllSetting } from '@/models/setting';
 
@@ -98,6 +98,18 @@ export default function DatapathTab({ allSetting, updateSetting }: DatapathTabPr
             />
           </SettingListItem>
         )}
+
+        <SettingListItem
+          paddings="small"
+          title={t('pages.settings.ipv6')}
+          description={t('pages.settings.ipv6Desc')}
+        >
+          <Switch
+            checked={!!allSetting.ipv6}
+            onChange={(ipv6) => updateSetting({ ipv6 })}
+            aria-label={t('pages.settings.ipv6')}
+          />
+        </SettingListItem>
 
         <SettingListItem
           paddings="small"

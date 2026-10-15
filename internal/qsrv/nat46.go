@@ -167,6 +167,13 @@ func (n *Node) behind(dst netip.AddrPort) netip.AddrPort {
 	return dst
 }
 
+func (n *Node) minted(dst netip.AddrPort, route string) string {
+	if route == "" && synthetic.Contains(dst.Addr()) && !n.nat.own.Contains(dst.Addr()) {
+		return AnyExit
+	}
+	return route
+}
+
 func (n *Node) stale(dst netip.AddrPort) bool {
 	if !synthetic.Contains(dst.Addr()) {
 		return false

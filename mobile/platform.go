@@ -12,8 +12,8 @@ import (
 
 	"github.com/jaywehosl/qd/internal/clientapi"
 	"github.com/jaywehosl/qd/internal/clientstate"
+	"github.com/jaywehosl/qd/internal/qcli/guard"
 	"github.com/jaywehosl/qd/internal/qdcrypt"
-	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
 	"github.com/jaywehosl/qd/internal/update"
 )
 
@@ -23,11 +23,11 @@ type platform struct {
 
 func (p platform) Running() bool { return p.c.Running() }
 
-func (p platform) Start(servers []string, relays []relay.Link, session uint32) error {
+func (p platform) Start(servers []string, session uint32) error {
 	if len(servers) == 0 {
 		return fmt.Errorf("no entrypoint to dial")
 	}
-	return p.c.carry(servers, relays, session)
+	return p.c.carry(servers, session)
 }
 
 func (p platform) Stop() error {
@@ -86,8 +86,6 @@ func (c *Client) carriage() string {
 	}
 	return "bbr " + cmp.Or(c.bbr(), "standard")
 }
-
-func (p platform) SyncControlRelays(relays []relay.Link) { p.c.wire().SetRelays(relays) }
 
 func (p platform) ServerName() string {
 	p.c.mu.Lock()
@@ -210,6 +208,17 @@ func (c *Client) appLists() (direct []string, allowed []string, carveOut bool) {
 
 func (p platform) HoldAutostart(on bool) error { return nil }
 
+func lanRoutes() []string {
+	var out []string
+	for _, p := range guard.New(nil).Bypasses() {
+		a := p.Addr()
+		if a.Is4() && p.Bits() < 32 && !a.IsLoopback() && !a.IsMulticast() && !a.IsUnspecified() {
+			out = append(out, p.String())
+		}
+	}
+	return out
+}
+
 func (c *Client) hold(assigned, six netip.Prefix, mtu int, dialed []netip.Addr) (int, error) {
 	direct, allowed, carveOut := c.appLists()
 	if carveOut {
@@ -236,6 +245,7 @@ func (c *Client) hold(assigned, six netip.Prefix, mtu int, dialed []netip.Addr) 
 		"include":  allowed,
 		"carveOut": carveOut,
 		"peers":    peers,
+		"lan":      lanRoutes(),
 	}
 	if six.IsValid() {
 		shape["localIp6"] = six.Addr().String()

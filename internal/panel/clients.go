@@ -14,7 +14,6 @@ import (
 	"github.com/jaywehosl/qd/internal/clientstate"
 	"github.com/jaywehosl/qd/internal/netstate"
 	"github.com/jaywehosl/qd/internal/qdcrypt"
-	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
 )
 
 type groupRow struct {
@@ -25,11 +24,6 @@ type groupRow struct {
 	AllowExit     bool   `json:"allowExit"`
 	AllowDev      bool   `json:"allowDev"`
 	AllowCore     bool   `json:"allowCore"`
-	RelayEnable   bool   `json:"relayEnable"`
-	Relays        []struct {
-		NodeID  int    `json:"nodeId"`
-		Weblink string `json:"weblink"`
-	} `json:"relays"`
 }
 
 func (a *API) groups() ([]groupRow, error) {
@@ -95,14 +89,10 @@ func (a *API) buildClients() ([]map[string]any, []string, error) {
 	}
 	names := make(map[int]string, len(groups))
 	reach := make(map[int][]int, len(groups))
-	relaysOf := make(map[int]int, len(groups))
 	tags := make([]string, 0, len(groups))
-	for i, g := range groups {
+	for _, g := range groups {
 		names[g.ID] = g.Name
 		reach[g.ID] = g.EntrypointIDs
-		if g.RelayEnable {
-			relaysOf[g.ID] = i
-		}
 		tags = append(tags, g.Name)
 	}
 
@@ -142,19 +132,10 @@ func (a *API) buildClients() ([]map[string]any, []string, error) {
 				}
 			}
 
-			var relays []relay.Link
-			if i, on := relaysOf[group]; on {
-				for _, r := range groups[i].Relays {
-					if auth := nodeEndpoint[r.NodeID]; auth != "" && r.Weblink != "" {
-						relays = append(relays, relay.Link{Authority: auth, Weblink: r.Weblink})
-					}
-				}
-			}
-
 			if len(reachable) > 0 {
 				tag, _ := row["email"].(string)
 				row["uri"] = clientstate.Link{
-					Key: uuid, Label: tag, NetworkKey: key, Endpoints: reachable, Relays: relays,
+					Key: uuid, Label: tag, NetworkKey: key, Endpoints: reachable,
 				}.String()
 			}
 		}
@@ -613,10 +594,9 @@ func (a *API) groupsList(w http.ResponseWriter, r *http.Request) {
 		out = append(out, map[string]any{
 			"id": g.ID, "name": g.Name, "clientCount": counts[g.ID],
 			"entrypointIds": g.EntrypointIDs, "deviceLimit": g.DeviceLimit,
-			"allowExit":   g.AllowExit,
-			"allowDev":    g.AllowDev,
-			"allowCore":   g.AllowCore,
-			"relayEnable": g.RelayEnable, "relays": g.Relays,
+			"allowExit": g.AllowExit,
+			"allowDev":  g.AllowDev,
+			"allowCore": g.AllowCore,
 		})
 	}
 	sendOK(w, out)

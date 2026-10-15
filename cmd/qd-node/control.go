@@ -7,9 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"runtime"
-	"strconv"
 	"strings"
 	"time"
 
@@ -508,25 +506,6 @@ func reachableBy(network *netstate.State, group *netstate.Group) []map[string]an
 	return out
 }
 
-func relaysFor(network *netstate.State, group *netstate.Group) []map[string]any {
-	out := []map[string]any{}
-	if group == nil || !group.RelayEnable {
-		return out
-	}
-	for _, r := range group.Relays {
-		n := network.Node(r.NodeID)
-		if n == nil || !n.Enable || r.Weblink == "" {
-			continue
-		}
-		authority := n.Authority
-		if authority == "" {
-			authority = net.JoinHostPort(n.Address, strconv.Itoa(n.Port))
-		}
-		out = append(out, map[string]any{"weblink": r.Weblink, "authority": authority})
-	}
-	return out
-}
-
 func (state *controlState) carries(network *netstate.State, group *netstate.Group) bool {
 	if group == nil {
 		return false
@@ -577,7 +556,6 @@ func (state *controlState) whoami(token string, claim deviceClaim) map[string]an
 			"expiryTime":     c.ExpiryAt,
 			"carried":        c.Enable && !expired && state.enable && state.servesClients() && state.carries(network, group),
 			"entrypoints":    reachableBy(network, group),
-			"relays":         relaysFor(network, group),
 		}
 		if c.Admin && c.Enable {
 			answer["peers"] = peerAddresses(network)
@@ -622,12 +600,7 @@ func (state *controlState) wrote(answer response, self bool) response {
 		state.applySelf()
 	}
 	state.syncSessions()
-	state.applyRelays()
 	return answer
-}
-
-func (state *controlState) applyRelays() {
-	state.node.SetRelays(relaysForNode(state.db, state.id))
 }
 
 func (state *controlState) selfRow() (netstate.Node, bool) {
@@ -866,6 +839,7 @@ func movedWhat(was, now store.NetworkSettings) string {
 		{"pool", was.Pool == now.Pool},
 		{"brutal_mbit", was.BrutalMbit == now.BrutalMbit},
 		{"bbr_profile", was.BBRProfile == now.BBRProfile},
+		{"ipv6", was.IPv6 == now.IPv6},
 		{"socket_buffer", was.SocketBuffer == now.SocketBuffer},
 		{"max_streams", was.MaxStreams == now.MaxStreams},
 		{"stream_window", was.StreamWindow == now.StreamWindow},

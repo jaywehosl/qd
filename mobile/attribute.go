@@ -23,6 +23,7 @@ type marks struct {
 
 	mu   sync.RWMutex
 	role map[string]byte
+	def  byte
 
 	flows sync.Map
 	ports sync.Map
@@ -48,30 +49,31 @@ func newMarks(host Host) *marks {
 	return &marks{host: host, role: map[string]byte{}, seed: maphash.MakeSeed()}
 }
 
+func markFor(role string) byte {
+	switch role {
+	case clientstate.RoleEgress:
+		return markEgress
+	case clientstate.RoleNoEgress:
+		return markLocal
+	}
+	return markGlobal
+}
+
 func (m *marks) reload(db *clientstate.DB) {
-	_, rules, err := db.RulesInForce()
+	def, rules, err := db.RulesInForce()
 	if err != nil {
 		return
 	}
 
 	fresh := map[string]byte{}
 	for _, rule := range rules {
-		name := strings.TrimSpace(rule.Process)
-		if name == "" {
-			continue
-		}
-		switch rule.Role {
-		case clientstate.RoleEgress:
-			fresh[name] = markEgress
-		case clientstate.RoleNoEgress:
-			fresh[name] = markLocal
-		default:
-			fresh[name] = markGlobal
+		if name := strings.TrimSpace(rule.Process); name != "" {
+			fresh[name] = markFor(rule.Role)
 		}
 	}
 
 	m.mu.Lock()
-	m.role = fresh
+	m.role, m.def = fresh, markFor(def)
 	m.mu.Unlock()
 
 	m.forget()
@@ -86,16 +88,22 @@ func (m *marks) forget() {
 	m.live.Store(0)
 }
 
-func (m *marks) interested() bool {
+func (m *marks) interested() (bool, byte) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return len(m.role) > 0
+	return len(m.role) > 0, m.def
+}
+
+func (m *marks) fallback() qdcrypt.Exit {
+	_, def := m.interested()
+	return exitOf(def, qdcrypt.Exit(exit.Load()))
 }
 
 func (m *marks) forFlow(src, dst netip.AddrPort, udp bool) qdcrypt.Exit {
 	global := qdcrypt.Exit(exit.Load())
-	if !m.interested() || !src.IsValid() || !dst.IsValid() {
-		return global
+	some, def := m.interested()
+	if !some || !src.IsValid() || !dst.IsValid() {
+		return exitOf(def, global)
 	}
 
 	proto := byte(6)
@@ -158,15 +166,15 @@ func (m *marks) owner(proto byte, src, dst netip.AddrPort) (byte, bool) {
 	if spent := time.Since(started).Milliseconds(); spent > 20 {
 		say("owner: lookup took %d ms for proto=%d port=%d", spent, proto, src.Port())
 	}
-	if named == "" {
-		return markGlobal, false
-	}
-
 	m.mu.RLock()
 	mark, known := m.role[named]
+	def := m.def
 	m.mu.RUnlock()
+	if named == "" {
+		return def, false
+	}
 	if !known {
-		return markGlobal, true
+		return def, true
 	}
 	return mark, true
 }

@@ -21,6 +21,7 @@ export class AllSetting {
   pool = '10.7.0.0/16';
   brutalMbit = 0;
   bbrProfile = 'standard';
+  ipv6 = false;
   maxStreams = 65536;
   streamWindowKb = 512;
   maxStreamWindowKb = 16384;

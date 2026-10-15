@@ -23,6 +23,7 @@ export const AllSettingSchema = z.object({
   pool: z.string().optional(),
   brutalMbit: nonNegativeInt.optional(),
   bbrProfile: z.string().optional(),
+  ipv6: z.boolean().optional(),
   maxStreams: nonNegativeInt.optional(),
   streamWindowKb: nonNegativeInt.optional(),
   maxStreamWindowKb: nonNegativeInt.optional(),

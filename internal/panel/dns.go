@@ -23,6 +23,7 @@ var networkKeys = []string{
 	"pool",
 	"brutalMbit",
 	"bbrProfile",
+	"ipv6",
 	"maxStreams",
 	"streamWindowKb",
 	"maxStreamWindowKb",

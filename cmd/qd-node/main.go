@@ -28,7 +28,6 @@ import (
 	"github.com/jaywehosl/qd/internal/qdcrypt"
 	"github.com/jaywehosl/qd/internal/qsrv"
 	"github.com/jaywehosl/qd/internal/qsrv/uplink/quicconn"
-	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
 	"github.com/jaywehosl/qd/internal/store"
 	"github.com/jaywehosl/qd/internal/update"
 )
@@ -237,12 +236,19 @@ func main() {
 	quicconn.ECH = ech.publicList
 	keepPort(*confFlag, self.Port)
 	keepNAT(*confFlag, self.NATSlot)
-	fmt.Printf("nat46      slot %d, IPv6-only sites get addresses from %s\n", self.NATSlot, qsrv.NATSlot(self.NATSlot))
+	qsrv.AllowV6(settings.IPv6)
+	quicconn.OnlyV4.Store(!settings.IPv6)
+	switch {
+	case qsrv.HoldsV6():
+		fmt.Printf("nat46      slot %d, IPv6-only sites get addresses from %s\n", self.NATSlot, qsrv.NATSlot(self.NATSlot))
+	case settings.IPv6:
+		fmt.Printf("ipv6       on in the network settings, but this server has no global v6 address\n")
+	default:
+		fmt.Printf("ipv6       off in the network settings: clients get no v6, no AAAA and no NAT46, peers are dialed over v4\n")
+	}
 
 	admission := newGate()
 	admission.setNetwork(key)
-
-	relays := relaysForNode(db, self.ID)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -263,7 +269,6 @@ func main() {
 		Pool:      poolOf(settings.Pool),
 		TLS:       tlsConf,
 		Token:     key,
-		Relays:    relays,
 		Verify:    admission.verify,
 		Admit:     admission.admit,
 		Reset:     resetKey(filepath.Dir(*dbPath)),
@@ -343,25 +348,6 @@ func main() {
 	<-ctx.Done()
 	fmt.Println("\nstopping")
 	printStats(node)
-}
-
-func relaysForNode(db *store.DB, selfID int) []relay.Config {
-	groups, err := db.Groups()
-	if err != nil {
-		return nil
-	}
-	var out []relay.Config
-	for _, g := range groups {
-		if !g.RelayEnable {
-			continue
-		}
-		for _, r := range g.Relays {
-			if r.NodeID == selfID && r.Weblink != "" {
-				out = append(out, relay.Config{Public: r.Weblink})
-			}
-		}
-	}
-	return out
 }
 
 func mustSettings(db *store.DB) store.NetworkSettings {

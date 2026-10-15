@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -65,7 +66,25 @@ func goesDirect(pkt []byte) bool {
 	return r.RoleFor(pkt) == clientstate.RoleDirect
 }
 
+const icmpRule = "qd ICMPv4 unreachable"
+
+var icmpOnce sync.Once
+
+func holdICMPRule() {
+	if _, err := run("netsh", "advfirewall", "firewall", "show", "rule", "name="+icmpRule); err == nil {
+		return
+	}
+	if out, err := run("netsh", "advfirewall", "firewall", "add", "rule", "name="+icmpRule, "dir=in", "action=allow", "protocol=icmpv4:3,any"); err != nil {
+		fmt.Printf("firewall inbound ICMP unreachable is not allowed, cut UDP flows wait for their own timeout: %v %s\n", err, out)
+		return
+	}
+	fmt.Printf("firewall inbound ICMP unreachable allowed, so a UDP flow cut by a rule change hears it at once\n")
+}
+
+func dropICMPRule() { run("netsh", "advfirewall", "firewall", "delete", "rule", "name="+icmpRule) }
+
 func (t *tunnel) opener() (sourceOpener, error) {
+	icmpOnce.Do(holdICMPRule)
 	dll, err := unpackDriver()
 	if err != nil {
 		return nil, err
@@ -147,9 +166,6 @@ func driverError(err error) error {
 func (t *tunnel) bypass(live *qcli.Tunnel, keepOut []netip.Prefix) []netip.Prefix {
 	out := append([]netip.Prefix(nil), guard.New(nil).Bypasses()...)
 	for _, p := range live.Peers() {
-		out = append(out, netip.PrefixFrom(p, p.BitLen()))
-	}
-	for _, p := range live.RelayPeers() {
 		out = append(out, netip.PrefixFrom(p, p.BitLen()))
 	}
 	return append(out, keepOut...)

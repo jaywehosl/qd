@@ -7,8 +7,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-
-	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
 )
 
 const linkScheme = "qd"
@@ -23,7 +21,6 @@ type Link struct {
 	Label      string
 	NetworkKey string
 	Endpoints  []Endpoint
-	Relays     []relay.Link
 }
 
 var errNotALink = errors.New("that is not a qd:// link")
@@ -61,25 +58,6 @@ func ParseLink(raw string) (Link, error) {
 		}
 		link.Endpoints = append(link.Endpoints, e)
 	}
-	for _, r := range u.Query()["relay"] {
-		authority, weblink, ok := strings.Cut(r, "|")
-		if ok && authority != "" && weblink != "" {
-			link.Relays = append(link.Relays, relay.Link{Authority: authority, Weblink: weblink})
-		}
-	}
-	for _, r := range u.Query()["r"] {
-		at, docs, ok := strings.Cut(r, "~")
-		i, err := strconv.Atoi(at)
-		if !ok || err != nil || i < 0 || i >= len(link.Endpoints) {
-			continue
-		}
-		authority := link.Endpoints[i].String()
-		for _, doc := range strings.Split(docs, ",") {
-			if doc = relay.Doc(doc); doc != "" {
-				link.Relays = append(link.Relays, relay.Link{Authority: authority, Weblink: relay.Weblink(doc)})
-			}
-		}
-	}
 	return link, nil
 }
 
@@ -112,32 +90,11 @@ func (l Link) String() string {
 		parts = append(parts, "k="+queryText(l.NetworkKey))
 	}
 
-	where := map[string]int{}
 	for i, e := range l.Endpoints {
 		if i == 0 {
 			u.Host = e.String()
 		} else {
 			parts = append(parts, "alt="+queryText(e.String()))
-		}
-		if _, seen := where[e.String()]; !seen {
-			where[e.String()] = i
-		}
-	}
-
-	docs := make([][]string, len(l.Endpoints))
-	for _, r := range l.Relays {
-		if r.Authority == "" || r.Weblink == "" {
-			continue
-		}
-		if i, ok := where[r.Authority]; ok {
-			docs[i] = append(docs[i], relay.Doc(r.Weblink))
-			continue
-		}
-		parts = append(parts, "relay="+queryText(r.Authority+"|"+r.Weblink))
-	}
-	for i, held := range docs {
-		if len(held) > 0 {
-			parts = append(parts, "r="+strconv.Itoa(i)+"~"+queryText(strings.Join(held, ",")))
 		}
 	}
 

@@ -1,12 +1,16 @@
 package domainroute
 
 import (
+	"maps"
 	"net/netip"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/jaywehosl/qd/internal/clientstate"
 )
 
 const (
@@ -102,6 +106,9 @@ func New() *Table {
 }
 
 func (t *Table) Load(rules map[string]string, lower map[string]Entry, nets []Net) {
+	maps.DeleteFunc(rules, func(_, role string) bool { return role == clientstate.RoleTunnel })
+	maps.DeleteFunc(lower, func(_ string, e Entry) bool { return e.Role == clientstate.RoleTunnel })
+	nets = slices.DeleteFunc(nets, func(n Net) bool { return n.Role == clientstate.RoleTunnel })
 	now := time.Now().Unix()
 	few, many := sortNets(nets)
 	t.mu.Lock()

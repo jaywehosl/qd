@@ -66,14 +66,13 @@ func (d *DB) RulesInForce() (string, []Rule, error) {
 		return "", nil, err
 	}
 	def, _ := d.DefaultRole()
-	if sub, err := d.Subscription(); err == nil && sub.AllowExit {
-		return def, rules, nil
-	}
-	if !plainRole(def) {
+	sub, err := d.Subscription()
+	exits := err == nil && sub.AllowExit
+	if !exits && !plainRole(def) {
 		def = RoleDirect
 	}
 	for i := range rules {
-		if !plainRole(rules[i].Role) {
+		if rules[i].Role == RoleTunnel || (!exits && !plainRole(rules[i].Role)) {
 			rules[i].Role = def
 		}
 	}

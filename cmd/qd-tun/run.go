@@ -185,10 +185,8 @@ func runClient(opts runOptions) error {
 		if admin != nil {
 			admin.SetKey(api.Key())
 		}
-		syncRelays(db)
 		go api.Greet()
 	}
-	syncRelays(db)
 	go api.Greet()
 
 	ui, err := startLocalUI(opts.UIHost, opts.UIPort, withSetup(api.Routes(), db, tun), admin, func() bool {

@@ -39,8 +39,6 @@ func Open(path string) (*DB, error) {
 		`ALTER TABLE devices ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE devices ADD COLUMN version TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE groups ADD COLUMN device_limit INTEGER NOT NULL DEFAULT 0`,
-		`ALTER TABLE groups ADD COLUMN relay_enable INTEGER NOT NULL DEFAULT 0`,
-		`ALTER TABLE groups ADD COLUMN relays TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE clients ADD COLUMN allow_exit INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE network ADD COLUMN refresh_minutes INTEGER NOT NULL DEFAULT 480`,
 		`ALTER TABLE nodes ADD COLUMN uuid TEXT NOT NULL DEFAULT ''`,
@@ -78,6 +76,7 @@ func Open(path string) (*DB, error) {
 		`ALTER TABLE network ADD COLUMN block_tif INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE dns_records ADD COLUMN allow INTEGER NOT NULL DEFAULT 0`,
 		`UPDATE network SET max_streams = 65536 WHERE max_streams = 4096`,
+		`ALTER TABLE network ADD COLUMN ipv6 INTEGER NOT NULL DEFAULT 0`,
 	} {
 		if _, err := h.Exec(add); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			h.Close()

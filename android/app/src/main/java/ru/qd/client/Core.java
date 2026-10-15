@@ -242,7 +242,7 @@ public final class Core {
             return "Android не дал создать VPN. Проверьте, не включён ли другой VPN.";
         }
         if (why.contains("no entrypoint answered") || why.contains("deadline exceeded")
-                || why.contains("timeout") || why.contains("no relay answered")) {
+                || why.contains("timeout")) {
             return "Сервер не отвечает. Проверьте интернет и попробуйте ещё раз.";
         }
         return "Не удалось подключиться. Подробности в журнале.";

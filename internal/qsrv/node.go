@@ -21,7 +21,6 @@ import (
 
 	"github.com/jaywehosl/qd/internal/ippkt"
 	"github.com/jaywehosl/qd/internal/qsrv/server/decoy"
-	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
 	"github.com/jaywehosl/qd/internal/update"
 )
 
@@ -77,9 +76,8 @@ type Config struct {
 	NATSlot   int
 	Pool      netip.Prefix
 
-	TLS    *tls.Config
-	Token  string
-	Relays []relay.Config
+	TLS   *tls.Config
+	Token string
 
 	Verify func(raw string) (Grant, bool)
 	Admit  func(g Grant, version, build string) bool
@@ -155,9 +153,7 @@ type Node struct {
 	mu   sync.Mutex
 	held map[uint32]*live
 
-	srv           *http3.Server
-	relayMu       sync.Mutex
-	relaySessions map[string]*relay.Session
+	srv *http3.Server
 }
 
 func New(cfg Config) *Node {
@@ -177,8 +173,6 @@ func New(cfg Config) *Node {
 		tmpl:  Template(cfg.Authority, ConnectIPPath),
 		site:  decoy.Handler(),
 		held:  map[uint32]*live{},
-
-		relaySessions: map[string]*relay.Session{},
 	}
 	t := DefaultTunables()
 	if cfg.Tune != nil {
@@ -374,8 +368,6 @@ func (n *Node) Run(ctx context.Context) error {
 	go n.sweepLinks(ctx)
 
 	n.srv = srv
-	n.SetRelays(n.cfg.Relays)
-	defer n.stopRelays()
 
 	n.cfg.Log("quic      listening on %s, authority %s", n.cfg.Listen, n.cfg.Authority)
 	tr := &quic.Transport{Conn: udp, StatelessResetKey: n.cfg.Reset}
@@ -386,56 +378,6 @@ func (n *Node) Run(ctx context.Context) error {
 	}
 	defer ln.Close()
 	return srv.ServeListener(ln)
-}
-
-func (n *Node) SetRelays(cfgs []relay.Config) {
-	n.relayMu.Lock()
-	defer n.relayMu.Unlock()
-	if n.srv == nil {
-		return
-	}
-
-	want := map[string]relay.Config{}
-	for _, c := range cfgs {
-		if c.Public != "" {
-			want[c.Public] = c
-		}
-	}
-
-	for pub, sess := range n.relaySessions {
-		if _, ok := want[pub]; !ok {
-			sess.Stop()
-			delete(n.relaySessions, pub)
-			n.cfg.Log("relay     dropped %s", pub)
-		}
-	}
-
-	for pub, c := range want {
-		if _, ok := n.relaySessions[pub]; ok {
-			continue
-		}
-		sess := relay.New(c)
-		sess.Log = n.cfg.Log
-		pc := relay.NewPacketConn(sess)
-		if err := sess.Start(); err != nil {
-			n.cfg.Log("relay     %s will not start: %v", pub, err)
-			continue
-		}
-		n.relaySessions[pub] = sess
-		go func(pub string, pc net.PacketConn) {
-			n.cfg.Log("relay     %s carries quic over a cursor-relay", pub)
-			n.srv.Serve(pc)
-		}(pub, pc)
-	}
-}
-
-func (n *Node) stopRelays() {
-	n.relayMu.Lock()
-	defer n.relayMu.Unlock()
-	for pub, sess := range n.relaySessions {
-		sess.Stop()
-		delete(n.relaySessions, pub)
-	}
 }
 
 func (n *Node) carrier(r *http.Request) (Grant, bool) {
@@ -643,8 +585,14 @@ func (s *live) where() string {
 
 var v6Once sync.Once
 var v6Held bool
+var v6Allowed atomic.Bool
+
+func AllowV6(on bool) { v6Allowed.Store(on) }
 
 func HoldsV6() bool {
+	if !v6Allowed.Load() {
+		return false
+	}
 	v6Once.Do(func() {
 		addrs, err := net.InterfaceAddrs()
 		if err != nil {

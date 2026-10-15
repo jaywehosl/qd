@@ -425,10 +425,8 @@ export const sections: readonly Section[] = [
           { name: 'allowExit', in: 'body (json)', type: 'boolean', desc: 'Whether clients in this group may route through an exit node. Off by default; a client may override it either way.' },
           { name: 'allowDev', in: 'body (json)', type: 'boolean', optional: true, desc: 'Whether clients in this group may bring up a tunnel from a test build that carries no version. Off by default.' },
           { name: 'allowCore', in: 'body (json)', type: 'boolean', optional: true, desc: 'Whether the core inside umiray may bring up a tunnel for clients in this group whatever its version. Off by default.' },
-          { name: 'relayEnable', in: 'body (json)', type: 'boolean', optional: true, desc: 'Whether clients in this group fall back to the document-cursor relay when no ingress answers directly.' },
-          { name: 'relays', in: 'body (json)', type: 'object[]', optional: true, desc: 'One public document link per ingress node: [{ "nodeId": 3, "weblink": "SkqX/..." }]. Each link is one coauthoring room, carried by exactly one ingress.' },
         ],
-        body: '{\n  "name": "russia-in",\n  "entrypointIds": [1, 2],\n  "relayEnable": true,\n  "relays": [{ "nodeId": 3, "weblink": "SkqX/bvsLtDZ3g" }]\n}',
+        body: '{\n  "name": "russia-in",\n  "entrypointIds": [1, 2]\n}',
         response: '{\n  "success": true,\n  "obj": {\n    "affected": 2\n  }\n}',
       },
       {

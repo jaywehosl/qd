@@ -21,7 +21,6 @@ import (
 	"github.com/jaywehosl/qd/internal/qcli"
 	"github.com/jaywehosl/qd/internal/qcli/packet"
 	"github.com/jaywehosl/qd/internal/qdcrypt"
-	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
 )
 
 type tunnelConfig struct {
@@ -120,7 +119,7 @@ func (t *tunnel) token() string {
 	return hex.EncodeToString(t.cfg.Key[:])
 }
 
-func (t *tunnel) Start(servers []string, relays []relay.Link, sessionID uint32) error {
+func (t *tunnel) Start(servers []string, sessionID uint32) error {
 	t.mu.Lock()
 	switch {
 	case t.running, t.starting:
@@ -135,7 +134,7 @@ func (t *tunnel) Start(servers []string, relays []relay.Link, sessionID uint32) 
 	t.mu.Unlock()
 	carried := carriageNow()
 
-	held, sharp, lost, keepOut, err := t.bring(ctx, servers, relays)
+	held, sharp, lost, keepOut, err := t.bring(ctx, servers)
 
 	t.mu.Lock()
 	t.starting, t.abort = false, nil
@@ -195,9 +194,7 @@ func (t *tunnel) Start(servers []string, relays []relay.Link, sessionID uint32) 
 	return nil
 }
 
-func (t *tunnel) bring(ctx context.Context, servers []string, relays []relay.Link) (*clientrun.Carried, func(), func(error), []netip.Prefix, error) {
-	nodeTalk.SetRelays(relays)
-
+func (t *tunnel) bring(ctx context.Context, servers []string) (*clientrun.Carried, func(), func(error), []netip.Prefix, error) {
 	open, err := t.opener()
 	if err != nil {
 		return nil, nil, nil, nil, err
@@ -215,12 +212,11 @@ func (t *tunnel) bring(ctx context.Context, servers []string, relays []relay.Lin
 			Answered: routeByDomain.Learn,
 			Native:   namedDirect,
 			Device:   deviceOf().ID,
-			Exit:     func() bool { return routeTag() == anyExit },
+			Exit:     nameLeaves,
 		}
 	}
 	plan.Dial = qcli.Options{
 		Endpoints: servers,
-		Relays:    relays,
 		Token:     t.token(),
 		Device:    deviceOf().ID,
 		Route:     routeTag(),

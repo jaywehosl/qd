@@ -4,7 +4,6 @@ import (
 	"errors"
 
 	"github.com/jaywehosl/qd/internal/qdcrypt"
-	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
 	"github.com/jaywehosl/qd/internal/update"
 )
 
@@ -27,14 +26,13 @@ type Process struct {
 
 type Platform interface {
 	Running() bool
-	Start(servers []string, relays []relay.Link, session uint32) error
+	Start(servers []string, session uint32) error
 	ServerName() string
 	Road() string
 	Stop() error
 	SetKey(key *qdcrypt.Key)
 	SetExit(egress bool)
 	SetCarriage(mbit int, profile string)
-	SyncControlRelays(relays []relay.Link)
 	Wire() Asker
 	Identify() Device
 	Processes() []Process

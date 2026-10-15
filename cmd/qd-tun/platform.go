@@ -9,7 +9,6 @@ import (
 	"github.com/jaywehosl/qd/internal/clientapi"
 	"github.com/jaywehosl/qd/internal/clientstate"
 	"github.com/jaywehosl/qd/internal/qdcrypt"
-	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
 )
 
 type hostPlatform struct {
@@ -21,8 +20,8 @@ func (p hostPlatform) Running() bool { return p.tun.Running() }
 
 func (p hostPlatform) Failed() bool { return p.tun.Failed() }
 
-func (p hostPlatform) Start(servers []string, relays []relay.Link, session uint32) error {
-	if err := p.tun.Start(servers, relays, session); !errors.Is(err, errAlreadyUp) {
+func (p hostPlatform) Start(servers []string, session uint32) error {
+	if err := p.tun.Start(servers, session); !errors.Is(err, errAlreadyUp) {
 		return err
 	}
 	return nil
@@ -55,8 +54,6 @@ func (p hostPlatform) SetCarriage(mbit int, profile string) {
 		p.tun.Redial()
 	}
 }
-
-func (p hostPlatform) SyncControlRelays(relays []relay.Link) { nodeTalk.SetRelays(relays) }
 
 func (p hostPlatform) Wire() clientapi.Asker { return nodeTalk }
 

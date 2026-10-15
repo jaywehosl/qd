@@ -380,6 +380,8 @@
       "bbrConservative": "Conservative",
       "bbrStandard": "Standard",
       "bbrAggressive": "Aggressive",
+      "ipv6": "IPv6",
+      "ipv6Desc": "Give clients an IPv6 address, AAAA answers and IPv6-only sites through the nodes' own IPv6. Turn it on only where every node reaches the IPv6 internet reliably: with it off clients stay on IPv4 and nodes reach each other over IPv4. The nodes restart when it changes.",
       "maxStreams": "Streams per client",
       "maxStreamsDesc": "How many flows one connection may hold open at once. A browser alone takes hundreds, and on an exit node every client transits through a single connection. Raise it before the client count does.",
       "streamWindow": "Stream window",
@@ -527,12 +529,12 @@
       "roleDesc": {
         "direct": "Straight out of this machine. Never enters the tunnel.",
         "direct_phone": "Straight out of this device. Never enters the tunnel.",
-        "tunnel": "Into the tunnel. Whether it leaves through an exit node follows the +egress switch on Connect.",
+        "tunnel": "No opinion of its own: a domain or bundle set to tunnel leaves the choice to the app rule, an app set to tunnel leaves it to Everything else. Everything else set to tunnel sends traffic into the tunnel, and the +egress switch on Connect picks the exit.",
         "egress": "Into the tunnel and out through an exit node, whatever the switch says.",
         "noEgress": "Into the tunnel and out at the entry node, whatever the switch says."
       },
       "noExit": "no exit — follows the default",
-      "newFlowsNote": "Rules apply to new connections. Anything already open finishes on the route it started on — moving a live connection would change the address the far end sees and it would drop the session.",
+      "newFlowsNote": "Rules apply at once: every open connection whose route changes is cut, TCP and UDP alike, so the app reconnects on the new route. A blocked service sent direct usually just times out rather than failing outright.",
       "matchNote": "A rule picked from a running process matches that exact file. One typed by name matches any process called that, wherever it was started from.",
       "matchNote_phone": "A rule matches an app by its package name.",
       "searchProcess": "Search running processes, or type a name",

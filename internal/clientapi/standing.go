@@ -9,7 +9,6 @@ import (
 
 	"github.com/jaywehosl/qd/internal/clientstate"
 	"github.com/jaywehosl/qd/internal/pace"
-	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
 	"github.com/jaywehosl/qd/internal/update"
 )
 
@@ -30,7 +29,6 @@ type Standing struct {
 	RefreshMinutes int          `json:"refreshMinutes"`
 	Denied         string       `json:"refused"`
 	Entrypoints    []Entrypoint `json:"entrypoints"`
-	Relays         []relay.Link `json:"relays"`
 	Admin          bool         `json:"admin"`
 	FixedRate      int          `json:"fixedRate"`
 	BBRProfile     string       `json:"bbrProfile"`

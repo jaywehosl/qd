@@ -40,18 +40,7 @@ func (c *Client) wire() *qwire.Dialer {
 	held = c.talk
 	c.mu.Unlock()
 
-	c.syncRelays()
 	return held
-}
-
-func (c *Client) syncRelays() {
-	c.mu.Lock()
-	held := c.talk
-	c.mu.Unlock()
-	if held == nil {
-		return
-	}
-	held.SetRelays(c.api.Relays())
 }
 
 func (p platform) Wire() clientapi.Asker { return p.c.wire() }
@@ -75,5 +64,4 @@ func (c *Client) tellWire() {
 	if held != nil {
 		held.SetToken(c.netKeyHex())
 	}
-	c.syncRelays()
 }

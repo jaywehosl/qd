@@ -75,6 +75,20 @@ func namedDirect(name string) bool {
 	return known && role == clientstate.RoleDirect
 }
 
+func nameLeaves(name string) bool {
+	role, known := routeByDomain.RoleOfName(name)
+	if r := routeByProcess.Load(); !known && r != nil {
+		role = r.fallback()
+	}
+	switch role {
+	case clientstate.RoleEgress:
+		return true
+	case clientstate.RoleNoEgress:
+		return false
+	}
+	return routeTag() == anyExit
+}
+
 func exitFor(src, dst netip.AddrPort, udp bool) string {
 	if role, ok := routeByDomain.RoleOf(dst.Addr()); ok {
 		switch role {

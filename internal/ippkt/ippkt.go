@@ -53,6 +53,69 @@ func Reset4(pkt []byte) []byte {
 	return out
 }
 
+func Refuse(pkt []byte) []byte {
+	if len(pkt) < 28 || pkt[0]>>4 != 4 {
+		return Refuse6(pkt)
+	}
+	if pkt[9] == protoTCP {
+		return Reset4(pkt)
+	}
+	ihl := int(pkt[0]&0x0F) * 4
+	if ihl < 20 || len(pkt) < ihl+8 || pkt[9] == 1 {
+		return nil
+	}
+	msg := append([]byte{3, 3, 0, 0, 0, 0, 0, 0}, pkt[:min(len(pkt), 548)]...)
+	binary.BigEndian.PutUint16(msg[2:], Checksum(msg))
+
+	out := make([]byte, 20+len(msg))
+	out[0], out[8], out[9] = 0x45, 64, 1
+	binary.BigEndian.PutUint16(out[2:], uint16(len(out)))
+	copy(out[12:16], pkt[16:20])
+	copy(out[16:20], pkt[12:16])
+	binary.BigEndian.PutUint16(out[10:], Checksum(out[:20]))
+	copy(out[20:], msg)
+	return out
+}
+
+func Refuse6(pkt []byte) []byte {
+	if len(pkt) < 40 || pkt[0]>>4 != 6 || pkt[6] == 58 {
+		return nil
+	}
+	if pkt[6] != protoTCP {
+		msg := append([]byte{1, 4, 0, 0, 0, 0, 0, 0}, pkt[:min(len(pkt), 1280-48)]...)
+		return ICMPv6(netip.AddrFrom16([16]byte(pkt[24:40])), netip.AddrFrom16([16]byte(pkt[8:24])), 64, msg)
+	}
+	seg := pkt[40:]
+	if len(seg) < 20 {
+		return nil
+	}
+	head, flags := int(seg[12]>>4)*4, seg[13]
+	if head < 20 || head > len(seg) || flags&0x04 != 0 {
+		return nil
+	}
+	taken := uint32(len(seg) - head)
+	if flags&0x03 != 0 {
+		taken++
+	}
+
+	out := make([]byte, 60)
+	out[0], out[6], out[7] = 0x60, protoTCP, 64
+	binary.BigEndian.PutUint16(out[4:], 20)
+	copy(out[8:24], pkt[24:40])
+	copy(out[24:40], pkt[8:24])
+
+	tcp := out[40:]
+	copy(tcp[0:2], seg[2:4])
+	copy(tcp[2:4], seg[0:2])
+	if flags&0x10 != 0 {
+		copy(tcp[4:8], seg[8:12])
+	}
+	binary.BigEndian.PutUint32(tcp[8:], binary.BigEndian.Uint32(seg[4:8])+taken)
+	tcp[12], tcp[13] = 5<<4, 0x14
+	binary.BigEndian.PutUint16(tcp[16:], Checksum6(out))
+	return out
+}
+
 func Dst(pkt []byte) (netip.Addr, bool) {
 	if len(pkt) < 1 {
 		return netip.Addr{}, false

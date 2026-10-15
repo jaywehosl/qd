@@ -2183,13 +2183,6 @@
                 "entrypointIds": [
                   1,
                   2
-                ],
-                "relayEnable": true,
-                "relays": [
-                  {
-                    "nodeId": 3,
-                    "weblink": "SkqX/bvsLtDZ3g"
-                  }
                 ]
               }
             }

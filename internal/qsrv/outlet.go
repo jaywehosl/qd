@@ -2,6 +2,7 @@ package qsrv
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/netip"
 	"os"
@@ -38,7 +39,24 @@ type here struct {
 	from origin
 }
 
+var errNear = errors.New("the node carries no flows to its own, link-local or unmapped stand-in addresses")
+
+func near(dst netip.AddrPort) bool {
+	a := dst.Addr().Unmap()
+	return a.IsLoopback() || a.IsUnspecified() || a.IsLinkLocalUnicast() || a.IsMulticast() || synthetic.Contains(a)
+}
+
+func (d here) DialTCP(ctx context.Context, dst netip.AddrPort) (net.Conn, error) {
+	if near(dst) {
+		return nil, errNear
+	}
+	return d.NetDialer.DialTCP(ctx, dst)
+}
+
 func (d here) DialUDP(ctx context.Context, dst netip.AddrPort) (net.Conn, error) {
+	if near(dst) {
+		return nil, errNear
+	}
 	if !d.from.known() {
 		return d.NetDialer.DialUDP(ctx, dst)
 	}

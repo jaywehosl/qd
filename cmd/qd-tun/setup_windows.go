@@ -391,6 +391,7 @@ func uninstall() {
 	os.Remove(bench)
 	registry.DeleteKey(registry.LOCAL_MACHINE, uninstallKey)
 	releaseDriver()
+	dropICMPRule()
 
 	if root := os.Getenv("SystemRoot"); root != "" {
 		aside := filepath.Join(root, "Temp")

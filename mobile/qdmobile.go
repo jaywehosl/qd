@@ -20,7 +20,6 @@ import (
 	"github.com/jaywehosl/qd/internal/qcli/packet"
 	"github.com/jaywehosl/qd/internal/qdcrypt"
 	"github.com/jaywehosl/qd/internal/qsrv/uplink/quicconn"
-	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
 	"github.com/jaywehosl/qd/internal/qwire"
 	"github.com/jaywehosl/qd/internal/update"
 )
@@ -152,9 +151,6 @@ func Open(stateDir string, host Host, protector Protector, deviceID, model, name
 	}
 
 	c.api = clientapi.New(db, platform{c: c}, c.seen, c.key)
-	if protector != nil {
-		relay.Lookup = func(host string) []netip.Addr { return lookupOn(protector, host) }
-	}
 	c.upkeep()
 	return c, nil
 }

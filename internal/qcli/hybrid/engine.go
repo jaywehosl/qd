@@ -50,12 +50,16 @@ type Options struct {
 	Jumbo    uint16
 	Gateway  netip.Addr
 	Gateway6 netip.Addr
+	Gen      *atomic.Uint64
 }
 
 type Engine struct {
 	Options
 	bufPool sync.Pool
 	tcpPool sync.Pool
+
+	flows     sync.Map
+	flowCount atomic.Int64
 
 	cOutRecv, cTCP, cUDP, cBypass, cWriteErr, cOversize atomic.Uint64
 	cInRecv, cInject, cInErr                            atomic.Uint64
@@ -203,16 +207,23 @@ func (e *Engine) pumpOutbound(ctx context.Context, rd packet.Reader, src packet.
 			catch := e.CatchDNS && ippkt.IsDNS(p.Data)
 			if !catch && (e.Guard.Bypass(dst) || e.stepsAside(p.Data)) {
 				e.cBypass.Add(1)
-				if ippkt.StandIn.Contains(dst) {
-					if refusal := ippkt.Reset4(p.Data); refusal != nil {
-						reinject = append(reinject, packet.Packet{Data: refusal, Dir: packet.Inbound, IfIndex: p.IfIndex})
-					}
+				if ippkt.StandIn.Contains(dst) || e.cut(p.Data, tagDirect) {
+					reinject = refuse(reinject, p)
 					continue
 				}
 				reinject = append(reinject, *p)
 				continue
 			}
-			if catch || ippkt.IsTCP(p.Data) || (e.Detour != nil && ippkt.IsUDP(p.Data) && e.Detour(dst)) {
+			if !catch && dst.Is6() && !e.Gateway6.IsValid() {
+				reinject = refuse(reinject, p)
+				continue
+			}
+			aside := !catch && e.Detour != nil && ippkt.IsUDP(p.Data) && e.Detour(dst)
+			if aside && e.cut(p.Data, tagAside) {
+				reinject = refuse(reinject, p)
+				continue
+			}
+			if catch || aside || ippkt.IsTCP(p.Data) {
 				e.cTCP.Add(1)
 				e.Meter.carried(len(p.Data))
 				if e.Jumbo != 0 {
@@ -225,15 +236,20 @@ func (e *Engine) pumpOutbound(ctx context.Context, rd packet.Reader, src packet.
 				reinject = append(reinject, packet.Packet{Data: expired, Dir: packet.Inbound})
 				continue
 			}
+			mark := e.mark(p.Data)
+			if e.cut(p.Data, mark) {
+				reinject = refuse(reinject, p)
+				continue
+			}
 			e.cUDP.Add(1)
 			e.Meter.carried(len(p.Data))
 			e.NAT.Outbound(p.Data)
-			icmp, err := e.carry(tun, p.Data)
+			icmp, err := e.carry(tun, p.Data, mark)
 			if err != nil {
 				e.cWriteErr.Add(1)
 				continue
 			}
-			if len(icmp) > 0 && e.inPieces(tun, p.Data) {
+			if len(icmp) > 0 && e.inPieces(tun, p.Data, mark) {
 				continue
 			}
 			if len(icmp) > 0 {
@@ -464,18 +480,64 @@ func (e *Engine) stepsAside(pkt []byte) bool {
 	return e.Direct != nil && e.Direct(pkt)
 }
 
-func (e *Engine) carry(tun Tunnel, pkt []byte) ([]byte, error) {
+func (e *Engine) mark(pkt []byte) uint64 {
+	if e.Mark == nil {
+		return 0
+	}
+	return e.Mark(pkt)
+}
+
+const (
+	tagDirect uint64 = 1<<62 + iota
+	tagAside
+	flowsCap = 16384
+)
+
+type flowKey struct{ src, dst netip.AddrPort }
+
+type flowHeld struct{ tag, gen uint64 }
+
+func (e *Engine) cut(pkt []byte, tag uint64) bool {
+	if e.Gen == nil || !ippkt.IsUDP(pkt) {
+		return false
+	}
+	src, dst, _, ok := ippkt.Flow(pkt)
+	if !ok {
+		return false
+	}
+	gen, key := e.Gen.Load(), flowKey{src, dst}
+	held, seen := e.flows.Load(key)
+	if !seen && e.flowCount.Add(1) > flowsCap {
+		e.flows.Clear()
+		e.flowCount.Store(1)
+	}
+	was, _ := held.(flowHeld)
+	if seen && was.tag == tag && was.gen == gen {
+		return false
+	}
+	e.flows.Store(key, flowHeld{tag: tag, gen: gen})
+	return seen && was.tag != tag && was.gen != gen
+}
+
+func refuse(reinject []packet.Packet, p *packet.Packet) []packet.Packet {
+	if refusal := ippkt.Refuse(p.Data); refusal != nil {
+		reinject = append(reinject, packet.Packet{Data: refusal, Dir: packet.Inbound, IfIndex: p.IfIndex})
+	}
+	return reinject
+}
+
+func (e *Engine) carry(tun Tunnel, pkt []byte, mark uint64) ([]byte, error) {
 	marked, ok := tun.(markedTunnel)
 	if !ok || e.Mark == nil {
 		return tun.WritePacket(pkt)
 	}
-	return marked.WritePacketMarked(pkt, e.Mark(pkt))
+	return marked.WritePacketMarked(pkt, mark)
 }
 
-func (e *Engine) inPieces(tun Tunnel, pkt []byte) bool {
+func (e *Engine) inPieces(tun Tunnel, pkt []byte, mark uint64) bool {
 	pieces := ippkt.Fragments4(pkt, pieceSize)
 	for _, piece := range pieces {
-		if icmp, err := e.carry(tun, piece); err != nil || len(icmp) > 0 {
+		if icmp, err := e.carry(tun, piece, mark); err != nil || len(icmp) > 0 {
 			return false
 		}
 	}

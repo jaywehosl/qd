@@ -341,6 +341,7 @@ func (n *Node) serveConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dst = n.behind(dst)
+	route = n.minted(dst, route)
 
 	hops := defaultHops
 	if raw := r.Header.Get(HeaderHops); raw != "" {
@@ -433,7 +434,7 @@ type steered struct {
 
 func (d steered) DialTCP(ctx context.Context, dst netip.AddrPort) (net.Conn, error) {
 	dst = d.node.behind(dst)
-	return d.node.dialerFor(ctx, d.grant, d.route(ctx), d.hops, origin{}).DialTCP(ctx, dst)
+	return d.node.dialerFor(ctx, d.grant, d.node.minted(dst, d.route(ctx)), d.hops, origin{}).DialTCP(ctx, dst)
 }
 
 func (d steered) DialUDP(ctx context.Context, dst netip.AddrPort) (net.Conn, error) {
@@ -442,7 +443,7 @@ func (d steered) DialUDP(ctx context.Context, dst netip.AddrPort) (net.Conn, err
 	if flow, ok := netstack.FlowOf(ctx); ok {
 		from = origin{s: d.s, slot: slotOf(flow.Src.Addr().Is6() && !flow.Src.Addr().Is4In6(), flow.Src.Port())}
 	}
-	return d.node.dialerFor(ctx, d.grant, d.route(ctx), d.hops, from).DialUDP(ctx, dst)
+	return d.node.dialerFor(ctx, d.grant, d.node.minted(dst, d.route(ctx)), d.hops, from).DialUDP(ctx, dst)
 }
 
 func (d steered) route(ctx context.Context) string {

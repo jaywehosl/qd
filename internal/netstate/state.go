@@ -45,20 +45,13 @@ type Entrypoint struct {
 }
 
 type Group struct {
-	ID            int          `json:"id"`
-	Tag           string       `json:"name"`
-	AllowExit     bool         `json:"allowExit"`
-	AllowDev      bool         `json:"allowDev"`
-	AllowCore     bool         `json:"allowCore"`
-	DeviceLimit   int          `json:"deviceLimit"`
-	EntrypointIDs []int        `json:"entrypointIds"`
-	RelayEnable   bool         `json:"relayEnable"`
-	Relays        []GroupRelay `json:"relays"`
-}
-
-type GroupRelay struct {
-	NodeID  int    `json:"nodeId"`
-	Weblink string `json:"weblink"`
+	ID            int    `json:"id"`
+	Tag           string `json:"name"`
+	AllowExit     bool   `json:"allowExit"`
+	AllowDev      bool   `json:"allowDev"`
+	AllowCore     bool   `json:"allowCore"`
+	DeviceLimit   int    `json:"deviceLimit"`
+	EntrypointIDs []int  `json:"entrypointIds"`
 }
 
 type Client struct {

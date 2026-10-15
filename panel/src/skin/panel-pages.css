@@ -208,32 +208,6 @@ html.in-phone .ds-stats-grid .ds-stat__value { font-size: clamp(18px, 5.6vw, 24p
   row-gap: var(--step-2);
 }
 
-.ge-relays {
-  display: flex;
-  flex-direction: column;
-  gap: var(--step-3);
-}
-
-.ge-relay-node {
-  display: flex;
-  flex-direction: column;
-  gap: var(--step-2);
-}
-
-.ge-relay-node__head {
-  display: flex;
-  align-items: center;
-  gap: var(--step-2);
-  min-height: 32px;
-}
-
-.ge-relay-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--step-2);
-}
-
 .ge-pick { cursor: pointer; }
 
 .group-edit .ge-picks { justify-content: center; }
@@ -915,7 +889,6 @@ html.in-phone .ge-toggles { grid-template-columns: minmax(0, 1fr); row-gap: 0; }
 html.in-phone .ge-toggle { min-height: 48px; }
 html.in-phone .ge-toggle + .ge-toggle { border-top: 1px solid var(--edge); }
 html.in-phone .group-edit .ge-picks { justify-content: flex-start; }
-html.in-phone .ge-relay-row .ds-btn { width: 40px; padding: 0; }
 html.in-phone .group-edit { min-height: 400px; }
 
 .page-stack {

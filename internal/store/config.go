@@ -2,7 +2,6 @@ package store
 
 import (
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -288,38 +287,14 @@ func (d *DB) SaveClient(c netstate.Client, now int64) (int, error) {
 	return c.ID, nil
 }
 
-func marshalRelays(rs []netstate.GroupRelay) string {
-	if len(rs) == 0 {
-		return ""
-	}
-	b, err := json.Marshal(rs)
-	if err != nil {
-		return ""
-	}
-	return string(b)
-}
-
-func parseRelays(s string) []netstate.GroupRelay {
-	if s == "" {
-		return nil
-	}
-	var out []netstate.GroupRelay
-	if json.Unmarshal([]byte(s), &out) != nil {
-		return nil
-	}
-	return out
-}
-
 func (d *DB) Groups() ([]netstate.Group, error) {
 	out := []netstate.Group{}
-	err := scan(d.sql, `SELECT id, tag, allow_exit, device_limit, relay_enable, relays, allow_dev, allow_core FROM groups ORDER BY id`,
+	err := scan(d.sql, `SELECT id, tag, allow_exit, device_limit, allow_dev, allow_core FROM groups ORDER BY id`,
 		func(r *sql.Rows) error {
 			var g netstate.Group
-			var relays string
-			if err := r.Scan(&g.ID, &g.Tag, &g.AllowExit, &g.DeviceLimit, &g.RelayEnable, &relays, &g.AllowDev, &g.AllowCore); err != nil {
+			if err := r.Scan(&g.ID, &g.Tag, &g.AllowExit, &g.DeviceLimit, &g.AllowDev, &g.AllowCore); err != nil {
 				return err
 			}
-			g.Relays = parseRelays(relays)
 			out = append(out, g)
 			return nil
 		})
@@ -359,8 +334,8 @@ func (d *DB) SaveGroup(g netstate.Group, now int64) (int, error) {
 	id := g.ID
 	if id == 0 {
 		res, err := tx.Exec(
-			`INSERT INTO groups (tag, allow_exit, device_limit, relay_enable, relays, allow_dev, allow_core, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			g.Tag, g.AllowExit, g.DeviceLimit, g.RelayEnable, marshalRelays(g.Relays), g.AllowDev, g.AllowCore, now)
+			`INSERT INTO groups (tag, allow_exit, device_limit, allow_dev, allow_core, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+			g.Tag, g.AllowExit, g.DeviceLimit, g.AllowDev, g.AllowCore, now)
 		if err != nil {
 			return 0, err
 		}
@@ -370,8 +345,8 @@ func (d *DB) SaveGroup(g netstate.Group, now int64) (int, error) {
 		}
 		id = int(newID)
 	} else {
-		res, err := tx.Exec(`UPDATE groups SET tag = ?, allow_exit = ?, device_limit = ?, relay_enable = ?, relays = ?, allow_dev = ?, allow_core = ? WHERE id = ?`,
-			g.Tag, g.AllowExit, g.DeviceLimit, g.RelayEnable, marshalRelays(g.Relays), g.AllowDev, g.AllowCore, id)
+		res, err := tx.Exec(`UPDATE groups SET tag = ?, allow_exit = ?, device_limit = ?, allow_dev = ?, allow_core = ? WHERE id = ?`,
+			g.Tag, g.AllowExit, g.DeviceLimit, g.AllowDev, g.AllowCore, id)
 		if err != nil {
 			return 0, err
 		}
@@ -412,6 +387,7 @@ type NetworkSettings struct {
 	Pool             string `json:"pool"`
 	BrutalMbit       int    `json:"brutalMbit"`
 	BBRProfile       string `json:"bbrProfile"`
+	IPv6             bool   `json:"ipv6"`
 	MaxStreams       int    `json:"maxStreams"`
 	StreamWindow     int    `json:"streamWindowKb"`
 	MaxStreamWindow  int    `json:"maxStreamWindowKb"`
@@ -459,14 +435,14 @@ func (d *DB) NetworkSettings() (NetworkSettings, error) {
 		        dns_max_ttl, dns_stale, mtu, stats_seconds, pool, brutal_mbit, bbr_profile,
 		        max_streams, stream_window, max_stream_window, conn_window, max_conn_window,
 		        idle_seconds, keepalive_seconds, socket_buffer, block_tier, block_tif, ech_name,
-		        client_version, client_releases
+		        client_version, client_releases, ipv6
 		 FROM network WHERE id = 1`).Scan(
 		&out.RefreshMinutes, &out.DNSPrimary, &out.DNSSecondary,
 		&out.DNSCache, &out.DNSMinTTL, &out.DNSMaxTTL, &out.DNSStale,
 		&out.MTU, &out.StatsSeconds, &out.Pool, &out.BrutalMbit, &out.BBRProfile, &out.MaxStreams, &out.StreamWindow, &out.MaxStreamWindow,
 		&out.ConnWindow, &out.MaxConnWindow, &out.IdleSeconds, &out.KeepAliveSeconds,
 		&out.SocketBuffer, &out.BlockTier, &out.BlockTIF, &out.ECHName,
-		&out.ClientVersion, &out.ClientReleases)
+		&out.ClientVersion, &out.ClientReleases, &out.IPv6)
 	if errors.Is(err, sql.ErrNoRows) {
 		return defaultNetworkSettings(), nil
 	}
@@ -589,14 +565,14 @@ func (d *DB) SaveNetworkSettings(s NetworkSettings) error {
 		        pool = ?, brutal_mbit = ?, bbr_profile = ?, max_streams = ?, stream_window = ?,
 		        max_stream_window = ?, conn_window = ?, max_conn_window = ?,
 		        idle_seconds = ?, keepalive_seconds = ?, socket_buffer = ?, block_tier = ?, block_tif = ?,
-		        ech_name = ?, client_version = ?, client_releases = ?
+		        ech_name = ?, client_version = ?, client_releases = ?, ipv6 = ?
 		 WHERE id = 1`,
 		s.RefreshMinutes, s.DNSPrimary, s.DNSSecondary,
 		s.DNSCache, s.DNSMinTTL, s.DNSMaxTTL, s.DNSStale,
 		s.MTU, s.StatsSeconds, s.Pool, s.BrutalMbit, s.BBRProfile,
 		s.MaxStreams, s.StreamWindow, s.MaxStreamWindow, s.ConnWindow, s.MaxConnWindow,
 		s.IdleSeconds, s.KeepAliveSeconds, s.SocketBuffer, s.BlockTier, s.BlockTIF,
-		s.ECHName, s.ClientVersion, s.ClientReleases)
+		s.ECHName, s.ClientVersion, s.ClientReleases, s.IPv6)
 	if err != nil {
 		return err
 	}

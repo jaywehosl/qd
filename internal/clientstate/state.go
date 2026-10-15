@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
 	_ "modernc.org/sqlite"
 )
 
@@ -72,18 +71,6 @@ func (d *DB) Subscription() (Subscription, error) {
 	}
 	s.Imported = s.Key != ""
 	return s, nil
-}
-
-func (d *DB) RelayLinks() []relay.Link {
-	sub, err := d.Subscription()
-	if err != nil || sub.URI == "" {
-		return nil
-	}
-	link, err := ParseLink(sub.URI)
-	if err != nil {
-		return nil
-	}
-	return link.Relays
 }
 
 func (d *DB) SaveSubscription(s Subscription) error {

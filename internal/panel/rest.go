@@ -451,11 +451,6 @@ func (a *API) groupEntrypoints(w http.ResponseWriter, r *http.Request) {
 		AllowExit     bool   `json:"allowExit"`
 		AllowDev      bool   `json:"allowDev"`
 		AllowCore     bool   `json:"allowCore"`
-		RelayEnable   bool   `json:"relayEnable"`
-		Relays        []struct {
-			NodeID  int    `json:"nodeId"`
-			Weblink string `json:"weblink"`
-		} `json:"relays"`
 	}
 	if err := bindBody(r, &body); err != nil {
 		sendFail(w, err)
@@ -466,12 +461,6 @@ func (a *API) groupEntrypoints(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.EntrypointIDs == nil {
 		body.EntrypointIDs = []int{}
-	}
-	if body.Relays == nil {
-		body.Relays = []struct {
-			NodeID  int    `json:"nodeId"`
-			Weblink string `json:"weblink"`
-		}{}
 	}
 
 	groups, err := a.groups()
@@ -487,7 +476,6 @@ func (a *API) groupEntrypoints(w http.ResponseWriter, r *http.Request) {
 			"id": g.ID, "name": g.Name, "entrypointIds": body.EntrypointIDs,
 			"deviceLimit": body.DeviceLimit, "allowExit": body.AllowExit,
 			"allowDev": body.AllowDev, "allowCore": body.AllowCore,
-			"relayEnable": body.RelayEnable, "relays": body.Relays,
 		})
 		if err != nil {
 			sendFailWith(w, err, results)

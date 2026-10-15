@@ -19,11 +19,10 @@ import (
 	"github.com/jaywehosl/qd/internal/qcli/packet/tun"
 	"github.com/jaywehosl/qd/internal/qdcrypt"
 	"github.com/jaywehosl/qd/internal/qsrv"
-	"github.com/jaywehosl/qd/internal/qsrv/uplink/relay"
 	"github.com/jaywehosl/qd/internal/steerlist"
 )
 
-func (c *Client) carry(servers []string, relays []relay.Link, session uint32) error {
+func (c *Client) carry(servers []string, session uint32) error {
 	c.turn.Lock()
 	defer c.turn.Unlock()
 
@@ -64,7 +63,6 @@ func (c *Client) carry(servers []string, relays []relay.Link, session uint32) er
 	held, err := clientrun.Carry(round, clientrun.Plan{
 		Dial: qcli.Options{
 			Endpoints: servers,
-			Relays:    relays,
 			Token:     c.token(),
 			Device:    c.device.ID,
 			Route:     c.route(),
@@ -89,7 +87,7 @@ func (c *Client) carry(servers []string, relays []relay.Link, session uint32) er
 			Node: servers[0], Token: c.token(), Ask: c.wire().Ask,
 			Say:      say,
 			Device:   c.device.ID,
-			Exit:     func() bool { return exit.Load() == uint32(qdcrypt.ExitEgress) },
+			Exit:     c.nameLeaves,
 			Adblock:  func() bool { return seen != nil && seen.Adblock() },
 			Answered: c.names.Learn,
 			Native: func(name string) bool {
@@ -103,16 +101,12 @@ func (c *Client) carry(servers []string, relays []relay.Link, session uint32) er
 			},
 		},
 		Source: func(ctx context.Context, live *qcli.Tunnel) (packet.Source, error) {
-			six, carried := live.Six()
-			fd, err := c.hold(live.Assigned()[0], six, localMTU, append(live.Peers(), live.RelayPeers()...))
+			six, _ := live.Six()
+			fd, err := c.hold(live.Assigned()[0], six, localMTU, live.Peers())
 			if err != nil {
 				return nil, err
 			}
-			raw, err := tun.Open(fd)
-			if err != nil {
-				return nil, err
-			}
-			return watched(raw, carried), nil
+			return tun.Open(fd)
 		},
 		Lost: func(error) { c.lost() },
 		Ride: func(live *qcli.Tunnel) func() {
@@ -181,7 +175,6 @@ func (c *Client) stopCarry() {
 	if live == nil {
 		return
 	}
-	live.StopRelay()
 
 	go func() {
 		if gone != nil {
@@ -268,6 +261,18 @@ func (c *Client) outside(ctx context.Context, network string, dst netip.AddrPort
 	keep := c.keeper()
 	dialer := net.Dialer{Control: func(_, _ string, raw syscall.RawConn) error { return raw.Control(keep) }}
 	return dialer.DialContext(ctx, network, dst.String())
+}
+
+func (c *Client) nameLeaves(name string) bool {
+	if role, known := c.names.RoleOfName(name); known {
+		switch role {
+		case clientstate.RoleEgress:
+			return true
+		case clientstate.RoleNoEgress:
+			return false
+		}
+	}
+	return c.marks.fallback() == qdcrypt.ExitEgress
 }
 
 func (c *Client) exitFor(src, dst netip.AddrPort, udp bool) string {
