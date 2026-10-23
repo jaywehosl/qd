@@ -21,6 +21,7 @@ type seen struct {
 	LastSeen int64
 	Transit  bool
 	Client   string
+	Seats    map[uint32]string
 	Up       uint64
 	Down     uint64
 	PktUp    uint64
@@ -32,7 +33,7 @@ type stint struct {
 	Since     int64
 	LastHeard int64
 	Checked   int64
-	Client    string
+	seats     map[uint32]string
 	Device    string
 	devices   map[string]int64
 	Seen      []address
@@ -147,30 +148,15 @@ func (p *presence) tick() {
 
 		held.LastHeard = now
 
-		if held.Client != "" && s.Client != "" && held.Client != s.Client {
-			fmt.Printf("roam       session %d moved from %s to %s\n", id, held.Client, s.Client)
-		}
-		held.Client = s.Client
-		if s.Client == "" {
-			continue
-		}
-
-		host := s.Client
-		if where, err := netip.ParseAddrPort(host); err == nil {
-			host = where.Addr().Unmap().String()
-		}
-
-		found := false
-		for i := range held.Seen {
-			if held.Seen[i].IP == host {
-				held.Seen[i].LastSeen = now
-				found = true
-				break
+		for seat, where := range s.Seats {
+			if was := held.seats[seat]; was != "" && where != "" && was != where {
+				fmt.Printf("roam       session %d seat %d moved from %s to %s\n", id, seat, was, where)
+			}
+			if where != "" {
+				held.note(where, now)
 			}
 		}
-		if !found {
-			held.Seen = append(held.Seen, address{IP: host, FirstSeen: now, LastSeen: now})
-		}
+		held.seats = s.Seats
 	}
 
 	for id, held := range p.stint {
@@ -182,6 +168,20 @@ func (p *presence) tick() {
 		}
 		delete(p.stint, id)
 	}
+}
+
+func (held *stint) note(where string, now int64) {
+	host := where
+	if at, err := netip.ParseAddrPort(where); err == nil {
+		host = at.Addr().Unmap().String()
+	}
+	for i := range held.Seen {
+		if held.Seen[i].IP == host {
+			held.Seen[i].LastSeen = now
+			return
+		}
+	}
+	held.Seen = append(held.Seen, address{IP: host, FirstSeen: now, LastSeen: now})
 }
 
 func (p *presence) of(id uint32) (since, lastHeard, checked int64, device string, seen []address) {

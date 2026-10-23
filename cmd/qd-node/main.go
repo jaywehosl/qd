@@ -451,6 +451,10 @@ func sampleSessions(node *qsrv.Node) map[uint32]seen {
 		}
 
 		total := out[s.Session]
+		if total.Seats == nil {
+			total.Seats = map[uint32]string{}
+		}
+		total.Seats[s.Seat] = where
 		total.Transit = s.Transit
 		total.Up += s.Up
 		total.Down += s.Down
