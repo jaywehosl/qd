@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/url"
 	"os"
 	"os/signal"
@@ -20,6 +21,7 @@ import (
 	"github.com/jaywehosl/qd/internal/pace"
 	"github.com/jaywehosl/qd/internal/qdcrypt"
 	"github.com/jaywehosl/qd/internal/qsrv/uplink/quicconn"
+	"github.com/jaywehosl/qd/internal/quiet"
 	"github.com/jaywehosl/qd/internal/update"
 )
 
@@ -36,6 +38,7 @@ func runClient(opts runOptions) error {
 	if !embedded {
 		redirectOutput(opts.StatePath)
 	}
+	log.SetOutput(quiet.Writer(log.Writer()))
 	standFull()
 
 	first, release := true, func() {}
@@ -98,12 +101,12 @@ func runClient(opts runOptions) error {
 		if settings.NetworkKey != keyText {
 			settings.NetworkKey = keyText
 			if err := db.SaveSettings(settings); err != nil {
-				fmt.Printf("crypto   key not stored: %v\n", err)
+				fmt.Printf("network  key not stored: %v\n", err)
 			}
 		}
-		fmt.Printf("crypto   chacha20, mtu %d\n", mtu)
+		fmt.Printf("network  key known, mtu %d\n", mtu)
 	} else {
-		fmt.Printf("crypto   off, no network key\n")
+		fmt.Printf("network  no key yet, a subscription link brings one\n")
 	}
 
 	var admin *adminUI
@@ -239,7 +242,7 @@ func runClient(opts runOptions) error {
 			close(quit)
 		}()
 	} else {
-		go answerKnocks(func() { openPage(pageURL) }, stop)
+		go answerKnocks(func() { openPage(ui.Entry()) }, stop)
 		trayed, untray = startShell(db, tun, ui, api, quit, stop)
 	}
 	defer untray()
@@ -264,7 +267,7 @@ func runClient(opts runOptions) error {
 		}
 	}
 	if !embedded && (!trayed || arrived || behaviour == "open" || behaviour == "openConnect") {
-		openPage(pageURL)
+		openPage(ui.Entry())
 	}
 
 	sig := make(chan os.Signal, 1)

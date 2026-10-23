@@ -2,25 +2,21 @@ import { z } from 'zod';
 
 export const NodeRecordSchema = z.object({
   id: z.number(),
-  name: z.string().optional(),
-  remark: z.string().optional(),
+  tag: z.string().optional(),
   address: z.string().optional(),
   port: z.number().optional(),
-  basePath: z.string().optional(),
-  apiToken: z.string().optional(),
   enable: z.boolean().optional(),
+  online: z.boolean().optional(),
   status: z.string().optional(),
   latencyMs: z.number().optional(),
   cpuPct: z.number().optional(),
   memPct: z.number().optional(),
-  panelVersion: z.string().optional(),
+  version: z.string().optional(),
   uptimeSecs: z.number().optional(),
   clientCount: z.number().optional(),
   onlineCount: z.number().optional(),
-  depletedCount: z.number().optional(),
   lastHeartbeat: z.number().optional(),
   lastError: z.string().optional(),
-  allowPrivateAddress: z.boolean().optional(),
   role: z.enum(['ingress', 'egress']).optional(),
   dnsPrimary: z.string().optional(),
   dnsSecondary: z.string().optional(),
@@ -42,7 +38,7 @@ export const ProbeResultSchema = z.object({
 
 export const NodeEditSchema = z.object({
   id: z.number().optional(),
-  name: z.string().trim().min(1, 'pages.nodes.toasts.fillRequired'),
+  tag: z.string().trim().min(1, 'pages.nodes.toasts.fillRequired'),
   role: z.enum(['ingress', 'egress']),
   port: z.number().int().min(1).max(65535),
   dnsPrimary: z.string().trim(),
@@ -55,8 +51,7 @@ export const NodeEditSchema = z.object({
 
 export const NodeFormSchema = NodeEditSchema.extend({
   uuid: z.string(),
-  address: z.string().trim().min(1, 'pages.nodes.toasts.fillRequired'),
-  apiToken: z.string().trim().min(1, 'pages.nodes.toasts.fillRequired'),
+  networkKey: z.string().trim().min(1, 'pages.nodes.toasts.fillRequired'),
   enable: z.boolean(),
   natSlot: z.number().int().min(0, 'pages.nodes.toasts.noNatSlot'),
 });

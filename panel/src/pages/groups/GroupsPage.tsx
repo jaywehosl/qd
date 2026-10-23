@@ -1,7 +1,6 @@
 import { lazy, useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { z } from 'zod';
 import {
   DeleteOutlined,
   EditOutlined,
@@ -26,13 +25,13 @@ import {
 } from '@/components/ds';
 import { useTheme } from '@/hooks/useTheme';
 import { usePageTitle } from '@/hooks/usePageTitle';
-import { useClients } from '@/hooks/useClients';
-import { clientsApi } from '@/generated/client';
+import { useEntrypoints } from '@/hooks/useClients';
+import { HttpUtil } from '@/utils';
 import { keys } from '@/api/queryKeys';
 import { getMessage } from '@/utils/messageBus';
 import { LazyMount } from '@/components/utility';
 import {
-  ClientRecordSchema,
+  ClientRecordListSchema,
   GroupSummaryListSchema,
   type ClientRecord,
   type GroupSummary,
@@ -40,12 +39,11 @@ import {
 import { parseMsg } from '@/utils/zodValidate';
 import { phone } from '@/lib/phone';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
-const ClientRecordListSchema = z.array(ClientRecordSchema).nullable().transform((v) => v ?? []);
 
 const GroupEditModal = lazy(() => import('./GroupEditModal'));
 
 async function fetchGroups(): Promise<GroupSummary[]> {
-  const msg = await clientsApi.groups(undefined, { silent: true });
+  const msg = await HttpUtil.get('/panel/api/clients/groups', undefined, { silent: true });
   if (!msg?.success) throw new Error(msg?.msg || 'Failed to load groups');
   return parseMsg(msg, GroupSummaryListSchema, 'clients/groups').obj ?? [];
 }
@@ -63,7 +61,7 @@ export default function GroupsPage() {
   const { isDark, isUltra } = useTheme();
   const queryClient = useQueryClient();
 
-  const { inbounds } = useClients();
+  const entrypoints = useEntrypoints();
 
   const groupsQuery = useQuery({ queryKey: keys.clients.groups(), queryFn: fetchGroups });
   const groups = useMemo(() => groupsQuery.data ?? [], [groupsQuery.data]);
@@ -76,11 +74,11 @@ export default function GroupsPage() {
   }, [queryClient]);
 
   const createMut = useMutation({
-    mutationFn: (body: { name: string }) => clientsApi.groupsCreate(body, { silent: true }),
+    mutationFn: (body: { tag: string }) => HttpUtil.post('/panel/api/clients/groups/save', body, { silent: true }),
     onSuccess: (msg) => { if (msg?.success) invalidate(); },
   });
   const deleteMut = useMutation({
-    mutationFn: (body: { name: string }) => clientsApi.groupsDelete(body, { silent: true }),
+    mutationFn: (body: { id: number }) => HttpUtil.post('/panel/api/clients/groups/delete', body, { silent: true }),
     onSuccess: (msg) => { if (msg?.success) invalidate(); },
   });
 
@@ -95,7 +93,7 @@ export default function GroupsPage() {
   const allClientsQuery = useQuery<ClientRecord[]>({
     queryKey: keys.clients.all(),
     queryFn: async () => {
-      const msg = await clientsApi.list(undefined, { silent: true });
+      const msg = await HttpUtil.get('/panel/api/clients/list', undefined, { silent: true });
       if (!msg?.success) throw new Error(msg?.msg || 'Failed to load clients');
       return parseMsg(msg, ClientRecordListSchema, 'clients/list').obj ?? [];
     },
@@ -106,9 +104,9 @@ export default function GroupsPage() {
 
   const inboundLabel = useMemo(() => {
     const byId = new Map<number, string>();
-    for (const ib of inbounds) byId.set(ib.id, ib.tag?.trim() || ib.remark?.trim() || String(ib.id));
+    for (const e of entrypoints) byId.set(e.id, e.tag?.trim() || String(e.id));
     return (id: number) => byId.get(id) ?? String(id);
-  }, [inbounds]);
+  }, [entrypoints]);
 
   const totalGroups = groups.length;
   const totalClients = useMemo(() => groups.reduce((a, g) => a + (g.clientCount || 0), 0), [groups]);
@@ -128,11 +126,11 @@ export default function GroupsPage() {
   async function confirmCreate() {
     const name = createName.trim();
     if (!name) return;
-    if (groups.some((g) => g.name.toLowerCase() === name.toLowerCase())) {
+    if (groups.some((g) => g.tag.toLowerCase() === name.toLowerCase())) {
       message.error(t('pages.groups.renameCollision', { name }));
       return;
     }
-    const msg = await createMut.mutateAsync({ name });
+    const msg = await createMut.mutateAsync({ tag: name });
     if (msg?.success) { message.success(t('pages.groups.createSuccess', { name })); setCreateOpen(false); }
     else if (msg?.msg) message.error(msg.msg);
   }
@@ -141,11 +139,11 @@ export default function GroupsPage() {
 
   function onDelete(g: GroupSummary) {
     setConfirm({
-      title: t('pages.groups.deleteConfirmTitle', { name: g.name }),
+      title: t('pages.groups.deleteConfirmTitle', { name: g.tag }),
       content: t('pages.groups.deleteConfirmContent', { count: g.clientCount }),
       okText: t('delete'),
       onOk: async () => {
-        const msg = await deleteMut.mutateAsync({ name: g.name });
+        const msg = await deleteMut.mutateAsync({ id: g.id });
         if (msg?.success) {
           const affected = (msg.obj as { affected?: number } | undefined)?.affected ?? 0;
           message.success(t('pages.groups.deleteSuccess', { count: affected }));
@@ -171,9 +169,9 @@ export default function GroupsPage() {
       ),
     },
     {
-      accessorKey: 'name',
+      accessorKey: 'tag',
       header: () => t('pages.groups.groupTag'),
-      cell: ({ row }) => <Tag tone="primary">{row.original.name}</Tag>,
+      cell: ({ row }) => <Tag tone="primary">{row.original.tag}</Tag>,
     },
     {
       id: 'entrypoints',
@@ -198,7 +196,6 @@ export default function GroupsPage() {
         </Tag>
       ),
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   ], [t, groups, inboundLabel]);
 
   const { isMobile } = useMediaQuery();
@@ -254,9 +251,9 @@ export default function GroupsPage() {
                   {groups.map((g) => {
                     const ids = g.entrypointIds ?? [];
                     return (
-                      <div key={g.name} className="mc is-tap is-plain" onClick={() => openEdit(g)}>
+                      <div key={g.id} className="mc is-tap is-plain" onClick={() => openEdit(g)}>
                         <div className="mc__body">
-                          <span className="mc__name">{g.name}</span>
+                          <span className="mc__name">{g.tag}</span>
                           <span className="mc__sub">
                             <span className={ids.length ? 'is-group' : ''}>{ids.length ? ids.map(inboundLabel).join(', ') : t('pages.groups.noInbounds', { defaultValue: 'No inbounds' })}</span>
                             <span>{t('pages.groups.clientCount')}: {g.clientCount || 0}</span>
@@ -278,7 +275,7 @@ export default function GroupsPage() {
                 <DataTable
                   data={groups}
                   columns={columns}
-                  getRowId={(g) => g.name}
+                  getRowId={(g) => String(g.id)}
                   empty={
                     <>
                       <TagsOutlined style={{ fontSize: 28 }} />
@@ -328,7 +325,7 @@ export default function GroupsPage() {
             open={editOpen}
             group={editTarget}
             groups={groups}
-            inbounds={inbounds}
+            entrypoints={entrypoints}
             clients={allClients}
             onClose={() => setEditOpen(false)}
             onSaved={invalidate}

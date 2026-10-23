@@ -583,6 +583,7 @@ func (r routed) DialUDP(ctx context.Context, dst netip.AddrPort) (net.Conn, erro
 type Counters struct {
 	Out, In, Back, BytesOut, BytesIn uint64
 	Heard                            uint64
+	Shed, Failed                     uint64
 }
 
 func (t *Tunnel) Stats() Counters {
@@ -592,6 +593,8 @@ func (t *Tunnel) Stats() Counters {
 		Back:     t.meter.Back.Load(),
 		BytesOut: t.meter.BytesOut.Load(),
 		BytesIn:  t.meter.BytesIn.Load(),
+		Shed:     t.meter.Shed.Load(),
+		Failed:   t.meter.Failed.Load(),
 	}
 	out.Heard = out.In
 	if held, ok := t.road.(interface{ Received() uint64 }); ok {

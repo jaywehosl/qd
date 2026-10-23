@@ -33,8 +33,7 @@ CREATE TABLE IF NOT EXISTS rules (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
     process TEXT    NOT NULL,
     path    TEXT    NOT NULL DEFAULT '',
-    role    TEXT    NOT NULL,
-    matched INTEGER NOT NULL DEFAULT 0
+    role    TEXT    NOT NULL
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_rules_target ON rules(process, path);
@@ -57,8 +56,6 @@ CREATE TABLE IF NOT EXISTS samples (
     pkt_in       INTEGER NOT NULL DEFAULT 0,
     lost         INTEGER NOT NULL DEFAULT 0,
     drops        INTEGER NOT NULL DEFAULT 0,
-    reorder      INTEGER NOT NULL DEFAULT 0,
-    retries      INTEGER NOT NULL DEFAULT 0,
     send_drop    INTEGER NOT NULL DEFAULT 0,
     send_err     INTEGER NOT NULL DEFAULT 0,
     dns_queries  INTEGER NOT NULL DEFAULT 0,
@@ -99,8 +96,7 @@ CREATE TABLE IF NOT EXISTS ech (
 CREATE TABLE IF NOT EXISTS domain_rules (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
     domain  TEXT    NOT NULL UNIQUE,
-    role    TEXT    NOT NULL,
-    matched INTEGER NOT NULL DEFAULT 0
+    role    TEXT    NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS bundle_rules (

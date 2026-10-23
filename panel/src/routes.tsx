@@ -91,11 +91,4 @@ const routes: RouteObject[] = [
   { path: '/', element: <Navigate to="/client" replace /> },
 ];
 
-function computeBasename() {
-  const raw = (typeof window !== 'undefined' && window.X_UI_BASE_PATH) || '/';
-  return raw.replace(/\/+$/, '');
-}
-
-export const router = createBrowserRouter(routes, {
-  basename: computeBasename(),
-});
+export const router = createBrowserRouter(routes);

@@ -9,20 +9,13 @@ export const keys = {
   settings: {
     root: () => ['settings'] as const,
     all: () => ['settings', 'all'] as const,
-    defaults: () => ['settings', 'defaults'] as const,
   },
-  inbounds: {
-    root: () => ['inbounds'] as const,
-    options: () => ['inbounds', 'options'] as const,
-  },
+  entrypoints: () => ['entrypoints'] as const,
   clients: {
     root: () => ['clients'] as const,
     list: (params: unknown) => ['clients', 'list', params] as const,
     all: () => ['clients', 'all'] as const,
     onlines: () => ['clients', 'onlines'] as const,
-    onlinesByNode: () => ['clients', 'onlinesByNode'] as const,
-    activeInbounds: () => ['clients', 'activeInbounds'] as const,
-    lastOnline: () => ['clients', 'lastOnline'] as const,
     groups: () => ['clients', 'groups'] as const,
   },
 } as const;

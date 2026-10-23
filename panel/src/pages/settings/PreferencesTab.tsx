@@ -15,8 +15,6 @@ interface Release {
   signed: boolean;
 }
 
-const ZONES = ['UTC', ...Intl.supportedValuesOf('timeZone')];
-
 export default function PreferencesTab({ allSetting, updateSetting }: PreferencesTabProps) {
   const { t } = useTranslation();
 
@@ -97,19 +95,6 @@ export default function PreferencesTab({ allSetting, updateSetting }: Preference
 
       <SettingListItem
         paddings="small"
-        title={t('pages.settings.timeZone')}
-        description={t('pages.settings.timeZoneDesc')}
-      >
-        <Select
-          value={allSetting.timeLocation}
-          onChange={(v) => updateSetting({ timeLocation: v as string })}
-          options={(ZONES.includes(allSetting.timeLocation) ? ZONES : [allSetting.timeLocation, ...ZONES])
-            .map((zone) => ({ value: zone, label: zone }))}
-        />
-      </SettingListItem>
-
-      <SettingListItem
-        paddings="small"
         title={t('pages.settings.expireTimeDiff')}
         description={t('pages.settings.expireTimeDiffDesc')}
       >
@@ -118,20 +103,6 @@ export default function PreferencesTab({ allSetting, updateSetting }: Preference
           min={0}
           value={allSetting.expireDiff}
           onChange={(e) => updateSetting({ expireDiff: Number(e.target.value) || 0 })}
-        />
-      </SettingListItem>
-
-      <SettingListItem
-        paddings="small"
-        title={t('pages.settings.trafficDiff')}
-        description={t('pages.settings.trafficDiffDesc')}
-      >
-        <Input
-          type="number"
-          min={0}
-          max={100}
-          value={allSetting.trafficDiff}
-          onChange={(e) => updateSetting({ trafficDiff: Number(e.target.value) || 0 })}
         />
       </SettingListItem>
     </Card>

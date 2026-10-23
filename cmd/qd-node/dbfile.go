@@ -3,33 +3,45 @@
 package main
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/jaywehosl/qd/internal/store"
 )
 
+const (
+	dbChunk      = 1 << 20
+	snapshotKeep = 10 * time.Minute
+)
+
 func (state *controlState) dbRead(req request) response {
 	var body struct {
-		Offset int64 `json:"offset"`
+		Offset int64  `json:"offset"`
+		ID     string `json:"id"`
 	}
 	json.Unmarshal(req.Body, &body)
 
-	snapshot := state.dbPath + ".snapshot"
 	if body.Offset == 0 {
-		os.Remove(snapshot)
-		if _, err := state.db.SQL().Exec(`VACUUM INTO ?`, snapshot); err != nil {
+		state.sweepSnapshots()
+		raw := make([]byte, 8)
+		rand.Read(raw)
+		body.ID = hex.EncodeToString(raw)
+		if _, err := state.data().SQL().Exec(`VACUUM INTO ?`, state.snapshot(body.ID)); err != nil {
 			return response{OK: false, Error: err.Error()}
 		}
-		state.gaveAt = time.Now()
-		state.gaveChunks = 0
 	}
-	state.gaveChunks++
+	if len(body.ID) != 16 {
+		return response{OK: false, Error: "no such copy"}
+	}
+	snapshot := state.snapshot(body.ID)
 
 	file, err := os.Open(snapshot)
 	if err != nil {
@@ -50,6 +62,7 @@ func (state *controlState) dbRead(req request) response {
 
 	done := body.Offset+int64(n) >= info.Size()
 	answer := map[string]any{
+		"id":    body.ID,
 		"size":  info.Size(),
 		"chunk": buf[:n],
 		"eof":   done,
@@ -57,11 +70,23 @@ func (state *controlState) dbRead(req request) response {
 	if done {
 		answer["sum"] = sumOf(snapshot)
 		defer os.Remove(snapshot)
-		fmt.Printf("database   copy out: %d B in %d chunks, %s\n",
-			info.Size(), state.gaveChunks, time.Since(state.gaveAt).Round(time.Millisecond))
+		fmt.Printf("database   copy out: %d B\n", info.Size())
 	}
 
 	return reply(req, answer)
+}
+
+func (state *controlState) snapshot(id string) string {
+	return state.dbPath + ".snapshot." + id
+}
+
+func (state *controlState) sweepSnapshots() {
+	held, _ := filepath.Glob(state.dbPath + ".snapshot*")
+	for _, path := range held {
+		if info, err := os.Stat(path); err == nil && time.Since(info.ModTime()) > snapshotKeep {
+			os.Remove(path)
+		}
+	}
 }
 
 func sumOf(path string) string {
@@ -130,8 +155,8 @@ func (state *controlState) dbWrite(req request) response {
 		return response{OK: false, Error: err.Error()}
 	}
 
-	was, _ := state.db.NetworkSettings()
-	state.db.Close()
+	was, _ := state.data().NetworkSettings()
+	state.data().Close()
 	for _, suffix := range []string{"-wal", "-shm"} {
 		os.Remove(state.dbPath + suffix)
 	}
@@ -143,7 +168,7 @@ func (state *controlState) dbWrite(req request) response {
 	if err != nil {
 		return response{OK: false, Error: err.Error()}
 	}
-	state.db = db
+	state.base.Store(db)
 
 	state.applySelf()
 	state.syncSessions()
@@ -169,8 +194,17 @@ func checkDatabase(path string) error {
 	if _, err := probe.Nodes(); err != nil {
 		return err
 	}
-	_, err = probe.Version()
-	return err
+	if _, err := probe.Version(); err != nil {
+		return err
+	}
+	clients, err := probe.Clients()
+	if err != nil {
+		return err
+	}
+	for _, c := range clients {
+		if c.Admin && c.Enable {
+			return nil
+		}
+	}
+	return errors.New("the copy has no enabled administrator, nobody could manage the network with it")
 }
-
-const dbChunk = 1 << 20

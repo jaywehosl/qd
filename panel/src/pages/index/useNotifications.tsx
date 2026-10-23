@@ -30,19 +30,19 @@ export function useNotifications(): NotificationRow[] {
   return useMemo(() => {
     const rows: NotificationRow[] = [];
 
-    if (prefs.xray && statusFetched && status.nodes > 0) {
+    if (prefs.nodes && statusFetched && status.nodes > 0) {
       const missing = status.nodes - status.nodesOnline;
       if (status.nodesOnline === 0) {
         rows.push({
           id: 'nodes-none',
-          category: 'xray',
+          category: 'nodes',
           severity: 'danger',
           text: t('pages.index.notifyNodesNone'),
         });
       } else if (missing > 0) {
         rows.push({
           id: 'nodes-partial',
-          category: 'xray',
+          category: 'nodes',
           severity: 'warning',
           text: t('pages.index.notifyNodesPartial', { missing, total: status.nodes }),
         });

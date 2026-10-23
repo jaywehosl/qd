@@ -49,9 +49,8 @@ func collectSamples(db *clientstate.DB, tun *tunnel, stop <-chan struct{}) {
 			Down:        rate(delta(cur.bytesIn, prev.bytesIn), per),
 			PktOut:      rate(delta(cur.out, prev.out), per),
 			PktIn:       rate(delta(cur.in, prev.in), per),
-			Lost:        delta(cur.gaps, prev.gaps),
-			Reorder:     delta(cur.reorder, prev.reorder),
-			Retries:     delta(cur.retries, prev.retries),
+			Lost:        delta(cur.lost, prev.lost),
+			Drops:       delta(cur.drops, prev.drops),
 			SendDrop:    delta(cur.sendDrop, prev.sendDrop),
 			SendErr:     delta(cur.sendErr, prev.sendErr),
 			DNSQueries:  delta(uint64(dns.queries), uint64(prevDNS.queries)),
@@ -66,7 +65,9 @@ func collectSamples(db *clientstate.DB, tun *tunnel, stop <-chan struct{}) {
 		if sentRaw > 0 || gotRaw > 0 {
 			db.AddTraffic(sentRaw, gotRaw)
 		}
-		db.AddSample(sample)
+		if !sample.Quiet() {
+			db.AddSample(sample)
+		}
 
 		windowOut += uint64(sentRaw)
 		windowIn += uint64(gotRaw)
@@ -97,22 +98,25 @@ type dnsSnapshot struct {
 
 type counters struct {
 	out, in, bytesOut, bytesIn uint64
-	gaps, reorder, retries     uint64
+	lost, drops                uint64
 	sendDrop, sendErr          uint64
 }
 
 func snapshotStats() counters {
+	lost, _ := quic.LossStats()
+	_, missed := quic.DatagramStats()
+	out := counters{
+		lost:  lost,
+		drops: missed + quic.DatagramsShed() + http3.StreamDatagramsDropped(),
+	}
 	live := liveTunnel.Load()
 	if live == nil {
-		return counters{}
+		return out
 	}
 	c := (*live).Stats()
-	return counters{
-		out:      c.Out,
-		in:       c.In,
-		bytesOut: c.BytesOut,
-		bytesIn:  c.BytesIn,
-	}
+	out.out, out.in, out.bytesOut, out.bytesIn = c.Out, c.In, c.BytesOut, c.BytesIn
+	out.sendDrop, out.sendErr = c.Shed, c.Failed
+	return out
 }
 
 func snapshotDNS(r *clientdns.Resolver) dnsSnapshot {

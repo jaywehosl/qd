@@ -140,9 +140,9 @@ func (r *Resolver) handle(query []byte, from *net.UDPAddr) {
 
 	began := time.Now()
 	answer, hit, err := r.cache.Answer(query)
-	r.tell("dns: %s %dms hit=%v err=%v", name, time.Since(began).Milliseconds(), hit, err)
 
 	if err != nil {
+		r.tell("dns: a name went unanswered after %d ms: %v", time.Since(began).Milliseconds(), err)
 		r.failed.Add(1)
 		r.conn.WriteToUDP(dnsproxy.ServFail(query), from)
 		return

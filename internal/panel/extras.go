@@ -1,13 +1,14 @@
 package panel
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"runtime"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -16,18 +17,20 @@ import (
 
 const prefsKey = "panel.prefs"
 
+func freshSecret() string {
+	raw := make([]byte, 32)
+	rand.Read(raw)
+	return hex.EncodeToString(raw)
+}
+
 func (a *API) extraRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/panel/api/server/status", a.serverStatus)
-	mux.HandleFunc("/panel/api/inbounds/options", a.inboundOptions)
+	mux.HandleFunc("/panel/api/entrypoints", a.entrypointsList)
 
 	mux.HandleFunc("/panel/api/clients/onlines", a.onlines)
-	mux.HandleFunc("/panel/api/clients/onlinesByNode", a.onlinesByNode)
 	mux.HandleFunc("/panel/api/clients/lastOnline", a.lastOnline)
-	mux.HandleFunc("/panel/api/clients/activeInbounds", emptyObject)
 
-	mux.HandleFunc("/panel/api/publish/draft", a.draft)
 	mux.HandleFunc("/panel/setting/all", a.settings)
-	mux.HandleFunc("/panel/setting/defaultSettings", a.settings)
 	mux.HandleFunc("/panel/setting/update", a.settings)
 
 	mux.HandleFunc("/panel/api/releases", a.releases)
@@ -83,7 +86,7 @@ func (a *API) serverStatus(w http.ResponseWriter, r *http.Request) {
 	sendOK(w, status)
 }
 
-func (a *API) inboundOptions(w http.ResponseWriter, r *http.Request) {
+func (a *API) entrypointsList(w http.ResponseWriter, r *http.Request) {
 	body, err := a.fleet.Read("entrypoints.list", nil)
 	if err != nil {
 		sendFail(w, err)
@@ -95,6 +98,7 @@ func (a *API) inboundOptions(w http.ResponseWriter, r *http.Request) {
 		NodeID int    `json:"nodeId"`
 		Port   int    `json:"port"`
 		Remark string `json:"remark"`
+		Enable bool   `json:"enable"`
 	}
 	if err := json.Unmarshal(body, &rows); err != nil {
 		sendFail(w, err)
@@ -118,40 +122,42 @@ func (a *API) inboundOptions(w http.ResponseWriter, r *http.Request) {
 			label = e.Remark
 		}
 		out = append(out, map[string]any{
-			"id": e.ID, "remark": label, "port": e.Port, "nodeId": e.NodeID,
-			"protocol": "qd", "enable": true,
+			"id": e.ID, "tag": label, "port": e.Port, "nodeId": e.NodeID, "enable": e.Enable,
 		})
 	}
 	sendOK(w, out)
 }
 
-func (a *API) draft(w http.ResponseWriter, r *http.Request) {
-	revision := 0
-	for _, h := range a.fleet.Health() {
-		if h.Revision > revision {
-			revision = h.Revision
+var localPrefs = []string{"pageSize", "expireDiff"}
+
+func (a *API) prefsMap() map[string]any {
+	out := map[string]any{}
+	if a.prefs == nil {
+		return out
+	}
+	stored, err := a.prefs.Value(prefsKey)
+	if err != nil || stored == "" {
+		return out
+	}
+	var saved map[string]any
+	if json.Unmarshal([]byte(stored), &saved) != nil {
+		return out
+	}
+	for _, key := range localPrefs {
+		if v, held := saved[key]; held {
+			out[key] = v
 		}
 	}
-	sendOK(w, map[string]any{
-		"changes":           []any{},
-		"revision":          revision,
-		"publishedRevision": revision,
-	})
+	return out
 }
 
 func (a *API) settings(w http.ResponseWriter, r *http.Request) {
-	current := map[string]any{
-		"pageSize":        50,
-		"timeLocation":    time.Local.String(),
-		"datepicker":      "gregorian",
-		"expireDiff":      float64(a.expiryWarning()) / (24 * 60 * 60 * 1000),
-		"trafficDiff":     0,
-		"remarkModel":     "-ieo",
-		"subEnable":       false,
-		"tgBotEnable":     false,
-		"twoFactorEnable": false,
+	current := map[string]any{"pageSize": 50, "expireDiff": 3}
+	for k, v := range a.prefsMap() {
+		current[k] = v
 	}
 
+	echSecret, echKnown := "", false
 	if body, err := a.fleet.Read("network.settings", nil); err == nil {
 		var network map[string]any
 		if json.Unmarshal(body, &network) == nil {
@@ -160,24 +166,21 @@ func (a *API) settings(w http.ResponseWriter, r *http.Request) {
 					current[key] = v
 				}
 			}
+			echSecret, _ = network["echSecret"].(string)
+			echKnown = true
 		}
 	}
-
-	if a.prefs != nil {
-		if stored, err := a.prefs.Value(prefsKey); err == nil && stored != "" {
-			var saved map[string]any
-			if json.Unmarshal([]byte(stored), &saved) == nil {
-				for _, key := range networkKeys {
-					delete(saved, key)
-				}
-				for k, v := range saved {
-					current[k] = v
-				}
-			}
-		}
+	needSecret := func() bool {
+		name, _ := current["echName"].(string)
+		return echKnown && name != "" && echSecret == ""
 	}
 
-	if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/update") {
+	updating := r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/update")
+	if !updating && needSecret() {
+		a.write("network.settings.save", map[string]any{"echSecret": freshSecret()})
+	}
+
+	if updating {
 		var patch map[string]any
 		if err := bindBody(r, &patch); err != nil {
 			sendFail(w, err)
@@ -204,6 +207,9 @@ func (a *API) settings(w http.ResponseWriter, r *http.Request) {
 			current[key] = v
 			delete(patch, key)
 		}
+		if needSecret() {
+			network["echSecret"] = freshSecret()
+		}
 		if len(network) > 0 {
 			written, err := a.write("network.settings.save", network)
 			if err != nil {
@@ -224,17 +230,14 @@ func (a *API) settings(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 		}
-		for k, v := range patch {
-			current[k] = v
+		local := map[string]any{}
+		for _, key := range localPrefs {
+			if v, carried := patch[key]; carried {
+				current[key] = v
+			}
+			local[key] = current[key]
 		}
 		if a.prefs != nil {
-			local := map[string]any{}
-			for k, v := range current {
-				local[k] = v
-			}
-			for _, key := range networkKeys {
-				delete(local, key)
-			}
 			blob, _ := json.Marshal(local)
 			if err := a.prefs.SetValue(prefsKey, string(blob)); err != nil {
 				sendFail(w, err)
@@ -246,85 +249,38 @@ func (a *API) settings(w http.ResponseWriter, r *http.Request) {
 	sendOK(w, current)
 }
 
-func present(s sessionStat) bool { return s.Since > 0 }
-
-func (a *API) presence() (map[string]sessionStat, error) {
+func (a *API) onlines(w http.ResponseWriter, r *http.Request) {
 	rows, _, err := a.readClients()
 	if err != nil {
-		return nil, err
+		sendFail(w, err)
+		return
 	}
 
-	live := a.sessions()
-	out := make(map[string]sessionStat, len(rows))
+	tags := []string{}
 	for _, row := range rows {
-		uuid, _ := row["uuid"].(string)
-		tag, _ := row["email"].(string)
-		if uuid == "" || tag == "" {
-			continue
-		}
-		if seen, carried := live[qdcrypt.SessionID(uuid)]; carried {
-			out[tag] = seen
+		if online(row) {
+			tags = append(tags, textOf(row["tag"]))
 		}
 	}
-	return out, nil
-}
-
-func (a *API) onlines(w http.ResponseWriter, r *http.Request) {
-	seen, err := a.presence()
-	if err != nil {
-		sendFail(w, err)
-		return
-	}
-
-	names := []string{}
-	for tag, stat := range seen {
-		if present(stat) {
-			names = append(names, tag)
-		}
-	}
-	sort.Strings(names)
-	sendOK(w, names)
-}
-
-func (a *API) onlinesByNode(w http.ResponseWriter, r *http.Request) {
-	seen, err := a.presence()
-	if err != nil {
-		sendFail(w, err)
-		return
-	}
-
-	byNode := map[string][]string{}
-	for tag, stat := range seen {
-		if !present(stat) {
-			continue
-		}
-		node := strconv.Itoa(stat.NodeID)
-		byNode[node] = append(byNode[node], tag)
-	}
-	for _, names := range byNode {
-		sort.Strings(names)
-	}
-	sendOK(w, byNode)
+	sort.Strings(tags)
+	sendOK(w, tags)
 }
 
 func (a *API) lastOnline(w http.ResponseWriter, r *http.Request) {
-	seen, err := a.presence()
+	rows, _, err := a.readClients()
 	if err != nil {
 		sendFail(w, err)
 		return
 	}
 
+	live := a.sessions()
 	out := map[string]int64{}
-	for tag, stat := range seen {
-		if stat.LastSeen > 0 {
-			out[tag] = stat.LastSeen
+	for _, row := range rows {
+		if seen := live[qdcrypt.SessionID(textOf(row["uuid"]))]; seen.LastSeen > 0 {
+			out[textOf(row["tag"])] = seen.LastSeen
 		}
 	}
 	sendOK(w, out)
-}
-
-func emptyObject(w http.ResponseWriter, r *http.Request) {
-	sendOK(w, map[string]any{})
 }
 
 func (a *API) Live() map[string]any {
@@ -335,28 +291,25 @@ func (a *API) Live() map[string]any {
 		return out
 	}
 
-	online := []string{}
+	onlineTags := []string{}
 	stats := make([]map[string]any, 0, len(clients))
 	for _, row := range clients {
-		tag := textOf(row["email"])
-		if tag == "" {
-			continue
-		}
-		if numberOf(row["onlineSince"]) > 0 {
-			online = append(online, tag)
+		tag := textOf(row["tag"])
+		if online(row) {
+			onlineTags = append(onlineTags, tag)
 		}
 
-		stat := map[string]any{"email": tag}
+		stat := map[string]any{"tag": tag, "enable": row["enable"], "expiryAt": row["expiryAt"]}
 		if traffic, ok := row["traffic"].(map[string]any); ok {
-			for _, field := range []string{"up", "down", "total", "enable", "expiryTime", "lastOnline"} {
-				stat[field] = traffic[field]
+			for field, v := range traffic {
+				stat[field] = v
 			}
 		}
 		stats = append(stats, stat)
 	}
-	sort.Strings(online)
+	sort.Strings(onlineTags)
 
-	out["traffic"] = map[string]any{"onlineClients": online}
+	out["traffic"] = map[string]any{"onlineClients": onlineTags}
 	out["client_stats"] = map[string]any{"clients": stats}
 	return out
 }

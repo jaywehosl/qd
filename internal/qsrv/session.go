@@ -18,9 +18,28 @@ type sessionKey struct{}
 type held struct {
 	conn  *quic.Conn
 	mu    sync.Mutex
+	who   identity
 	grant Grant
 	known bool
 	route string
+}
+
+type identity struct {
+	token   string
+	device  string
+	node    string
+	seat    uint32
+	session uint32
+}
+
+func identityOf(r *http.Request) identity {
+	return identity{
+		token:   r.Header.Get(HeaderToken),
+		device:  r.Header.Get(HeaderDevice),
+		node:    r.Header.Get(HeaderNode),
+		seat:    numberIn(r, HeaderSeat),
+		session: numberIn(r, HeaderSession),
+	}
 }
 
 func newSessionContext(ctx context.Context, c *quic.Conn) context.Context {
@@ -32,16 +51,25 @@ func sessionOf(ctx context.Context) *held {
 	return s
 }
 
-func (h *held) remember(g Grant) {
+func (h *held) remember(who identity, g Grant) {
 	if h == nil {
 		return
 	}
 	h.mu.Lock()
-	h.grant, h.known = g, true
+	h.who, h.grant, h.known = who, g, true
 	h.mu.Unlock()
 }
 
-func (h *held) recall() (Grant, bool) {
+func (h *held) recall() (identity, bool) {
+	if h == nil {
+		return identity{}, false
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.who, h.known
+}
+
+func (h *held) lastGrant() (Grant, bool) {
 	if h == nil {
 		return Grant{}, false
 	}
@@ -51,26 +79,41 @@ func (h *held) recall() (Grant, bool) {
 }
 
 func (n *Node) verified(r *http.Request) (Grant, bool) {
-	if token := r.Header.Get(HeaderToken); token != "" && n.cfg.Verify != nil {
-		grant, ok := n.cfg.Verify(token)
-		if !ok {
+	who := identityOf(r)
+	h := sessionOf(r.Context())
+	fresh := who.token != ""
+	if !fresh {
+		var ok bool
+		if who, ok = h.recall(); !ok {
 			return Grant{}, false
 		}
-		grant.Seat = grant.Session
-		if seat := numberIn(r, HeaderSeat); seat != 0 && grant.Peer {
-			grant.Session = seat
-			if client := numberIn(r, HeaderSession); client != 0 {
-				grant.Session = client
-			}
-			grant.Seat = seat
-			grant.Client = r.Header.Get(HeaderNode)
-		} else if device := r.Header.Get(HeaderDevice); device != "" && !grant.Peer {
-			grant.Seat = seatFor(grant.Session, device)
-		}
-		sessionOf(r.Context()).remember(grant)
-		return grant, true
 	}
-	return sessionOf(r.Context()).recall()
+	grant, ok := n.grantOf(who)
+	if ok && fresh {
+		h.remember(who, grant)
+	}
+	return grant, ok
+}
+
+func (n *Node) grantOf(who identity) (Grant, bool) {
+	if n.cfg.Verify == nil {
+		return Grant{}, false
+	}
+	grant, ok := n.cfg.Verify(who.token)
+	if !ok {
+		return Grant{}, false
+	}
+	grant.Via, grant.Seat = grant.Session, grant.Session
+	switch {
+	case grant.Peer && who.seat != 0:
+		grant.Session, grant.Seat, grant.Client = who.seat, who.seat, who.node
+		if who.session != 0 {
+			grant.Session = who.session
+		}
+	case !grant.Peer && who.device != "":
+		grant.Seat = seatFor(grant.Session, who.device)
+	}
+	return grant, true
 }
 
 func SeatFor(session uint32, device string) uint32 { return seatFor(session, device) }
@@ -129,9 +172,8 @@ func (n *Node) peerSession(grant Grant, qc *quic.Conn) *live {
 		return held
 	}
 
-	s := newLive(Grant{Client: uuid, AllowExit: grant.AllowExit,
-		Session: grant.Session, Seat: id}, netip.Prefix{}, uuid, "")
-	s.transit = true
+	s := n.newLive(Grant{Client: uuid, AllowExit: grant.AllowExit,
+		Session: grant.Session, Seat: id, Via: grant.Via}, netip.Prefix{}, uuid, "", true)
 	s.conn = qc
 	n.held[id] = s
 	return s
@@ -143,7 +185,7 @@ func (n *Node) untilGone(c *quic.Conn, h *held) {
 	}
 	<-c.Context().Done()
 
-	grant, ok := h.recall()
+	grant, ok := h.lastGrant()
 	if !ok || grant.Seat == 0 {
 		return
 	}
@@ -193,7 +235,7 @@ func (n *Node) streamSession(grant Grant, r *http.Request, route string) *live {
 		return s
 	}
 
-	s := newLive(grant, n.pool.stream(grant.Seat), r.RemoteAddr, route)
+	s := n.newLive(grant, n.pool.stream(grant.Seat), r.RemoteAddr, route, false)
 	s.stream = true
 	n.held[grant.Seat] = s
 	return s
@@ -219,11 +261,3 @@ func (n *Node) sweepStreams(quiet time.Duration) {
 }
 
 const streamQuiet = 2 * time.Minute
-
-func newLive(grant Grant, address netip.Prefix, peer, route string) *live {
-	now := time.Now().Unix()
-	s := &live{grant: grant, address: address, peer: peer, since: now}
-	s.lastSeen.Store(now)
-	s.route.Store(&route)
-	return s
-}

@@ -53,12 +53,8 @@ CREATE INDEX IF NOT EXISTS idx_clients_group ON clients(group_id);
 
 CREATE TABLE IF NOT EXISTS revisions (
     number        INTEGER PRIMARY KEY,
-    created_at    INTEGER NOT NULL,
-    published_at  INTEGER NOT NULL DEFAULT 0,
-    state_json    TEXT    NOT NULL
+    created_at    INTEGER NOT NULL
 );
-
-CREATE INDEX IF NOT EXISTS idx_revisions_published ON revisions(published_at);
 
 CREATE TABLE IF NOT EXISTS network (
     id              INTEGER PRIMARY KEY CHECK (id = 1),
@@ -96,15 +92,6 @@ CREATE TABLE IF NOT EXISTS dns_records (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_dns_records_suffix ON dns_records(suffix);
-
-CREATE TABLE IF NOT EXISTS node_state (
-    node_id           INTEGER PRIMARY KEY,
-    applied_revision  INTEGER NOT NULL DEFAULT 0,
-    staged_revision   INTEGER NOT NULL DEFAULT 0,
-    status            TEXT    NOT NULL DEFAULT 'unknown',
-    last_seen         INTEGER NOT NULL DEFAULT 0,
-    epoch             INTEGER NOT NULL DEFAULT 0
-);
 
 CREATE TABLE IF NOT EXISTS client_traffic (
     client_id   INTEGER NOT NULL,
@@ -154,15 +141,8 @@ CREATE TABLE IF NOT EXISTS exit_log (
     last_seen  INTEGER NOT NULL DEFAULT 0,
     up         INTEGER NOT NULL DEFAULT 0,
     down       INTEGER NOT NULL DEFAULT 0,
+    epoch      INTEGER NOT NULL DEFAULT 0,
+    last_up    INTEGER NOT NULL DEFAULT 0,
+    last_down  INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (client_id, node_id)
 );
-
-CREATE TABLE IF NOT EXISTS node_metrics (
-    node_id  INTEGER NOT NULL,
-    metric   TEXT    NOT NULL,
-    t        INTEGER NOT NULL,
-    v        REAL    NOT NULL,
-    PRIMARY KEY (node_id, metric, t)
-);
-
-CREATE INDEX IF NOT EXISTS idx_node_metrics_window ON node_metrics(node_id, metric, t);

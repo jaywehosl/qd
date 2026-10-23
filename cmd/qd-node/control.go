@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jaywehosl/qd/internal/blocklist"
@@ -41,13 +43,12 @@ type controlState struct {
 	key        string
 	id         int
 	port       int
-	db         *store.DB
+	base       atomic.Pointer[store.DB]
 	dbPath     string
 	tookAt     time.Time
 	tookChunks int
-	gaveAt     time.Time
-	gaveChunks int
 	started    time.Time
+	syncing    sync.Mutex
 	metrics    *metrics
 	logs       *logRing
 	restart    func()
@@ -77,22 +78,22 @@ var clientOps = map[string]bool{
 	"dns":    true,
 }
 
+func (state *controlState) data() *store.DB { return state.base.Load() }
+
 func (state *controlState) mayAdminister(auth string) bool {
-	clients, err := state.db.Clients()
+	if auth == "" {
+		return false
+	}
+	clients, err := state.data().Clients()
 	if err != nil {
 		return false
 	}
-	seen := false
 	for _, c := range clients {
-		if !c.Admin || !c.Enable {
-			continue
-		}
-		seen = true
-		if auth != "" && auth == c.UUID {
+		if c.Admin && c.Enable && auth == c.UUID {
 			return true
 		}
 	}
-	return !seen
+	return false
 }
 
 func handleControl(state *controlState, req request) response {
@@ -106,7 +107,7 @@ func handleControl(state *controlState, req request) response {
 
 	switch req.Op {
 	case "hello":
-		revision, _ := state.db.Version()
+		revision, _ := state.data().Version()
 		latest := state.metrics.Latest()
 		return reply(req, nodeInfo{
 			CPUPct:    latest.CPU,
@@ -132,44 +133,39 @@ func handleControl(state *controlState, req request) response {
 		return reply(req, state.whoami(body.Token, body.deviceClaim))
 
 	case "nodes.list":
-		return read(req, state.db.Nodes)
+		return read(req, state.data().Nodes)
 	case "entrypoints.list":
-		return read(req, state.db.Entrypoints)
+		return read(req, state.data().Entrypoints)
 	case "groups.list":
-		return read(req, state.db.Groups)
+		return read(req, state.data().Groups)
 	case "clients.list":
-		return read(req, state.db.Clients)
+		return read(req, state.data().Clients)
 
 	case "nodes.save":
-		answer := state.wrote(merged(state, req, state.db.Nodes,
-			func(n netstate.Node) int { return n.ID }, state.db.SaveNode), true)
+		answer := state.wrote(merged(state, req, state.data().Nodes,
+			func(n netstate.Node) int { return n.ID }, state.data().SaveNode), true)
 		state.followPort()
 		return answer
 	case "entrypoints.save":
-		return state.wrote(merged(state, req, state.db.Entrypoints,
-			func(e netstate.Entrypoint) int { return e.ID }, state.db.SaveEntrypoint), true)
+		return state.wrote(merged(state, req, state.data().Entrypoints,
+			func(e netstate.Entrypoint) int { return e.ID }, state.data().SaveEntrypoint), true)
 	case "groups.save":
-		return state.wrote(merged(state, req, state.db.Groups,
-			func(g netstate.Group) int { return g.ID }, state.db.SaveGroup), false)
+		return state.wrote(merged(state, req, state.data().Groups,
+			func(g netstate.Group) int { return g.ID }, state.data().SaveGroup), false)
 	case "clients.save":
-		var want struct {
-			ID     int  `json:"id"`
-			Admin  bool `json:"admin"`
-			Enable bool `json:"enable"`
-		}
-		json.Unmarshal(req.Body, &want)
-		if why := state.lastAdmin(want.ID, want.Admin && want.Enable); why != "" {
+		id, stays := state.adminAfter(req.Body)
+		if why := state.lastAdmin(id, stays); why != "" {
 			return response{OK: false, Error: why}
 		}
-		return state.wrote(merged(state, req, state.db.Clients,
-			func(c netstate.Client) int { return c.ID }, state.db.SaveClient), false)
+		return state.wrote(merged(state, req, state.data().Clients,
+			func(c netstate.Client) int { return c.ID }, state.data().SaveClient), false)
 
 	case "nodes.delete":
-		return state.wrote(remove(state, req, state.db.DeleteNode), true)
+		return state.wrote(remove(state, req, state.data().DeleteNode), true)
 	case "entrypoints.delete":
-		return state.wrote(remove(state, req, state.db.DeleteEntrypoint), true)
+		return state.wrote(remove(state, req, state.data().DeleteEntrypoint), true)
 	case "groups.delete":
-		return state.wrote(remove(state, req, state.db.DeleteGroup), false)
+		return state.wrote(remove(state, req, state.data().DeleteGroup), false)
 	case "clients.delete":
 		var going struct {
 			ID int `json:"id"`
@@ -178,7 +174,7 @@ func handleControl(state *controlState, req request) response {
 		if why := state.lastAdmin(going.ID, false); why != "" {
 			return response{OK: false, Error: why}
 		}
-		return state.wrote(remove(state, req, state.db.DeleteClient), false)
+		return state.wrote(remove(state, req, state.data().DeleteClient), false)
 
 	case "status":
 		return reply(req, state.machineStatus())
@@ -213,7 +209,7 @@ func handleControl(state *controlState, req request) response {
 			Sessions []uint32 `json:"sessions"`
 		}
 		json.Unmarshal(req.Body, &body)
-		clients, _ := state.db.Clients()
+		clients, _ := state.data().Clients()
 		owner := map[uint32]int{}
 		for _, c := range clients {
 			if c.UUID != "" {
@@ -223,7 +219,7 @@ func handleControl(state *controlState, req request) response {
 		for _, id := range body.Sessions {
 			state.node.Reset(id)
 			if client, known := owner[id]; known {
-				state.db.ResetTraffic(client)
+				state.data().ResetTraffic(client)
 			}
 		}
 		return reply(req, map[string]int{"reset": len(body.Sessions)})
@@ -237,7 +233,7 @@ func handleControl(state *controlState, req request) response {
 		if err := json.Unmarshal(req.Body, &body); err != nil {
 			return response{OK: false, Error: err.Error()}
 		}
-		if err := state.db.BlockDevice(body.ClientID, body.Fingerprint, body.Blocked); err != nil {
+		if err := state.data().BlockDevice(body.ClientID, body.Fingerprint, body.Blocked); err != nil {
 			return response{OK: false, Error: err.Error()}
 		}
 		state.bumpAfterWrite()
@@ -251,7 +247,7 @@ func handleControl(state *controlState, req request) response {
 		if err := json.Unmarshal(req.Body, &body); err != nil {
 			return response{OK: false, Error: err.Error()}
 		}
-		gone, err := state.db.ForgetDevice(body.ClientID, body.Fingerprint)
+		gone, err := state.data().ForgetDevice(body.ClientID, body.Fingerprint)
 		if err != nil {
 			return response{OK: false, Error: err.Error()}
 		}
@@ -265,7 +261,7 @@ func handleControl(state *controlState, req request) response {
 		if err := json.Unmarshal(req.Body, &body); err != nil {
 			return response{OK: false, Error: err.Error()}
 		}
-		gone, err := state.db.ForgetExit(body.ClientID, body.NodeID)
+		gone, err := state.data().ForgetExit(body.ClientID, body.NodeID)
 		if err != nil {
 			return response{OK: false, Error: err.Error()}
 		}
@@ -281,9 +277,9 @@ func handleControl(state *controlState, req request) response {
 		}
 		gone, err := 0, error(nil)
 		if body.IP == "" {
-			gone, err = state.db.ForgetAddresses(body.ClientID)
+			gone, err = state.data().ForgetAddresses(body.ClientID)
 		} else {
-			gone, err = state.db.ForgetAddress(body.ClientID, body.IP)
+			gone, err = state.data().ForgetAddress(body.ClientID, body.IP)
 		}
 		if err != nil {
 			return response{OK: false, Error: err.Error()}
@@ -291,14 +287,14 @@ func handleControl(state *controlState, req request) response {
 		return reply(req, map[string]int{"forgotten": gone})
 
 	case "network.settings":
-		settings, err := state.db.NetworkSettings()
+		settings, err := state.data().NetworkSettings()
 		if err != nil {
 			return response{OK: false, Error: err.Error()}
 		}
 		return reply(req, settings)
 
 	case "network.settings.save":
-		body, err := state.db.NetworkSettings()
+		body, err := state.data().NetworkSettings()
 		if err != nil {
 			return response{OK: false, Error: err.Error()}
 		}
@@ -311,12 +307,12 @@ func handleControl(state *controlState, req request) response {
 			return reply(req, was)
 		}
 
-		if err := state.db.SaveNetworkSettings(body); err != nil {
+		if err := state.data().SaveNetworkSettings(body); err != nil {
 			return response{OK: false, Error: err.Error()}
 		}
 		state.bumpAfterWrite()
 		state.reloadResolver()
-		settings, err := state.db.NetworkSettings()
+		settings, err := state.data().NetworkSettings()
 		if err != nil {
 			return response{OK: false, Error: err.Error()}
 		}
@@ -336,14 +332,14 @@ func handleControl(state *controlState, req request) response {
 		return state.resolve(req)
 
 	case "dns.records":
-		return read(req, state.db.DNSRecords)
+		return read(req, state.data().DNSRecords)
 
 	case "dns.records.save":
 		var body store.DNSRecord
 		if err := json.Unmarshal(req.Body, &body); err != nil {
 			return response{OK: false, Error: err.Error()}
 		}
-		id, err := state.db.SaveDNSRecord(body)
+		id, err := state.data().SaveDNSRecord(body)
 		if err != nil {
 			return response{OK: false, Error: err.Error()}
 		}
@@ -358,7 +354,7 @@ func handleControl(state *controlState, req request) response {
 		if err := json.Unmarshal(req.Body, &body); err != nil {
 			return response{OK: false, Error: err.Error()}
 		}
-		if err := state.db.DeleteDNSRecord(body.ID); err != nil {
+		if err := state.data().DeleteDNSRecord(body.ID); err != nil {
 			return response{OK: false, Error: err.Error()}
 		}
 		state.bumpAfterWrite()
@@ -390,23 +386,23 @@ func handleControl(state *controlState, req request) response {
 		return reply(req, map[string]bool{"flushed": true})
 
 	case "clients.stats":
-		traffic, err := state.db.Traffic()
+		traffic, err := state.data().Traffic()
 		if err != nil {
 			return response{OK: false, Error: err.Error()}
 		}
-		addresses, err := state.db.Addresses()
+		addresses, err := state.data().Addresses()
 		if err != nil {
 			return response{OK: false, Error: err.Error()}
 		}
-		devices, err := state.db.Devices()
+		devices, err := state.data().Devices()
 		if err != nil {
 			return response{OK: false, Error: err.Error()}
 		}
-		mine, err := state.db.TrafficFrom(state.id)
+		mine, err := state.data().TrafficFrom(state.id)
 		if err != nil {
 			return response{OK: false, Error: err.Error()}
 		}
-		exits, err := state.db.Exits()
+		exits, err := state.data().Exits()
 		if err != nil {
 			return response{OK: false, Error: err.Error()}
 		}
@@ -525,21 +521,17 @@ func (state *controlState) whoami(token string, claim deviceClaim) map[string]an
 		return map[string]any{"admin": false}
 	}
 
-	network, err := state.db.LoadState()
+	network, err := state.data().LoadState()
 	if err != nil {
 		return map[string]any{"admin": false}
 	}
 
-	anyAdmin := false
 	for _, c := range network.Clients {
-		if c.Admin {
-			anyAdmin = true
-		}
 		if c.UUID != token {
 			continue
 		}
 
-		settings, _ := state.db.NetworkSettings()
+		settings, _ := state.data().NetworkSettings()
 		group := network.Group(c.GroupID)
 		expired := c.ExpiryAt > 0 && c.ExpiryAt < time.Now().UnixMilli()
 		answer := map[string]any{
@@ -553,7 +545,6 @@ func (state *controlState) whoami(token string, claim deviceClaim) map[string]an
 			"id":             c.ID,
 			"enable":         c.Enable,
 			"expired":        expired,
-			"expiryTime":     c.ExpiryAt,
 			"carried":        c.Enable && !expired && state.enable && state.servesClients() && state.carries(network, group),
 			"entrypoints":    reachableBy(network, group),
 		}
@@ -582,13 +573,6 @@ func (state *controlState) whoami(token string, claim deviceClaim) map[string]an
 		return answer
 	}
 
-	if !anyAdmin && token == state.key {
-		return map[string]any{
-			"known": true, "admin": true, "tag": "network key",
-			"bootstrap": true, "enable": true, "carried": false,
-		}
-	}
-
 	return map[string]any{"known": false, "admin": false, "carried": false}
 }
 
@@ -604,7 +588,7 @@ func (state *controlState) wrote(answer response, self bool) response {
 }
 
 func (state *controlState) selfRow() (netstate.Node, bool) {
-	nodes, err := state.db.Nodes()
+	nodes, err := state.data().Nodes()
 	if err != nil {
 		return netstate.Node{}, false
 	}
@@ -701,7 +685,7 @@ func (state *controlState) followPort() {
 	if state.id == 0 {
 		return
 	}
-	rows, err := state.db.Nodes()
+	rows, err := state.data().Nodes()
 	if err != nil {
 		return
 	}
@@ -746,7 +730,7 @@ func merged[T any](state *controlState, req request, list func() ([]T, error),
 
 	after, _ := json.Marshal(row)
 	if found && bytes.Equal(before, after) {
-		revision, _ := state.db.Version()
+		revision, _ := state.data().Version()
 		return reply(req, map[string]int{"id": head.ID, "revision": revision})
 	}
 
@@ -755,7 +739,7 @@ func merged[T any](state *controlState, req request, list func() ([]T, error),
 	if err != nil {
 		return response{OK: false, Error: err.Error()}
 	}
-	revision, _ := state.db.Settle(wanted(req), now)
+	revision, _ := state.data().Settle(wanted(req), now)
 	return reply(req, map[string]int{"id": id, "revision": revision})
 }
 
@@ -769,7 +753,7 @@ func remove(state *controlState, req request, drop func(int) error) response {
 	if err := drop(body.ID); err != nil && !errors.Is(err, store.ErrNotFound) {
 		return response{OK: false, Error: err.Error()}
 	}
-	revision, _ := state.db.Settle(wanted(req), time.Now().UnixMilli())
+	revision, _ := state.data().Settle(wanted(req), time.Now().UnixMilli())
 	return reply(req, map[string]int{"id": body.ID, "revision": revision})
 }
 
@@ -790,7 +774,7 @@ func reply(req request, body any) response {
 }
 
 func (state *controlState) bumpAfterWrite() {
-	state.db.Bump(time.Now().UnixMilli())
+	state.data().Bump(time.Now().UnixMilli())
 }
 
 func (state *controlState) mySession() uint32 {
@@ -812,12 +796,12 @@ var writeOps = map[string]bool{
 }
 
 func (state *controlState) traceWrite(req request) func() {
-	was, _ := state.db.Version()
+	was, _ := state.data().Version()
 	began := time.Now()
 	size := len(req.Body)
 
 	return func() {
-		now, _ := state.db.Version()
+		now, _ := state.data().Version()
 		took := time.Since(began)
 		if now != was {
 			fmt.Printf("write      %-22s body %5d B  revision %d -> %d  in %s\n",
@@ -867,8 +851,28 @@ func askNode(state *controlState, op string, body []byte, auth string) (any, err
 	return json.RawMessage(answer.Body), nil
 }
 
+func (state *controlState) adminAfter(body []byte) (int, bool) {
+	var head struct {
+		ID int `json:"id"`
+	}
+	json.Unmarshal(body, &head)
+	var row netstate.Client
+	if head.ID > 0 {
+		if clients, err := state.data().Clients(); err == nil {
+			for _, c := range clients {
+				if c.ID == head.ID {
+					row = c
+					break
+				}
+			}
+		}
+	}
+	json.Unmarshal(body, &row)
+	return head.ID, row.Admin && row.Enable
+}
+
 func (state *controlState) lastAdmin(id int, stays bool) string {
-	clients, err := state.db.Clients()
+	clients, err := state.data().Clients()
 	if err != nil {
 		return ""
 	}

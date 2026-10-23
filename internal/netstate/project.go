@@ -62,7 +62,12 @@ func (s *State) clientsReaching(nodeID int) []CfgClient {
 		}
 		for _, id := range g.EntrypointIDs {
 			if local[id] {
-				out = append(out, CfgClient{UUID: c.UUID, ExpiryAt: c.ExpiryAt, AllowExit: c.MayExit(g), AllowDev: g.AllowDev, AllowCore: g.AllowCore})
+				limit := c.DeviceLimit
+				if limit <= 0 {
+					limit = g.DeviceLimit
+				}
+				out = append(out, CfgClient{ID: c.ID, UUID: c.UUID, ExpiryAt: c.ExpiryAt, DeviceLimit: limit,
+					AllowExit: c.MayExit(g), AllowDev: g.AllowDev, AllowCore: g.AllowCore})
 				break
 			}
 		}

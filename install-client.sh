@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 REPO="jaywehosl/qd"
+UPDATE_KEY="1dq/OBvDoYanXq7Jdgh7QzF64xDoDP1lFj1Uo3mvfdw="
 PREFIX="/opt/qd-client"
 ASSET="qd-client-linux-amd64.tar.gz"
 
@@ -24,6 +25,17 @@ step() { printf "\n  ${CYA}${BOLD}>${OFF} ${BOLD}%s${OFF}\n" "$*" >&2; }
 good() { printf "    ${GRN}ok${OFF}  %s\n" "$*" >&2; }
 warn() { printf "    ${YEL}!${OFF}   %s\n" "$*" >&2; }
 die()  { printf "\n  ${RED}x${OFF}   %s\n\n" "$*" >&2; exit 1; }
+signed() {
+    local pub sig ok=1
+    pub="$(mktemp)"; sig="$(mktemp)"
+    { printf '\060\052\060\005\006\003\053\145\160\003\041\000'; printf '%s' "$UPDATE_KEY" | base64 -d; } >"$pub"
+    if base64 -d <"$1.sig" >"$sig" 2>/dev/null &&
+        openssl pkeyutl -verify -pubin -keyform DER -inkey "$pub" -rawin -in "$1" -sigfile "$sig" >/dev/null 2>&1; then
+        ok=0
+    fi
+    rm -f "$pub" "$sig"
+    return $ok
+}
 
 usage() {
     cat <<'USAGE'
@@ -67,6 +79,7 @@ has_webkit() { ldconfig -p 2>/dev/null | grep -F "libwebkit2gtk-4.1.so.0" >/dev/
 install_packages() {
     local want=() apt=() dnf=() pac=() zyp=()
     command -v curl >/dev/null 2>&1 || { apt+=(curl ca-certificates); dnf+=(curl); pac+=(curl); zyp+=(curl); }
+    command -v openssl >/dev/null 2>&1 || { apt+=(openssl); dnf+=(openssl); pac+=(openssl); zyp+=(openssl); }
     command -v ip >/dev/null 2>&1   || { apt+=(iproute2); dnf+=(iproute); pac+=(iproute2); zyp+=(iproute2); }
     command -v nft >/dev/null 2>&1  || { apt+=(nftables); dnf+=(nftables); pac+=(nftables); zyp+=(nftables); }
     has_webkit                      || { apt+=(libwebkit2gtk-4.1-0); dnf+=(webkit2gtk4.1); pac+=(webkit2gtk-4.1); zyp+=(libwebkit2gtk-4_1-0); }
@@ -83,10 +96,10 @@ install_packages() {
 
     step "Checking what the client needs"
     if [ ${#apt[@]} -eq 0 ]; then
-        good "iproute2, nftables and WebKitGTK 4.1 are in place"
+        good "curl, openssl, iproute2, nftables and WebKitGTK 4.1 are in place"
         return 0
     fi
-    [ ${#want[@]} -gt 0 ] || die "no apt, dnf, pacman or zypper here; install curl, iproute2, nftables and WebKitGTK 4.1 by hand"
+    [ ${#want[@]} -gt 0 ] || die "no apt, dnf, pacman or zypper here; install curl, openssl, iproute2, nftables and WebKitGTK 4.1 by hand"
 
     say "installing ${want[*]}"
     local log
@@ -123,8 +136,16 @@ resolve_version() {
 
 verify() {
     if [ ! -f "$STAGE/checksums.txt" ]; then
+        [ -n "$LOCAL_DIR" ] || die "the release carries no signed checksums, refusing to install"
         warn "no checksums.txt next to the archive, installing unverified"
         return 0
+    fi
+    if [ -f "$STAGE/checksums.txt.sig" ]; then
+        signed "$STAGE/checksums.txt" || die "the checksums are not signed by the qd release key, refusing to install"
+        good "release signature verified"
+    else
+        [ -n "$LOCAL_DIR" ] || die "the release carries no signed checksums, refusing to install"
+        warn "no checksums.txt.sig, the checksums are unsigned"
     fi
     if ( cd "$STAGE" && grep -E "[ *]$ASSET\$" checksums.txt | sha256sum -c --status - ); then
         good "checksums verified"
@@ -140,6 +161,7 @@ fetch() {
         [ -f "$LOCAL_DIR/$ASSET" ] || die "no $ASSET in $LOCAL_DIR"
         cp "$LOCAL_DIR/$ASSET" "$STAGE/"
         [ -f "$LOCAL_DIR/checksums.txt" ] && cp "$LOCAL_DIR/checksums.txt" "$STAGE/"
+        [ -f "$LOCAL_DIR/checksums.txt.sig" ] && cp "$LOCAL_DIR/checksums.txt.sig" "$STAGE/"
     else
         local tag base
         tag="$(resolve_version)"
@@ -148,6 +170,7 @@ fetch() {
         curl -fsSL -o "$STAGE/$ASSET" "$base/$ASSET" \
             || die "cannot fetch $ASSET of $tag; if GitHub is unreachable, copy it over and pass --from DIR"
         curl -fsSL -o "$STAGE/checksums.txt" "$base/checksums.txt" 2>/dev/null || rm -f "$STAGE/checksums.txt"
+        curl -fsSL -o "$STAGE/checksums.txt.sig" "$base/checksums.txt.sig" 2>/dev/null || rm -f "$STAGE/checksums.txt.sig"
     fi
     verify
     tar -xzf "$STAGE/$ASSET" -C "$STAGE" || die "the archive is damaged"

@@ -163,6 +163,7 @@ func toLocalTime(line string) string {
 }
 
 type dbChunkReply struct {
+	ID    string `json:"id"`
 	Size  int64  `json:"size"`
 	Chunk []byte `json:"chunk"`
 	EOF   bool   `json:"eof"`
@@ -190,8 +191,9 @@ func (a *API) freshest() (int, error) {
 
 func (a *API) pullDB(id int) ([]byte, error) {
 	var out []byte
+	copyID := ""
 	for {
-		body, err := a.fleet.Ask(id, "db.get", map[string]int64{"offset": int64(len(out))})
+		body, err := a.fleet.Ask(id, "db.get", map[string]any{"offset": int64(len(out)), "id": copyID})
 		if err != nil {
 			return nil, err
 		}
@@ -199,6 +201,7 @@ func (a *API) pullDB(id int) ([]byte, error) {
 		if err := json.Unmarshal(body, &reply); err != nil {
 			return nil, err
 		}
+		copyID = reply.ID
 		out = append(out, reply.Chunk...)
 		if !reply.EOF && len(reply.Chunk) > 0 {
 			continue

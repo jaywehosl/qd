@@ -1,5 +1,5 @@
 type Bridge = {
-  qdTitleBar?: (height: number, holes: number[][]) => void;
+  qdTitleBar?: (height: number) => void;
   qdWindowCommand?: (what: string) => void;
   qdWindowGrab?: (edge: string) => void;
 };
@@ -25,7 +25,7 @@ function tellBar() {
   const tell = bridge().qdTitleBar;
   const bar = document.querySelector('.header-container');
   if (!tell || !bar) return;
-  void tell(Math.round(bar.getBoundingClientRect().bottom), []);
+  void tell(Math.round(bar.getBoundingClientRect().bottom));
 }
 
 function dragArea() {

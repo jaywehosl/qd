@@ -12,6 +12,8 @@ type Meter struct {
 	Back     atomic.Uint64
 	BytesOut atomic.Uint64
 	BytesIn  atomic.Uint64
+	Shed     atomic.Uint64
+	Failed   atomic.Uint64
 }
 
 func (m *Meter) carried(n int) {

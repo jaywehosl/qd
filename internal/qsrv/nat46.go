@@ -21,6 +21,7 @@ var synthetic = ippkt.StandIn
 const (
 	natSlotBits = 20
 	natIdle     = time.Hour
+	natReuse    = 5 * time.Minute
 )
 
 type pair struct {
@@ -80,8 +81,8 @@ func (n *nat46) stand(v6 netip.Addr) (netip.Addr, bool) {
 	}
 	base := n.own.Addr().As4()
 	room := uint32(1)<<(32-n.own.Bits()) - 2
-	if len(n.byV4) >= int(room) {
-		n.forgetOldestLocked()
+	if len(n.byV4) >= int(room) && !n.forgetOldestLocked(now-int64(natReuse.Seconds())) {
+		return netip.Addr{}, false
 	}
 
 	var v4 netip.Addr
@@ -118,7 +119,7 @@ func (n *nat46) real(v4 netip.Addr) (netip.Addr, bool) {
 	return held.v6, true
 }
 
-func (n *nat46) forgetOldestLocked() {
+func (n *nat46) forgetOldestLocked(before int64) bool {
 	var oldest netip.Addr
 	var since int64
 
@@ -128,13 +129,14 @@ func (n *nat46) forgetOldestLocked() {
 			oldest, since = v4, at
 		}
 	}
-	if !oldest.IsValid() {
-		return
+	if !oldest.IsValid() || since > before {
+		return false
 	}
 	if p := n.byV4[oldest]; p != nil {
 		delete(n.byV6, p.v6)
 	}
 	delete(n.byV4, oldest)
+	return true
 }
 
 func (n *nat46) sweep() int {

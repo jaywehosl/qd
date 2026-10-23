@@ -4,11 +4,16 @@ package main
 
 import (
 	"bufio"
+	"log"
 	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/jaywehosl/qd/internal/quiet"
 )
+
+var failing = os.Stderr
 
 type logRing struct {
 	mu    sync.RWMutex
@@ -24,8 +29,10 @@ func captureOutput(max int) *logRing {
 		return ring
 	}
 	console := os.Stdout
+	failing = os.Stderr
 	os.Stdout = write
 	os.Stderr = write
+	log.SetOutput(quiet.Writer(write))
 
 	go func() {
 		scanner := bufio.NewScanner(read)

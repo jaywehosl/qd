@@ -64,11 +64,20 @@ func sortNets(nets []Net) (few []Net, many []spans) {
 			few = append(few, group...)
 			continue
 		}
-		sort.Slice(group, func(i, j int) bool { return group[i].Prefix.Addr().Compare(group[j].Prefix.Addr()) < 0 })
+		sort.Slice(group, func(i, j int) bool {
+			return group[i].Prefix.Masked().Addr().Compare(group[j].Prefix.Masked().Addr()) < 0
+		})
 		set := spans{entry: group[0].Entry}
 		for _, n := range group {
-			set.lo = append(set.lo, n.Prefix.Masked().Addr())
-			set.hi = append(set.hi, last(n.Prefix))
+			lo, hi := n.Prefix.Masked().Addr(), last(n.Prefix)
+			if at := len(set.hi) - 1; at >= 0 && set.hi[at].Is4() == lo.Is4() && set.hi[at].Compare(lo) >= 0 {
+				if hi.Compare(set.hi[at]) > 0 {
+					set.hi[at] = hi
+				}
+				continue
+			}
+			set.lo = append(set.lo, lo)
+			set.hi = append(set.hi, hi)
 		}
 		many = append(many, set)
 	}

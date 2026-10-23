@@ -49,7 +49,7 @@ func TestSchemaApplies(t *testing.T) {
 	for _, table := range []string{
 		"nodes", "entrypoints", "groups", "group_entrypoints", "clients",
 		"revisions", "network",
-		"node_state", "client_traffic", "devices", "ip_log", "node_metrics",
+		"client_traffic", "devices", "ip_log", "exit_log",
 	} {
 		if got := count(t, d, table); got != 0 {
 			t.Fatalf("fresh %s has %d rows", table, got)
@@ -71,7 +71,7 @@ func TestSchemaIsIdempotent(t *testing.T) {
 func TestLoadStateFeedsTheProjection(t *testing.T) {
 	d := open(t)
 	seed(t, d)
-	if _, err := d.Touch(1); err != nil {
+	if _, err := d.Bump(1); err != nil {
 		t.Fatal(err)
 	}
 

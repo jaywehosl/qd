@@ -23,7 +23,7 @@ export default function NodeSelect({ nodes, value, onChange, empty }: NodeSelect
             style={{ '--i': i } as React.CSSProperties}
             onClick={() => onChange(n.id)}
           >
-            {n.name || n.address}
+            {n.tag || n.address}
           </Tag>
         );
       })}

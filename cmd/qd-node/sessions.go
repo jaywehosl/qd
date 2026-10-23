@@ -12,15 +12,29 @@ import (
 	"github.com/jaywehosl/qd/internal/qdcrypt"
 )
 
+const sessionSweep = 30 * time.Second
+
+func (state *controlState) keepSessions() {
+	tick := time.NewTicker(sessionSweep)
+	defer tick.Stop()
+	for range tick.C {
+		state.syncSessions()
+	}
+}
+
 func (state *controlState) syncSessions() {
+	state.syncing.Lock()
+	defer state.syncing.Unlock()
+
 	state.followUpdates()
-	network, err := state.db.LoadState()
+	network, err := state.data().LoadState()
 	if err != nil {
 		return
 	}
 	now := time.Now().UnixMilli()
 	want := map[uint32]bool{}
 	builds := map[uint32][2]bool{}
+	owners := map[uint32]owner{}
 	linked := map[uint32]bool{}
 	peers, exits := 0, 0
 
@@ -34,8 +48,10 @@ func (state *controlState) syncSessions() {
 			if c.ExpiryAt > 0 && c.ExpiryAt < now {
 				continue
 			}
-			want[qdcrypt.SessionID(c.UUID)] = c.AllowExit
-			builds[qdcrypt.SessionID(c.UUID)] = [2]bool{c.AllowDev, c.AllowCore}
+			id := qdcrypt.SessionID(c.UUID)
+			want[id] = c.AllowExit
+			builds[id] = [2]bool{c.AllowDev, c.AllowCore}
+			owners[id] = owner{client: c.ID, limit: c.DeviceLimit}
 			if c.AllowExit {
 				exits++
 			}
@@ -50,6 +66,7 @@ func (state *controlState) syncSessions() {
 	}
 
 	state.gate.nodes(linked)
+	state.gate.claim(owners)
 	live := state.gate.list()
 	added, removed := 0, 0
 	for id, allowExit := range want {
@@ -90,14 +107,19 @@ func (state *controlState) syncSessions() {
 
 func (state *controlState) sessionStats() []sessionStat {
 	live := sampleSessions(state.node)
-	out := make([]sessionStat, 0, len(live))
-	for id, s := range live {
-		since, lastSeen, checked, fingerprint, addresses := state.watch.of(id)
-		out = append(out, sessionStat{
-			Session: id, Client: s.Client, Transit: s.Transit, LastSeen: lastSeen,
-			Since: since, Checked: checked, Device: fingerprint, Seen: addresses,
-			Up: s.Up, Down: s.Down, PktUp: s.PktUp, PktDown: s.PktDown,
-		})
+	totals := state.node.Totals()
+	out := make([]sessionStat, 0, len(totals))
+	for _, t := range totals {
+		since, lastSeen, checked, fingerprint, addresses := state.watch.of(t.Session)
+		stat := sessionStat{
+			Session: t.Session, Client: live[t.Session].Client, Transit: t.Transit, LastSeen: lastSeen,
+			Since: since, Checked: checked, Device: fingerprint,
+			Up: t.Up, Down: t.Down, PktUp: t.PktUp, PktDown: t.PktDown,
+		}
+		if !t.Transit {
+			stat.Seen = addresses
+		}
+		out = append(out, stat)
 	}
 	return out
 }
@@ -118,7 +140,7 @@ type sessionStat struct {
 }
 
 func (state *controlState) followUpdates() {
-	settings, err := state.db.NetworkSettings()
+	settings, err := state.data().NetworkSettings()
 	if err != nil {
 		return
 	}

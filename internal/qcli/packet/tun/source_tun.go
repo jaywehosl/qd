@@ -178,8 +178,8 @@ func (s *Source) Close() error {
 	s.closed = true
 	s.mu.Unlock()
 
-	err := unix.Close(s.fd)
 	s.busy.Wait()
+	err := unix.Close(s.fd)
 
 	if err != nil && !errors.Is(err, os.ErrClosed) {
 		return err

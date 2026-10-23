@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 REPO="jaywehosl/qd"
+UPDATE_KEY="1dq/OBvDoYanXq7Jdgh7QzF64xDoDP1lFj1Uo3mvfdw="
 PREFIX="/opt/qd"
 STATE="/var/lib/qd"
 DB="$STATE/node.db"
@@ -19,12 +20,12 @@ PORT=443
 DOMAIN=""
 EMAIL=""
 ADMIN_TAG=""
-ADMIN_UUID=""
+ADMIN_UUID="${QD_ADMIN_UUID:-}"
 GROUP_TAG=""
 ADDRESS=""
-NETWORK_KEY=""
+NETWORK_KEY="${QD_NETWORK_KEY:-}"
 NODE_TAG=""
-NODE_UUID=""
+NODE_UUID="${QD_NODE_UUID:-}"
 NODE_ID=""
 NAT_SLOT=""
 ROLE="ingress"
@@ -55,6 +56,17 @@ step() { printf "\n  ${CYA}${BOLD}>${OFF} ${BOLD}%s${OFF}\n" "$*" >&2; }
 good() { printf "    ${GRN}ok${OFF}  %s\n" "$*" >&2; }
 warn() { printf "    ${YEL}!${OFF}   %s\n" "$*" >&2; }
 die()  { printf "\n  ${RED}x${OFF}   %s\n\n" "$*" >&2; exit 1; }
+signed() {
+    local pub sig ok=1
+    pub="$(mktemp)"; sig="$(mktemp)"
+    { printf '\060\052\060\005\006\003\053\145\160\003\041\000'; printf '%s' "$UPDATE_KEY" | base64 -d; } >"$pub"
+    if base64 -d <"$1.sig" >"$sig" 2>/dev/null &&
+        openssl pkeyutl -verify -pubin -keyform DER -inkey "$pub" -rawin -in "$1" -sigfile "$sig" >/dev/null 2>&1; then
+        ok=0
+    fi
+    rm -f "$pub" "$sig"
+    return $ok
+}
 rule() { printf "  ${DIM}%s${OFF}\n" "--------------------------------------------------------" >&2; }
 
 banner() {
@@ -67,8 +79,8 @@ usage() {
 qd node installer.
 
 Run it with no arguments to start a new network: it asks for what it needs.
-Run it with --key and the rest to join an existing one: it asks nothing and
-writes exactly what the panel handed it.
+Run it with the command the panel hands out to join an existing network: it
+asks nothing and writes exactly what the panel handed it.
 
   --mode install|update|fresh|over|uninstall
                                      what to do when something is already here
@@ -79,7 +91,8 @@ writes exactly what the panel handed it.
   --domain NAME                      domain clients dial and the certificate is
                                      issued for; --address and --host mean the same
   --email ADDR                       e-mail Let's Encrypt registers against
-  --no-cert                          skip certbot, stand up self-signed
+  --no-cert                          skip certbot; clients refuse the node until it
+                                     has a certificate they trust (--cert, --key-file)
   --port N                           udp port
   --dns1 A --dns2 B                  upstream resolvers
   --dns-cache N --dns-min-ttl N --dns-max-ttl N --dns-stale N
@@ -90,15 +103,17 @@ Starting a network, asked when absent:
   --admin TAG --group TAG            the first administrator and the first group
 
 Joining a network, every value comes from the panel:
-  --key HEX                          the network key
+  --key HEX                          the network key, or QD_NETWORK_KEY in the environment
   --authority HOST:PORT              what this node answers as, default: domain:port
                                      the certificate is issued by this script itself
   --tag NAME --role ingress|egress   what this node is
-  --node-uuid UUID --node-id N       identity and number of this node
-  --admin-uuid UUID --admin TAG      the administrator that may reach it
+  --node-uuid UUID --node-id N       identity and number of this node, the uuid
+                                     also as QD_NODE_UUID
+  --admin-uuid UUID --admin TAG      the administrator that may reach it, the uuid
+                                     also as QD_ADMIN_UUID
 
 Modes when something is already installed:
-  update    keep the database, swap binary and object, roll back if it will not start
+  update    keep the database, swap the binary, roll back if it will not start
   fresh     back the database up, remove everything, build a new network
   over      overwrite the files, leave the database alone
   uninstall remove the node, its database and its unit
@@ -180,12 +195,15 @@ ask_number() {
 require_root() { [ "$(id -u)" -eq 0 ] || die "run this as root"; }
 
 require_tools() {
-    if ! command -v curl >/dev/null 2>&1; then
+    local missing=()
+    command -v curl >/dev/null 2>&1 || missing+=(curl)
+    command -v openssl >/dev/null 2>&1 || missing+=(openssl)
+    if [ ${#missing[@]} -gt 0 ]; then
         if command -v apt-get >/dev/null 2>&1; then
-            say "curl is missing, installing it"
-            apt-get update -qq && apt-get install -y -qq curl
+            say "${missing[*]} missing, installing"
+            apt-get update -qq && apt-get install -y -qq "${missing[@]}"
         else
-            die "curl is missing and this is not an apt system, install curl and run again"
+            die "${missing[*]} missing and this is not an apt system, install it and run again"
         fi
     fi
     command -v systemctl >/dev/null 2>&1 || die "no systemd here, this installer needs it"
@@ -389,6 +407,13 @@ stage_from_dir() {
 
     if [ -f "$dir/checksums.txt" ]; then
         cp "$dir/checksums.txt" "$STAGE/checksums.txt"
+        if [ -f "$dir/checksums.txt.sig" ]; then
+            cp "$dir/checksums.txt.sig" "$STAGE/checksums.txt.sig"
+            signed "$STAGE/checksums.txt" || die "the checksums in $dir are not signed by the qd release key, refusing to install"
+            good "release signature verified"
+        else
+            warn "no checksums.txt.sig in $dir, the checksums are unsigned"
+        fi
         if ( cd "$STAGE" && sed 's/qd-node-linux-amd64/qd-node/' checksums.txt | grep -E '[ *]qd-node$' | sha256sum -c --status - ); then
             good "checksums verified"
         else
@@ -410,14 +435,15 @@ fetch_release() {
     curl -fsSL -o "$STAGE/qd-node" "$base/qd-node-linux-amd64" \
         || die "cannot fetch the binary of $tag; if the release host is unreachable, copy the files over and pass --from DIR"
 
-    if curl -fsSL -o "$STAGE/checksums.txt" "$base/checksums.txt" 2>/dev/null; then
-        if ( cd "$STAGE" && sed 's/qd-node-linux-amd64/qd-node/' checksums.txt | grep -E '[ *]qd-node$' | sha256sum -c --status - ); then
-            good "checksums verified"
-        else
-            die "checksum mismatch, refusing to install"
-        fi
+    curl -fsSL -o "$STAGE/checksums.txt" "$base/checksums.txt" 2>/dev/null \
+        && curl -fsSL -o "$STAGE/checksums.txt.sig" "$base/checksums.txt.sig" 2>/dev/null \
+        || die "$tag carries no signed checksums, refusing to install"
+    signed "$STAGE/checksums.txt" || die "the checksums of $tag are not signed by the qd release key, refusing to install"
+    good "release signature verified"
+    if ( cd "$STAGE" && sed 's/qd-node-linux-amd64/qd-node/' checksums.txt | grep -E '[ *]qd-node$' | sha256sum -c --status - ); then
+        good "checksums verified"
     else
-        warn "this release carries no checksums.txt, installing unverified"
+        die "checksum mismatch, refusing to install"
     fi
     chmod 0755 "$STAGE/qd-node"
 }
@@ -481,11 +507,11 @@ choose_mode() {
 
 This machine already carries a node. Pick one:
 
-  1  update  keep the database and the network, swap binary and object only.
+  1  update  keep the database and the network, swap the binary only.
              Rewrites the unit and rolls back by itself if the pair will not start.
   2  fresh   back the database up, remove unit and files, build a NEW network.
              The current network key and every client on it stop working here.
-  3  over    overwrite binary and object, leave the database alone.
+  3  over    overwrite the binary, leave the database alone.
   4  remove  take qd off this machine entirely: unit, files, database.
   5  cancel
 
@@ -564,12 +590,6 @@ cap_journal() {
 SystemMaxUse=200M
 SystemMaxFileSize=20M
 JOURNALCONF
-
-    mkdir -p "/etc/systemd/system/$SERVICE.d"
-    cat >"/etc/systemd/system/$SERVICE.d/journal.conf" <<'UNITJOURNAL'
-[Service]
-LogsDirectoryMode=0750
-UNITJOURNAL
 
     systemctl restart systemd-journald >/dev/null 2>&1 || true
     journalctl --vacuum-size=200M >/dev/null 2>&1 || true
@@ -748,7 +768,7 @@ do_install() {
     if [ "$WANT_CERT" -eq 1 ]; then
         issue_certificate "$DOMAIN"
     else
-        say "no certificate asked for, the node stands up self-signed"
+        warn "no certificate asked for: clients refuse this node until it has one they trust"
     fi
     [ -n "$AUTHORITY" ] || AUTHORITY="$DOMAIN:$PORT"
 
@@ -893,7 +913,13 @@ do_uninstall() {
     systemctl disable --now "$SERVICE" >/dev/null 2>&1 || true
     sleep 2
     rm -f "$UNIT"
+    rm -rf "/etc/systemd/system/$SERVICE.d"
     systemctl daemon-reload >/dev/null 2>&1 || true
+
+    step "removing what the installer set up around it"
+    rm -f /etc/systemd/journald.conf.d/qd.conf /etc/sysctl.d/99-qd.conf /etc/letsencrypt/renewal-hooks/deploy/qd-node.sh
+    systemctl restart systemd-journald >/dev/null 2>&1 || true
+    sysctl --system >/dev/null 2>&1 || true
 
     step "removing files"
     rm -rf "$PREFIX" "$STATE" "$(dirname "$CONF")"

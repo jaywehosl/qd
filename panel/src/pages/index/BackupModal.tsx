@@ -12,10 +12,7 @@ async function waitForPanelBack(timeoutMs = 90000): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     await PromiseUtil.sleep(2500);
-    const res = await HttpUtil.get('/panel/api/server/status', undefined, {
-      silent: true,
-      skipAuthRedirect: true,
-    });
+    const res = await HttpUtil.get('/panel/api/server/status', undefined, { silent: true });
     if (res?.success) return true;
   }
   return false;
@@ -23,14 +20,12 @@ async function waitForPanelBack(timeoutMs = 90000): Promise<boolean> {
 
 interface BackupModalProps {
   open: boolean;
-  basePath: string;
   onClose: () => void;
 }
 
-export default function BackupModal({ open, basePath: _basePath, onClose }: BackupModalProps) {
+export default function BackupModal({ open, onClose }: BackupModalProps) {
   const { t } = useTranslation();
   const busyOverlay = useBusyOverlay();
-  const isPostgres = window.X_UI_DB_TYPE === 'postgres';
 
   async function exportDb() {
     markBackupDone();
@@ -55,7 +50,7 @@ export default function BackupModal({ open, basePath: _basePath, onClose }: Back
   function importDb() {
     const fileInput = document.createElement('input');
     fileInput.type = 'file';
-    fileInput.accept = isPostgres ? '.dump' : '.db';
+    fileInput.accept = '.db';
     fileInput.addEventListener('change', async (e) => {
       const dbFile = (e.target as HTMLInputElement).files?.[0];
       if (!dbFile) return;
@@ -72,8 +67,6 @@ export default function BackupModal({ open, basePath: _basePath, onClose }: Back
       try { localStorage.setItem(BOOT_BUSY_KEY, JSON.stringify(overlay)); } catch {}
 
       const importP = HttpUtil.post('/panel/api/server/importDB', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        skipAuthRedirect: true,
         silent: true,
       }).then((r) => ({ kind: 'resp' as const, r })).catch(() => ({ kind: 'err' as const }));
 
@@ -111,17 +104,12 @@ export default function BackupModal({ open, basePath: _basePath, onClose }: Back
       title={t('pages.index.backupTitle')}
       footer={null}
     >
-      {isPostgres && (
-        <div className="backup-description" style={{ marginBottom: 16 }}>
-          {t('pages.index.backupPostgresNote')}
-        </div>
-      )}
       <div className="backup-list">
         <div className="backup-item">
           <div className="backup-meta">
             <div className="backup-title">{t('pages.index.exportDatabase')}</div>
             <div className="backup-description">
-              {isPostgres ? t('pages.index.exportDatabasePgDesc') : t('pages.index.exportDatabaseDesc')}
+              {t('pages.index.exportDatabaseDesc')}
             </div>
           </div>
           <Button variant="primary" onClick={exportDb} icon={<DownloadOutlined />} />
@@ -131,7 +119,7 @@ export default function BackupModal({ open, basePath: _basePath, onClose }: Back
           <div className="backup-meta">
             <div className="backup-title">{t('pages.index.importDatabase')}</div>
             <div className="backup-description">
-              {isPostgres ? t('pages.index.importDatabasePgDesc') : t('pages.index.importDatabaseDesc')}
+              {t('pages.index.importDatabaseDesc')}
             </div>
           </div>
           <Button variant="primary" onClick={importDb} icon={<UploadOutlined />} />

@@ -29,6 +29,7 @@ type gate struct {
 	core    map[uint32]bool
 	told    map[uint32]string
 	peer    map[uint32]bool
+	owners  map[uint32]owner
 	seats   map[uint32]seated
 	target  string
 	listed  []string
@@ -178,6 +179,19 @@ func (g *gate) nodes(linked map[uint32]bool) {
 	g.mu.Lock()
 	g.peer = linked
 	g.mu.Unlock()
+}
+
+func (g *gate) claim(owners map[uint32]owner) {
+	g.mu.Lock()
+	g.owners = owners
+	g.mu.Unlock()
+}
+
+func (g *gate) ownerOf(session uint32) (owner, bool) {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	who, known := g.owners[session]
+	return who, known
 }
 
 func (g *gate) builds(id uint32, dev, core bool) {

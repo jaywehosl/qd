@@ -5,34 +5,24 @@ import { Button, Dialog, Divider, Field, Input, Switch, Tag } from '@/components
 import { VerticalTabs } from '@/components/ui';
 import { phone } from '@/lib/phone';
 import { getMessage } from '@/utils/messageBus';
-import { clientsApi } from '@/generated/client';
+import { HttpUtil } from '@/utils';
 import { useFormSeed } from '@/hooks/useFormSeed';
-import type { ClientRecord, GroupSummary, InboundOption } from '@/schemas/client';
+import type { ClientRecord, Entrypoint, GroupSummary } from '@/schemas/client';
 interface GroupEditModalProps {
   open: boolean;
   group: GroupSummary | null;
   groups: GroupSummary[];
-  inbounds: InboundOption[];
+  entrypoints: Entrypoint[];
   clients: ClientRecord[];
   onClose: () => void;
   onSaved: () => void;
-}
-
-function entryLabel(ib: InboundOption): string {
-  return ib.tag?.trim() || ib.remark?.trim() || String(ib.id);
-}
-
-function sameSet(a: number[], b: number[]): boolean {
-  if (a.length !== b.length) return false;
-  const s = new Set(a);
-  return b.every((x) => s.has(x));
 }
 
 export default function GroupEditModal({
   open,
   group,
   groups,
-  inbounds,
+  entrypoints,
   clients,
   onClose,
   onSaved,
@@ -40,9 +30,9 @@ export default function GroupEditModal({
   const { t } = useTranslation();
   const message = getMessage();
 
-  const [name, setName] = useState('');
+  const [tag, setTag] = useState('');
   const [entrypointIds, setEntrypointIds] = useState<number[]>([]);
-  const [emails, setEmails] = useState<string[]>([]);
+  const [members, setMembers] = useState<number[]>([]);
   const [deviceLimit, setDeviceLimit] = useState(0);
   const [allowExit, setAllowExit] = useState(false);
   const [allowDev, setAllowDev] = useState(false);
@@ -50,75 +40,61 @@ export default function GroupEditModal({
   const [saving, setSaving] = useState(false);
   const [touched, setTouched] = useState(false);
 
-  const activeInbounds = useMemo(() => inbounds.filter((i) => i.enable !== false), [inbounds]);
-  const originalEmails = useMemo(
-    () => clients.filter((c) => c.group === group?.name).map((c) => c.email),
-    [clients, group?.name],
+  const activeEntrypoints = useMemo(() => entrypoints.filter((e) => e.enable !== false), [entrypoints]);
+  const originalMembers = useMemo(
+    () => clients.filter((c) => c.group === group?.tag).map((c) => c.id),
+    [clients, group?.tag],
   );
 
-  useFormSeed(open, group?.name ?? '', () => {
+  useFormSeed(open, group?.tag ?? '', () => {
     if (!group) return;
-    setName(group.name);
+    setTag(group.tag);
     setEntrypointIds([...(group.entrypointIds ?? [])]);
-    setEmails(clients.filter((c) => c.group === group.name).map((c) => c.email));
-    setDeviceLimit(Number((group as { deviceLimit?: number }).deviceLimit) || 0);
-    setAllowExit(!!(group as { allowExit?: boolean }).allowExit);
-    setAllowDev(!!(group as { allowDev?: boolean }).allowDev);
-    setAllowCore(!!(group as { allowCore?: boolean }).allowCore);
+    setMembers(originalMembers);
+    setDeviceLimit(group.deviceLimit || 0);
+    setAllowExit(!!group.allowExit);
+    setAllowDev(!!group.allowDev);
+    setAllowCore(!!group.allowCore);
     setTouched(false);
   });
 
   useEffect(() => {
     if (!open || touched) return;
-    setEmails(originalEmails);
-  }, [open, touched, originalEmails]);
+    setMembers(originalMembers);
+  }, [open, touched, originalMembers]);
 
   function toggleEntry(id: number) {
     setEntrypointIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   }
 
-  function toggleClient(email: string) {
+  function toggleClient(id: number) {
     setTouched(true);
-    setEmails((prev) => (prev.includes(email) ? prev.filter((x) => x !== email) : [...prev, email]));
+    setMembers((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   }
 
   async function submit() {
     if (!group) return;
-    const nextName = name.trim();
-    if (!nextName) {
+    const nextTag = tag.trim();
+    if (!nextTag) {
       message.error(t('pages.groups.nameRequired', { defaultValue: 'Group tag cannot be empty' }));
       return;
     }
-    if (nextName !== group.name && groups.some((g) => g.name.toLowerCase() === nextName.toLowerCase())) {
-      message.error(t('pages.groups.renameCollision', { name: nextName }));
+    if (groups.some((g) => g.id !== group.id && g.tag.toLowerCase() === nextTag.toLowerCase())) {
+      message.error(t('pages.groups.renameCollision', { name: nextTag }));
       return;
     }
 
     setSaving(true);
     try {
-      if (nextName !== group.name) {
-        const msg = await clientsApi.groupsRename({ oldName: group.name, newName: nextName }, { silent: true });
-        if (!msg?.success) { message.error(msg?.msg || t('somethingWentWrong')); return; }
-      }
-
-      if (!sameSet(entrypointIds, group.entrypointIds ?? [])
-          || deviceLimit !== (Number((group as { deviceLimit?: number }).deviceLimit) || 0)
-          || allowExit !== !!(group as { allowExit?: boolean }).allowExit
-          || allowDev !== !!(group as { allowDev?: boolean }).allowDev
-          || allowCore !== !!(group as { allowCore?: boolean }).allowCore) {
-        const msg = await clientsApi.groupsEntrypoints(
-          { name: nextName, entrypointIds, deviceLimit, allowExit, allowDev, allowCore }, { silent: true });
-        if (!msg?.success) { message.error(msg?.msg || t('somethingWentWrong')); return; }
-      }
-
-      const added = emails.filter((e) => !originalEmails.includes(e));
-      const removed = originalEmails.filter((e) => !emails.includes(e));
-      if (added.length > 0) {
-        const msg = await clientsApi.groupsBulkAdd({ emails: added, group: nextName }, { silent: true });
-        if (!msg?.success) { message.error(msg?.msg || t('somethingWentWrong')); return; }
-      }
-      if (removed.length > 0) {
-        const msg = await clientsApi.groupsBulkRemove({ emails: removed }, { silent: true });
+      const steps: [string, unknown][] = [
+        ['/panel/api/clients/groups/save', { id: group.id, tag: nextTag, entrypointIds, deviceLimit, allowExit, allowDev, allowCore }],
+      ];
+      const added = members.filter((id) => !originalMembers.includes(id));
+      const removed = originalMembers.filter((id) => !members.includes(id));
+      if (added.length > 0) steps.push(['/panel/api/clients/groups/members', { group: group.id, clients: added }]);
+      if (removed.length > 0) steps.push(['/panel/api/clients/groups/members', { group: 0, clients: removed }]);
+      for (const [path, body] of steps) {
+        const msg = await HttpUtil.post(path, body, { silent: true });
         if (!msg?.success) { message.error(msg?.msg || t('somethingWentWrong')); return; }
       }
 
@@ -143,12 +119,12 @@ export default function GroupEditModal({
       title={onPhone ? (
         <span className="ms-title">
           <small>{t('pages.groups.editGroup', { defaultValue: 'Edit Group' })}</small>
-          <span>{group?.name ?? '—'}</span>
+          <span>{group?.tag ?? '—'}</span>
         </span>
       ) : (
         <span className="ef-title">
           {t('edit', { defaultValue: 'Edit' })}
-          <Tag tone="success" className="ef-title__node">{group?.name ?? '—'}</Tag>
+          <Tag tone="success" className="ef-title__node">{group?.tag ?? '—'}</Tag>
           {t('pages.groups.groupWord', { defaultValue: 'group' })}
         </span>
       )}
@@ -183,7 +159,7 @@ export default function GroupEditModal({
       <>
       <div className="ge-head">
         <Field label={t('pages.groups.groupTag', { defaultValue: 'Group Tag' })}>
-          <Input value={name} onChange={(e) => setName(e.target.value)} />
+          <Input value={tag} onChange={(e) => setTag(e.target.value)} />
         </Field>
         <Field label={t('pages.groups.deviceLimit', { defaultValue: 'Device limit' })}>
           <Input
@@ -220,21 +196,21 @@ export default function GroupEditModal({
 
       {shows('members') && (
       <>
-      <Divider>{t('pages.groups.inboundsInGroup', { defaultValue: 'Inbounds in group' })}</Divider>
-      {activeInbounds.length === 0 ? (
+      <Divider>{t('pages.groups.inboundsInGroup', { defaultValue: 'Entrypoints in group' })}</Divider>
+      {activeEntrypoints.length === 0 ? (
         <div className="ge-empty">{t('pages.groups.noInbounds', { defaultValue: 'No active entrypoints.' })}</div>
       ) : (
         <div className="ge-picks">
-          {activeInbounds.map((ib) => {
-            const on = entrypointIds.includes(ib.id);
+          {activeEntrypoints.map((e) => {
+            const on = entrypointIds.includes(e.id);
             return (
               <Tag
-                key={ib.id}
+                key={e.id}
                 tone={on ? 'primary' : 'neutral'}
                 className={`ge-pick${on ? ' is-on' : ''}`}
-                onClick={() => toggleEntry(ib.id)}
+                onClick={() => toggleEntry(e.id)}
               >
-                {entryLabel(ib)}
+                {e.tag?.trim() || String(e.id)}
               </Tag>
             );
           })}
@@ -247,17 +223,17 @@ export default function GroupEditModal({
       ) : (
         <div className="ge-picks">
           {clients.map((c) => {
-            const on = emails.includes(c.email);
-            const taken = !on && !!c.group && c.group !== group?.name;
+            const on = members.includes(c.id);
+            const taken = !on && !!c.group && c.group !== group?.tag;
             return (
               <Tag
-                key={c.email}
+                key={c.id}
                 tone={on ? 'success' : 'neutral'}
                 className={`ge-pick${on ? ' is-on' : ''}${taken ? ' is-taken' : ''}`}
                 title={taken ? t('pages.groups.movesFrom', { defaultValue: 'Currently in {name}', name: c.group }) : undefined}
-                onClick={() => toggleClient(c.email)}
+                onClick={() => toggleClient(c.id)}
               >
-                {c.email}
+                {c.tag}
               </Tag>
             );
           })}

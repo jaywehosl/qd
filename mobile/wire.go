@@ -13,10 +13,10 @@ func (c *Client) keeper() func(fd uintptr) {
 		protector := c.protector
 		c.mu.Unlock()
 
-		if protector == nil || !c.Running() {
+		if protector == nil {
 			return
 		}
-		if !protector.Protect(int(fd)) {
+		if !protector.Protect(int(fd)) && c.Running() {
 			say("socket: the system refused to keep fd %d out of the tunnel", fd)
 		}
 	}

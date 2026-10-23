@@ -83,33 +83,6 @@ public final class Guard {
         }
     }
 
-    public static String said(int what, int state) {
-        switch (what) {
-            case BATTERY:
-                return state == YES
-                        ? "Приложение исключено из оптимизации батареи"
-                        : "Приложение не исключено из оптимизации батареи";
-            case VPN:
-                if (state == UNSURE) {
-                    return "Постоянный VPN — включается только вручную";
-                }
-                return state == YES ? "Постоянный VPN включен" : "Постоянный VPN выключен";
-            case NOTIFY:
-                return state == YES
-                        ? "Уведомления приложения разрешены"
-                        : "Уведомления приложения запрещены";
-            case AUTOSTART:
-                if (state == UNSURE) {
-                    return "Автозапуск приложения — проверь вручную";
-                }
-                return state == YES
-                        ? "Автозапуск приложения включен"
-                        : "Автозапуск приложения выключен";
-            default:
-                return "";
-        }
-    }
-
     public static void open(Context host, int what) {
         switch (what) {
             case BATTERY:
@@ -144,9 +117,6 @@ public final class Guard {
     }
 
     public static int notifying(Context host) {
-        if (Build.VERSION.SDK_INT < 33) {
-            return YES;
-        }
         return host.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
                 == PackageManager.PERMISSION_GRANTED ? YES : NO;
     }

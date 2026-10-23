@@ -1,8 +1,7 @@
 import { useMemo } from 'react';
 import SwaggerUI from 'swagger-ui-react';
 import { useTheme } from '@/hooks/useTheme';
-const basePath = window.X_UI_BASE_PATH || '';
-const openApiUrl = `${basePath}panel/api/openapi.json`;
+const openApiUrl = '/openapi.json';
 
 export default function ApiDocsPage() {
   const { isDark, isUltra } = useTheme();

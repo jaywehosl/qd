@@ -116,7 +116,7 @@ export default function DatapathTab({ allSetting, updateSetting }: DatapathTabPr
           title={t('pages.settings.mtu')}
           description={t('pages.settings.mtuDesc')}
         >
-          <Input type="number" min={576} max={9000} {...num('mtu', 1400)} />
+          <Input type="number" min={576} max={9000} {...num('mtu', 1500)} />
         </SettingListItem>
 
         <SettingListItem
@@ -163,7 +163,7 @@ export default function DatapathTab({ allSetting, updateSetting }: DatapathTabPr
           description={t('pages.settings.idleDesc')}
         >
           <div className="setting-pair">
-            <Input type="number" min={5} {...num('idleSeconds', 30)} />
+            <Input type="number" min={5} {...num('idleSeconds', 90)} />
             <Input type="number" min={1} {...num('keepAliveSeconds', 15)} />
           </div>
         </SettingListItem>

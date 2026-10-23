@@ -26,7 +26,6 @@ import {
   type ColumnDef,
 } from '@/components/ds';
 import { cellOf } from '@/components/ui';
-import { usePublish } from '@/layouts/PublishController';
 import { useHold } from '@/hooks/useHold';
 import type { NodeRecord } from '@/api/queries/useNodesQuery';
 interface NodeListProps {
@@ -112,8 +111,7 @@ export default function NodeList({
 }: NodeListProps) {
   const { t } = useTranslation();
   const relativeTime = useRelativeTime();
-  const { draft } = usePublish();
-  const published = draft?.publishedRevision ?? 0;
+  const published = useMemo(() => nodes.reduce((top, n) => Math.max(top, n.revision ?? 0), 0), [nodes]);
 
   const [showAddress, setShowAddress] = useState(false);
   const hold = useHold();
@@ -128,7 +126,7 @@ export default function NodeList({
       }))
       .sort((a, b) => {
         const side = (n: NodeRow) => ((n as { role?: string }).role === 'egress' ? 1 : 0);
-        return side(a) - side(b) || (a.name || '').localeCompare(b.name || '');
+        return side(a) - side(b) || (a.tag || '').localeCompare(b.tag || '');
       }),
     [nodes],
   );
@@ -164,13 +162,12 @@ export default function NodeList({
       ),
     },
     {
-      id: 'name',
-      accessorFn: (n: NodeRow) => n.name || '',
+      id: 'tag',
+      accessorFn: (n: NodeRow) => n.tag || '',
       header: () => t('pages.nodes.name'),
       cell: ({ row }) => (
         <div className="name-cell">
-          <span className="name">{row.original.name}</span>
-          {row.original.remark && <span className="remark">{row.original.remark}</span>}
+          <span className="name">{row.original.tag}</span>
         </div>
       ),
     },
@@ -320,7 +317,7 @@ export default function NodeList({
                   <div key={record.id} className="mc is-tap" {...hold(() => setOpenedId(record.id), () => onEdit(record))}>
                     <span className={`mc__dot is-${dotOf(record)}`} />
                     <div className="mc__body">
-                      <span className="mc__name">{record.name}</span>
+                      <span className="mc__name">{record.tag}</span>
                       <span className="mc__sub">
                         <span>{(record as { role?: string }).role || '-'}</span>
                         {record.status === 'online' && <span>{formatUptime(record.uptimeSecs)}</span>}
@@ -343,7 +340,7 @@ export default function NodeList({
             <Dialog
               open={opened !== null}
               onOpenChange={(o) => !o && setOpenedId(null)}
-              title={opened?.name ?? ''}
+              title={opened?.tag ?? ''}
               autoHeight
               footer={opened && (
                 <div className="ms-foot">

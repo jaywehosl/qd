@@ -41,8 +41,6 @@ export default function MetricsPanel() {
     if (open || notifyOpen) window.scrollTo({ top: 0, behavior: 'smooth' });
   }, [open, notifyOpen]);
 
-  const basePath = window.X_UI_BASE_PATH || '';
-
   const restartNetwork = useCallback(async () => {
     setRestarting(true);
     try {
@@ -82,7 +80,7 @@ export default function MetricsPanel() {
       </div>
 
       <LazyMount when={backupOpen}>
-        <BackupModal open={backupOpen} basePath={basePath} onClose={() => setBackupOpen(false)} />
+        <BackupModal open={backupOpen} onClose={() => setBackupOpen(false)} />
       </LazyMount>
       <Dialog
         open={restartAsk}

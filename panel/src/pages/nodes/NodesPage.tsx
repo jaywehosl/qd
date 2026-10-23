@@ -57,7 +57,7 @@ export default function NodesPage() {
 
   const onDelete = useCallback((node: NodeRecord) => {
     setConfirm({
-      title: t('pages.nodes.deleteConfirmTitle', { name: node.name }),
+      title: t('pages.nodes.deleteConfirmTitle', { name: node.tag }),
       content: t('pages.nodes.deleteConfirmContent'),
       okText: t('delete'),
       onOk: async () => {
@@ -81,7 +81,7 @@ export default function NodesPage() {
 
   const onSync = useCallback((node: NodeRecord) => {
     setConfirm({
-      title: t('pages.nodes.syncConfirmTitle', { defaultValue: `Copy the network database onto ${node.name}?` }),
+      title: t('pages.nodes.syncConfirmTitle', { defaultValue: `Copy the network database onto ${node.tag}?` }),
       content: t('pages.nodes.syncConfirmContent', {
         defaultValue: 'The freshest node in the network hands over its database and it replaces everything this node holds.',
       }),
@@ -166,7 +166,7 @@ export default function NodesPage() {
         open={formOpen}
         mode={formMode}
         node={formNode}
-        taken={nodes.map((n) => n.name ?? '').filter((name) => name !== '')}
+        taken={nodes.map((n) => n.tag ?? '').filter((name) => name !== '')}
         usedIds={nodes.map((n) => n.id)}
         usedSlots={nodes.map((n) => n.natSlot ?? -1).filter((slot) => slot >= 0)}
         save={onSave}

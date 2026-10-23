@@ -54,13 +54,22 @@ func redirectOutput(statePath string) {
 func stampLines(from io.Reader, into *os.File) {
 	defer close(logDrained)
 	lines := bufio.NewReaderSize(from, 64<<10)
+	size := int64(0)
+	if info, err := into.Stat(); err == nil {
+		size = info.Size()
+	}
 	for {
 		line, err := lines.ReadString('\n')
 		if line != "" {
 			if line[len(line)-1] != '\n' {
 				line += "\n"
 			}
-			into.WriteString(time.Now().Format("02.01 15:04:05.000 ") + line)
+			if size > logSizeCap && into.Truncate(0) == nil {
+				size = 0
+				line = "log      the journal outgrew its cap and started over\n" + line
+			}
+			written, _ := into.WriteString(time.Now().Format("02.01 15:04:05.000 ") + line)
+			size += int64(written)
 		}
 		if err != nil {
 			return

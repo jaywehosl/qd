@@ -182,7 +182,14 @@ func (a *API) importLink(w http.ResponseWriter, r *http.Request) {
 	a.state(w, r)
 }
 
+var ErrSubscribed = errors.New("a subscription is already in use: reset the client before adding another one")
+
 func (a *API) Import(uri string) error {
+	if held, err := a.db.Subscription(); err != nil {
+		return err
+	} else if held.Imported {
+		return ErrSubscribed
+	}
 	link, err := clientstate.ParseLink(uri)
 	if err != nil {
 		return err
@@ -477,10 +484,10 @@ func (a *API) adoptCarriage(mbit int, profile string) {
 		return
 	}
 	a.platform.SetCarriage(mbit, profile)
-	if settings.FixedRate == mbit && settings.BBRProfile == profile && !settings.RatePinned {
+	if settings.FixedRate == mbit && settings.BBRProfile == profile {
 		return
 	}
-	settings.FixedRate, settings.BBRProfile, settings.RatePinned = mbit, profile, false
+	settings.FixedRate, settings.BBRProfile = mbit, profile
 	a.db.SaveSettings(settings)
 }
 
@@ -754,10 +761,16 @@ func (a *API) SaveRulesJSON(raw string) error {
 	if err := json.Unmarshal([]byte(raw), &body); err != nil {
 		return err
 	}
-	if body.Rules != nil || (body.Domains == nil && body.Bundles == nil) {
-		rules := []clientstate.Rule{}
+	if body.Rules != nil || body.DefaultRole != "" {
+		var rules []clientstate.Rule
 		if body.Rules != nil {
 			rules = *body.Rules
+		} else {
+			held, err := a.db.Rules()
+			if err != nil {
+				return err
+			}
+			rules = held
 		}
 		if body.DefaultRole == "" {
 			body.DefaultRole, _ = a.db.DefaultRole()
@@ -806,7 +819,7 @@ func (a *API) SaveSettingsJSON(raw string) error {
 	if next.RefreshMinutes != current.RefreshMinutes {
 		next.RefreshPinned = true
 	}
-	next.FixedRate, next.RatePinned = current.FixedRate, false
+	next.FixedRate = current.FixedRate
 	next.RefreshMinutes = min(max(next.RefreshMinutes, 1), 1440)
 
 	if next.Autostart != current.Autostart {

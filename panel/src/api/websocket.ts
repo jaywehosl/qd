@@ -230,7 +230,7 @@ let shared: WebSocketClient | null = null;
 let holders = 0;
 
 export function holdSocket(handlers: Record<string, WebSocketListener>): () => void {
-  shared ??= new WebSocketClient((typeof window !== 'undefined' && window.X_UI_BASE_PATH) || '');
+  shared ??= new WebSocketClient();
   const client = shared;
   const entries = Object.entries(handlers);
   for (const [event, fn] of entries) client.on(event, fn);

@@ -46,15 +46,7 @@ func (d *DB) recordCounters(table, owner string, readings []Reading) error {
 			return err
 		}
 
-		addUp, addDown := r.Up, r.Down
-		if epoch == r.Epoch {
-			if r.Up >= lastUp {
-				addUp = r.Up - lastUp
-			}
-			if r.Down >= lastDown {
-				addDown = r.Down - lastDown
-			}
-		}
+		addUp, addDown := grown(r, epoch, lastUp, lastDown)
 
 		if _, err := tx.Exec(
 			`UPDATE `+table+`
@@ -68,6 +60,19 @@ func (d *DB) recordCounters(table, owner string, readings []Reading) error {
 		}
 	}
 	return tx.Commit()
+}
+
+func grown(r Reading, epoch int64, lastUp, lastDown uint64) (uint64, uint64) {
+	addUp, addDown := r.Up, r.Down
+	if epoch == r.Epoch {
+		if r.Up >= lastUp {
+			addUp = r.Up - lastUp
+		}
+		if r.Down >= lastDown {
+			addDown = r.Down - lastDown
+		}
+	}
+	return addUp, addDown
 }
 
 func (d *DB) ResetTraffic(clientID int) error {
@@ -281,16 +286,49 @@ type Exit struct {
 	Down      uint64 `json:"down"`
 }
 
-func (d *DB) RecordExit(clientID, nodeID int, at int64, up, down uint64) error {
-	_, err := d.sql.Exec(`
-		INSERT INTO exit_log (client_id, node_id, first_seen, last_seen, up, down)
-		VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT(client_id, node_id) DO UPDATE SET
-			last_seen = MAX(exit_log.last_seen, excluded.last_seen),
-			up        = MAX(exit_log.up, excluded.up),
-			down      = MAX(exit_log.down, excluded.down)`,
-		clientID, nodeID, at, at, up, down)
-	return err
+func (d *DB) RecordExits(readings []Reading) error {
+	if len(readings) == 0 {
+		return nil
+	}
+
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for _, r := range readings {
+		var epoch int64
+		var lastUp, lastDown uint64
+		err := tx.QueryRow(`SELECT epoch, last_up, last_down FROM exit_log WHERE client_id = ? AND node_id = ?`,
+			r.ClientID, r.NodeID).Scan(&epoch, &lastUp, &lastDown)
+
+		switch {
+		case err == sql.ErrNoRows:
+			if _, err := tx.Exec(
+				`INSERT INTO exit_log (client_id, node_id, first_seen, last_seen, up, down, epoch, last_up, last_down)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				r.ClientID, r.NodeID, r.At, r.At, r.Up, r.Down, r.Epoch, r.Up, r.Down); err != nil {
+				return err
+			}
+			continue
+		case err != nil:
+			return err
+		}
+
+		addUp, addDown := grown(r, epoch, lastUp, lastDown)
+		if _, err := tx.Exec(
+			`UPDATE exit_log
+			    SET epoch = ?, last_up = ?, last_down = ?,
+			        up = up + ?, down = down + ?,
+			        last_seen = CASE WHEN ? > 0 THEN MAX(last_seen, ?) ELSE last_seen END
+			  WHERE client_id = ? AND node_id = ?`,
+			r.Epoch, r.Up, r.Down, addUp, addDown,
+			addUp+addDown, r.At, r.ClientID, r.NodeID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (d *DB) Exits() (map[int][]Exit, error) {

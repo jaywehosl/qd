@@ -4,7 +4,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"sort"
 	"strconv"
@@ -18,7 +17,7 @@ import (
 
 type groupRow struct {
 	ID            int    `json:"id"`
-	Name          string `json:"name"`
+	Tag           string `json:"tag"`
 	EntrypointIDs []int  `json:"entrypointIds"`
 	DeviceLimit   int    `json:"deviceLimit"`
 	AllowExit     bool   `json:"allowExit"`
@@ -46,14 +45,14 @@ type groupView struct {
 	err  error
 }
 
-func (a *API) groupIDByName() (map[string]int, error) {
+func (a *API) groupIDByTag() (map[string]int, error) {
 	rows, err := a.groups()
 	if err != nil {
 		return nil, err
 	}
 	out := make(map[string]int, len(rows))
 	for _, g := range rows {
-		out[g.Name] = g.ID
+		out[g.Tag] = g.ID
 	}
 	return out, nil
 }
@@ -91,9 +90,9 @@ func (a *API) buildClients() ([]map[string]any, []string, error) {
 	reach := make(map[int][]int, len(groups))
 	tags := make([]string, 0, len(groups))
 	for _, g := range groups {
-		names[g.ID] = g.Name
+		names[g.ID] = g.Tag
 		reach[g.ID] = g.EntrypointIDs
-		tags = append(tags, g.Name)
+		tags = append(tags, g.Tag)
 	}
 
 	where := a.entrypointAddresses()
@@ -109,13 +108,12 @@ func (a *API) buildClients() ([]map[string]any, []string, error) {
 		delete(row, "groupId")
 
 		uuid, _ := row["uuid"].(string)
-		row["subId"] = uuid
 
 		entries := reach[group]
 		if entries == nil {
 			entries = []int{}
 		}
-		row["inboundIds"] = entries
+		row["entrypointIds"] = entries
 
 		row["uri"] = ""
 		if uuid != "" {
@@ -133,7 +131,7 @@ func (a *API) buildClients() ([]map[string]any, []string, error) {
 			}
 
 			if len(reachable) > 0 {
-				tag, _ := row["email"].(string)
+				tag, _ := row["tag"].(string)
 				row["uri"] = clientstate.Link{
 					Key: uuid, Label: tag, NetworkKey: key, Endpoints: reachable,
 				}.String()
@@ -143,8 +141,8 @@ func (a *API) buildClients() ([]map[string]any, []string, error) {
 		seen := live[qdcrypt.SessionID(uuid)]
 		saved := kept[int(numberOf(row["id"]))]
 
-		up := saved.Traffic.Up + seen.Up
-		down := saved.Traffic.Down + seen.Down
+		up := saved.Traffic.Up
+		down := saved.Traffic.Down
 
 		lastOnline := seen.LastSeen
 		if lastOnline == 0 {
@@ -155,25 +153,11 @@ func (a *API) buildClients() ([]map[string]any, []string, error) {
 			}
 		}
 
-		row["traffic"] = map[string]any{
-			"up": up, "down": down, "total": up + down,
-			"enable": row["enable"], "expiryTime": row["expiryTime"],
-			"lastOnline": lastOnline,
-		}
+		row["traffic"] = map[string]any{"up": up, "down": down, "lastOnline": lastOnline}
 
 		perNode := map[string]map[string]uint64{}
 		for id, t := range saved.ByNode {
 			perNode[strconv.Itoa(id)] = map[string]uint64{"up": t.Up, "down": t.Down}
-		}
-		if seen.NodeID != 0 {
-			key := strconv.Itoa(seen.NodeID)
-			held := perNode[key]
-			if held == nil {
-				held = map[string]uint64{}
-			}
-			held["up"] += seen.Up
-			held["down"] += seen.Down
-			perNode[key] = held
 		}
 		row["trafficByNode"] = perNode
 		row["lastNodeId"] = seen.NodeID
@@ -202,8 +186,8 @@ func (a *API) buildClients() ([]map[string]any, []string, error) {
 			fresh = nil
 		}
 		addresses := merge(saved.Addresses, fresh)
-		row["ipLog"] = addresses
-		row["exitLog"] = saved.Exits
+		row["addresses"] = addresses
+		row["exits"] = saved.Exits
 
 		devices := make([]deviceRow, 0, len(saved.Devices))
 		for _, d := range saved.Devices {
@@ -592,24 +576,38 @@ func (a *API) groupsList(w http.ResponseWriter, r *http.Request) {
 	out := make([]map[string]any, 0, len(groups))
 	for _, g := range groups {
 		out = append(out, map[string]any{
-			"id": g.ID, "name": g.Name, "clientCount": counts[g.ID],
+			"id": g.ID, "tag": g.Tag, "clientCount": counts[g.ID],
 			"entrypointIds": g.EntrypointIDs, "deviceLimit": g.DeviceLimit,
-			"allowExit": g.AllowExit,
-			"allowDev":  g.AllowDev,
-			"allowCore": g.AllowCore,
+			"allowExit": g.AllowExit, "allowDev": g.AllowDev, "allowCore": g.AllowCore,
 		})
 	}
 	sendOK(w, out)
 }
 
 func (a *API) clientsList(w http.ResponseWriter, r *http.Request) {
-	rows, groups, err := a.readClients()
+	rows, _, err := a.readClients()
 	if err != nil {
 		sendFail(w, err)
 		return
 	}
 	sendOK(w, rows)
-	_ = groups
+}
+
+func standing(row map[string]any, now, soon int64) string {
+	expiry := int64(numberOf(row["expiryAt"]))
+	switch {
+	case expiry > 0 && expiry <= now:
+		return "expired"
+	case row["enable"] != true:
+		return "disabled"
+	case expiry > 0 && expiry < soon:
+		return "expiring"
+	}
+	return "active"
+}
+
+func online(row map[string]any) bool {
+	return row["enable"] == true && numberOf(row["onlineSince"]) > 0
 }
 
 func (a *API) clientsPaged(w http.ResponseWriter, r *http.Request) {
@@ -618,100 +616,125 @@ func (a *API) clientsPaged(w http.ResponseWriter, r *http.Request) {
 		sendFail(w, err)
 		return
 	}
-
-	if needle := strings.TrimSpace(r.URL.Query().Get("search")); needle != "" {
-		needle = strings.ToLower(needle)
-		kept := make([]map[string]any, 0, len(rows))
-		for _, row := range rows {
-			tag := strings.ToLower(textOf(row["email"]))
-			note := strings.ToLower(textOf(row["comment"]))
-			if strings.Contains(tag, needle) || strings.Contains(note, needle) {
-				kept = append(kept, row)
-			}
-		}
-		rows = kept
-	}
-
-	page := atoiOr(r.URL.Query().Get("page"), 1)
-	size := atoiOr(r.URL.Query().Get("pageSize"), 50)
-	if page < 1 {
-		page = 1
-	}
-	if size < 1 {
-		size = 50
-	}
-
-	from := (page - 1) * size
-	if from > len(rows) {
-		from = len(rows)
-	}
-	to := from + size
-	if to > len(rows) {
-		to = len(rows)
-	}
-
-	online := []string{}
-	depleted := []string{}
-	expiring := []string{}
-	deactive := []string{}
-	active := 0
-
+	query := r.URL.Query()
 	now := time.Now().UnixMilli()
 	soon := now + a.expiryWarning()
 
+	summary := map[string]any{"total": len(rows)}
+	lists := map[string][]string{"online": {}, "expired": {}, "expiring": {}, "disabled": {}}
+	active := 0
 	for _, row := range rows {
-		email := textOf(row["email"])
-		enabled, _ := row["enable"].(bool)
-		expiry := int64(numberOf(row["expiryTime"]))
-
-		if !enabled {
-			deactive = append(deactive, email)
-			continue
+		tag := textOf(row["tag"])
+		if online(row) {
+			lists["online"] = append(lists["online"], tag)
 		}
-
-		if numberOf(row["onlineSince"]) > 0 {
-			online = append(online, email)
-		}
-
-		if expiry > 0 && expiry < now {
-			depleted = append(depleted, email)
-			continue
-		}
-		active++
-		if expiry > 0 && expiry < soon {
-			expiring = append(expiring, email)
+		switch state := standing(row, now, soon); state {
+		case "active":
+			active++
+		case "expiring":
+			active++
+			lists[state] = append(lists[state], tag)
+		default:
+			lists[state] = append(lists[state], tag)
 		}
 	}
+	summary["active"] = active
+	for name, tags := range lists {
+		summary[name] = tags
+	}
+
+	needle := strings.ToLower(strings.TrimSpace(query.Get("search")))
+	group := query.Get("group")
+	status := query.Get("status")
+	kept := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		if needle != "" && !strings.Contains(strings.ToLower(textOf(row["tag"])), needle) &&
+			!strings.Contains(strings.ToLower(textOf(row["comment"])), needle) {
+			continue
+		}
+		if group != "" && textOf(row["group"]) != group {
+			continue
+		}
+		switch state := standing(row, now, soon); status {
+		case "":
+		case "online":
+			if !online(row) {
+				continue
+			}
+		case "active":
+			if state != "active" && state != "expiring" {
+				continue
+			}
+		default:
+			if state != status {
+				continue
+			}
+		}
+		kept = append(kept, row)
+	}
+	sortClients(kept, query.Get("sort"), query.Get("order") == "descend")
+
+	page := max(atoiOr(query.Get("page"), 1), 1)
+	size := atoiOr(query.Get("pageSize"), 50)
+	if size < 1 {
+		size = 50
+	}
+	from := min((page-1)*size, len(kept))
+	to := min(from+size, len(kept))
 
 	sendOK(w, map[string]any{
-		"items":    rows[from:to],
+		"items":    kept[from:to],
 		"total":    len(rows),
-		"filtered": len(rows),
+		"filtered": len(kept),
 		"page":     page,
 		"pageSize": size,
 		"groups":   groups,
-		"summary": map[string]any{
-			"total":    len(rows),
-			"active":   active,
-			"online":   online,
-			"depleted": depleted,
-			"expiring": expiring,
-			"deactive": deactive,
-		},
+		"summary":  summary,
+	})
+}
+
+func sortClients(rows []map[string]any, by string, descend bool) {
+	key := func(row map[string]any) float64 {
+		switch by {
+		case "updatedAt", "expiryAt":
+			return numberOf(row[by])
+		case "lastOnline":
+			traffic, _ := row["traffic"].(map[string]any)
+			return numberOf(traffic["lastOnline"])
+		case "traffic":
+			traffic, _ := row["traffic"].(map[string]any)
+			return numberOf(traffic["up"]) + numberOf(traffic["down"])
+		}
+		return numberOf(row["createdAt"])
+	}
+	less := func(i, j int) bool { return key(rows[i]) < key(rows[j]) }
+	if by == "tag" {
+		less = func(i, j int) bool {
+			return strings.ToLower(textOf(rows[i]["tag"])) < strings.ToLower(textOf(rows[j]["tag"]))
+		}
+	}
+	if by == "expiryAt" {
+		plain := less
+		less = func(i, j int) bool {
+			a, b := numberOf(rows[i]["expiryAt"]), numberOf(rows[j]["expiryAt"])
+			if (a == 0) != (b == 0) {
+				return b == 0
+			}
+			return plain(i, j)
+		}
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		if descend {
+			return less(j, i)
+		}
+		return less(i, j)
 	})
 }
 
 func (a *API) expiryWarning() int64 {
-	days := 3.0
-	if a.prefs != nil {
-		if stored, err := a.prefs.Value(prefsKey); err == nil && stored != "" {
-			var saved map[string]any
-			if json.Unmarshal([]byte(stored), &saved) == nil {
-				if set := numberOf(saved["expireDiff"]); set > 0 {
-					days = set
-				}
-			}
-		}
+	days := numberOf(a.prefsMap()["expireDiff"])
+	if days <= 0 {
+		days = 3
 	}
 	return int64(days * 24 * 60 * 60 * 1000)
 }
@@ -723,50 +746,25 @@ func atoiOr(text string, fallback int) int {
 	return fallback
 }
 
-func (a *API) clientSave(id int) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		a.writeClient(w, r, id)
-	}
+func (a *API) clientAdd(w http.ResponseWriter, r *http.Request) {
+	a.writeClient(w, r, 0)
 }
 
-func (a *API) clientSaveWithID(w http.ResponseWriter, r *http.Request) {
-	segment := pathTail(r.URL.Path, "/panel/api/clients/update/")
-
-	if id, err := strconv.Atoi(segment); err == nil {
-		a.writeClient(w, r, id)
-		return
-	}
-
-	byEmail, err := a.clientIDs()
-	if err != nil {
-		sendFail(w, err)
-		return
-	}
-	id, known := byEmail[segment]
-	if !known {
-		sendFail(w, fmt.Errorf("no client named %q", segment))
+func (a *API) clientUpdate(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(lastPathSegment(r.URL.Path))
+	if err != nil || id <= 0 {
+		sendFail(w, fmt.Errorf("no client id in %q", r.URL.Path))
 		return
 	}
 	a.writeClient(w, r, id)
 }
 
 func (a *API) clientDelete(w http.ResponseWriter, r *http.Request) {
-	segment := pathTail(r.URL.Path, "/panel/api/clients/del/")
-
-	id, err := strconv.Atoi(segment)
-	if err != nil {
-		byEmail, lookupErr := a.clientIDs()
-		if lookupErr != nil {
-			sendFail(w, lookupErr)
-			return
-		}
-		known := false
-		if id, known = byEmail[segment]; !known {
-			sendFail(w, fmt.Errorf("no client named %q", segment))
-			return
-		}
+	id, err := strconv.Atoi(lastPathSegment(r.URL.Path))
+	if err != nil || id <= 0 {
+		sendFail(w, fmt.Errorf("no client id in %q", r.URL.Path))
+		return
 	}
-
 	results, err := a.write("clients.delete", map[string]int{"id": id})
 	if err != nil {
 		sendFailWith(w, err, results)
@@ -776,51 +774,30 @@ func (a *API) clientDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) writeClient(w http.ResponseWriter, r *http.Request, id int) {
-	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
-	if err != nil {
+	body := map[string]any{}
+	if err := bindBody(r, &body); err != nil {
 		sendFail(w, err)
 		return
 	}
-
-	var body map[string]any
-	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &body); err != nil {
-			sendFail(w, err)
-			return
-		}
-	}
-	if body == nil {
-		body = map[string]any{}
-	}
-	if nested, ok := body["client"].(map[string]any); ok {
-		body = nested
-	}
-
-	uuid := firstText(body["subId"], body["uuid"], body["id"])
-	delete(body, "subId")
 	delete(body, "id")
-	if uuid != "" {
-		body["uuid"] = uuid
-	} else {
-		delete(body, "uuid")
-	}
-
 	if id != 0 {
 		body["id"] = id
+	} else if textOf(body["uuid"]) == "" {
+		body["uuid"] = newUUID()
 	}
 
-	if name, ok := body["group"].(string); ok {
+	if tag, ok := body["group"].(string); ok {
 		delete(body, "group")
 		body["groupId"] = 0
-		if name != "" {
-			ids, err := a.groupIDByName()
+		if tag != "" {
+			ids, err := a.groupIDByTag()
 			if err != nil {
 				sendFail(w, err)
 				return
 			}
-			groupID, known := ids[name]
+			groupID, known := ids[tag]
 			if !known {
-				sendFail(w, errUnknownGroup(name))
+				sendFail(w, fmt.Errorf("no group %q", tag))
 				return
 			}
 			body["groupId"] = groupID
@@ -834,16 +811,3 @@ func (a *API) writeClient(w http.ResponseWriter, r *http.Request, id int) {
 	}
 	sendOK(w, map[string]any{"nodes": results})
 }
-
-func firstText(values ...any) string {
-	for _, v := range values {
-		if s, ok := v.(string); ok && s != "" {
-			return s
-		}
-	}
-	return ""
-}
-
-type errUnknownGroup string
-
-func (e errUnknownGroup) Error() string { return "no group named " + string(e) }

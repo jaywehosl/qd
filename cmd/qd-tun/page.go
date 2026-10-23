@@ -16,8 +16,7 @@ func withPage(cfg *localapi.Config) error {
 	cfg.Guarded = guardPage
 	cfg.Index = func(token string) ([]byte, error) {
 		return web.IndexWith(map[string]string{
-			"X_UI_BASE_PATH": "/",
-			"QD_TOKEN":       token,
+			"QD_TOKEN": token,
 		})
 	}
 	return nil

@@ -30,12 +30,12 @@ func startTray(db *clientstate.DB, tun *tunnel, ui *localapi.Server, api *client
 	var once sync.Once
 
 	return tray.Run(appName, tray.Menu{
-		Open: func() { openPage(ui.URL()) },
+		Open: func() { openPage(ui.Entry()) },
 
 		Connect: func() {
 			sub, err := db.Subscription()
 			if err != nil || !sub.Imported {
-				openPage(ui.URL())
+				openPage(ui.Entry())
 				return
 			}
 			if err := api.Connect(); err != nil {

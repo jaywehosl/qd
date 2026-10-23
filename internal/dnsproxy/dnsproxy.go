@@ -871,11 +871,13 @@ func Addrs(msg []byte) []netip.Addr {
 
 func AskFor(query []byte, qtype uint16) []byte {
 	end := questionEnd(query)
-	if end < 4 {
+	if end < 17 {
 		return nil
 	}
 	out := make([]byte, end)
 	copy(out, query[:end])
+	binary.BigEndian.PutUint16(out[4:6], 1)
+	clear(out[6:12])
 	binary.BigEndian.PutUint16(out[end-4:end-2], qtype)
 	return out
 }

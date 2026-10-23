@@ -10,7 +10,7 @@ import { useFormSeed } from '@/hooks/useFormSeed';
 import type { NodeRecord } from '@/api/queries/useNodesQuery';
 import type { Msg } from '@/utils';
 import { NodeEditSchema, NodeFormSchema, type NodeFormValues } from '@/schemas/node';
-const DEPLOY_SCRIPT_URL = 'https://raw.githubusercontent.com/jaywehosl/qd/main/install-node.sh';
+const deployScript = (ref: string) => `https://raw.githubusercontent.com/jaywehosl/qd/${ref}/install-node.sh`;
 
 type Mode = 'add' | 'edit';
 
@@ -31,6 +31,7 @@ interface NetworkIdentity {
   key?: string;
   adminUuid?: string;
   adminTag?: string;
+  version?: string;
 }
 
 function newUuid(): string {
@@ -41,7 +42,7 @@ function defaultValues(): NodeFormValues {
   return {
     id: 0,
     uuid: newUuid(),
-    name: '',
+    tag: '',
     role: 'ingress',
     dnsPrimary: '',
     dnsSecondary: '',
@@ -50,7 +51,7 @@ function defaultValues(): NodeFormValues {
     keyPath: '',
     address: '',
     port: 443,
-    apiToken: '',
+    networkKey: '',
     enable: true,
     natSlot: -1,
   };
@@ -83,7 +84,7 @@ export default function NodeFormModal({
   const [submitting, setSubmitting] = useState(false);
   const [script, setScript] = useState('');
   const [pools, setPools] = useState<NamePools>({ ingress: [], egress: [] });
-  const [identity, setIdentity] = useState({ adminUuid: '', adminTag: '' });
+  const [identity, setIdentity] = useState({ adminUuid: '', adminTag: '', version: '' });
 
   function set<K extends keyof NodeFormValues>(key: K, value: NodeFormValues[K]) {
     setValues((prev) => ({ ...prev, [key]: value }));
@@ -112,8 +113,8 @@ export default function NodeFormModal({
       const msg = await HttpUtil.get<NetworkIdentity>('/panel/api/network/key', undefined, { silent: true });
       const seen = msg?.success ? msg.obj : undefined;
       if (!alive || !seen) return;
-      if (seen.key) setValues((prev) => ({ ...prev, apiToken: seen.key as string }));
-      setIdentity({ adminUuid: seen.adminUuid ?? '', adminTag: seen.adminTag ?? '' });
+      if (seen.key) setValues((prev) => ({ ...prev, networkKey: seen.key as string }));
+      setIdentity({ adminUuid: seen.adminUuid ?? '', adminTag: seen.adminTag ?? '', version: seen.version ?? '' });
     })();
     return () => { alive = false; };
   }, [open, isEdit]);
@@ -130,22 +131,22 @@ export default function NodeFormModal({
 
   const nameOptions = useMemo(() => {
     const pool = values.role === 'egress' ? pools.egress : pools.ingress;
-    const held = new Set(taken.filter((name) => name !== node?.name));
+    const held = new Set(taken.filter((name) => name !== node?.tag));
     const free = pool.filter((name) => !held.has(name)).sort((a, b) => a.localeCompare(b));
-    const current = values.name.trim();
+    const current = values.tag.trim();
     if (current && !free.includes(current)) free.unshift(current);
     return free.map((name) => ({ value: name, label: name }));
-  }, [pools, values.role, values.name, taken, node?.name]);
+  }, [pools, values.role, values.tag, taken, node?.tag]);
 
   useEffect(() => {
     if (!open) return;
     const pool = values.role === 'egress' ? pools.egress : pools.ingress;
     if (pool.length === 0) return;
-    if (values.name && pool.includes(values.name)) return;
+    if (values.tag && pool.includes(values.tag)) return;
 
-    const held = new Set(taken.filter((name) => name !== node?.name));
+    const held = new Set(taken.filter((name) => name !== node?.tag));
     const free = pool.filter((name) => !held.has(name));
-    if (free.length > 0) set('name', free[Math.floor(Math.random() * free.length)]);
+    if (free.length > 0) set('tag', free[Math.floor(Math.random() * free.length)]);
   }, [open, values.role, pools]);
 
   const { isMobile } = useMediaQuery();
@@ -154,16 +155,16 @@ export default function NodeFormModal({
     () => (isEdit && isMobile ? (
       <span className="ms-title">
         <small>{t('pages.nodes.editNode', { defaultValue: 'Edit Node' })}</small>
-        <span>{node?.name || '—'}</span>
+        <span>{node?.tag || '—'}</span>
       </span>
     ) : isEdit ? (
       <span className="ef-title">
         {t('edit', { defaultValue: 'Edit' })}
-        <Tag tone="success" className="ef-title__node">{node?.name || '—'}</Tag>
+        <Tag tone="success" className="ef-title__node">{node?.tag || '—'}</Tag>
         {t('pages.nodes.nodeWord', { defaultValue: 'node' })}
       </span>
     ) : t('pages.nodes.addNode')),
-    [isEdit, isMobile, node?.name, t],
+    [isEdit, isMobile, node?.tag, t],
   );
 
   const addressLabel = t("pages.nodes.authority", { defaultValue: "Domain clients dial" });
@@ -172,7 +173,7 @@ export default function NodeFormModal({
   function buildPayload(v: NodeFormValues): Partial<NodeRecord> {
     const common = {
       id: v.id || 0,
-      name: v.name.trim(),
+      tag: v.tag.trim(),
       role: v.role,
       port: v.port,
       dnsPrimary: v.dnsPrimary.trim(),
@@ -186,10 +187,8 @@ export default function NodeFormModal({
       ...common,
       uuid: v.uuid,
       address: v.address.trim(),
-      apiToken: v.apiToken.trim(),
       enable: v.enable,
       natSlot: v.natSlot,
-      status: 'waiting',
     };
   }
 
@@ -215,19 +214,23 @@ export default function NodeFormModal({
     }
 
     const domain = v.address.trim().replace(/:\d+$/, '');
+    const release = identity.version.startsWith('v') ? identity.version : '';
+    const secrets = [
+      `QD_NETWORK_KEY=${v.networkKey}`,
+      `QD_NODE_UUID=${v.uuid}`,
+      `QD_ADMIN_UUID=${identity.adminUuid}`,
+    ].join(' ');
     const args = [
-      `--key ${v.apiToken}`,
-      `--tag ${v.name.trim()}`,
+      `--tag ${v.tag.trim()}`,
       `--role ${v.role}`,
       `--domain ${domain}`,
       `--port ${v.port}`,
       `--node-id ${v.id}`,
       `--nat-slot ${v.natSlot}`,
-      `--node-uuid ${v.uuid}`,
-      `--admin-uuid ${identity.adminUuid}`,
       `--admin ${identity.adminTag}`,
+      ...(release ? [`--version ${release}`] : []),
     ].join(' ');
-    setScript(`bash <(curl -Ls ${DEPLOY_SCRIPT_URL}) ${args}`);
+    setScript(` ${secrets} bash <(curl -fsSL ${deployScript(release || 'main')}) ${args}`);
   }
 
   async function copyScript() {
@@ -269,8 +272,8 @@ export default function NodeFormModal({
         <div className="node-form-grid cols-2">
           <Field label={t('pages.nodes.tag')}>
             <Select
-              value={values.name}
-              onChange={(v) => set('name', String(v))}
+              value={values.tag}
+              onChange={(v) => set('tag', String(v))}
               options={nameOptions}
             />
           </Field>

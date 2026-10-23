@@ -3,7 +3,6 @@ import { Outlet, useLocation } from 'react-router-dom';
 import AppSidebar from '@/layouts/AppSidebar';
 import { MetricsPanelProvider } from '@/layouts/MetricsPanelContext';
 import { SettingsControllerProvider } from '@/layouts/SettingsController';
-import { PublishControllerProvider } from '@/layouts/PublishController';
 import { HeaderActionsProvider } from '@/layouts/header-actions-context';
 import { BusyOverlayProvider } from '@/layouts/BusyOverlayProvider';
 import MetricsPanel from '@/pages/index/MetricsPanel';
@@ -44,7 +43,6 @@ export default function PanelLayout() {
       <MetricsPanelProvider>
         <BusyOverlayProvider>
           <HeaderActionsProvider>
-            <PublishControllerProvider>
               <SettingsControllerProvider>
               
                 <div className="topbar-shell">
@@ -60,8 +58,6 @@ export default function PanelLayout() {
                 </div>
               
               </SettingsControllerProvider>
-              
-            </PublishControllerProvider>
           </HeaderActionsProvider>
         </BusyOverlayProvider>
       </MetricsPanelProvider>

@@ -399,6 +399,7 @@ type NetworkSettings struct {
 	BlockTier        string `json:"blockTier"`
 	BlockTIF         bool   `json:"blockTif"`
 	ECHName          string `json:"echName"`
+	ECHSecret        string `json:"echSecret"`
 	ClientVersion    string `json:"clientVersion"`
 	ClientReleases   string `json:"clientReleases"`
 }
@@ -434,14 +435,14 @@ func (d *DB) NetworkSettings() (NetworkSettings, error) {
 		`SELECT refresh_minutes, dns_primary, dns_secondary, dns_cache, dns_min_ttl,
 		        dns_max_ttl, dns_stale, mtu, stats_seconds, pool, brutal_mbit, bbr_profile,
 		        max_streams, stream_window, max_stream_window, conn_window, max_conn_window,
-		        idle_seconds, keepalive_seconds, socket_buffer, block_tier, block_tif, ech_name,
+		        idle_seconds, keepalive_seconds, socket_buffer, block_tier, block_tif, ech_name, ech_secret,
 		        client_version, client_releases, ipv6
 		 FROM network WHERE id = 1`).Scan(
 		&out.RefreshMinutes, &out.DNSPrimary, &out.DNSSecondary,
 		&out.DNSCache, &out.DNSMinTTL, &out.DNSMaxTTL, &out.DNSStale,
 		&out.MTU, &out.StatsSeconds, &out.Pool, &out.BrutalMbit, &out.BBRProfile, &out.MaxStreams, &out.StreamWindow, &out.MaxStreamWindow,
 		&out.ConnWindow, &out.MaxConnWindow, &out.IdleSeconds, &out.KeepAliveSeconds,
-		&out.SocketBuffer, &out.BlockTier, &out.BlockTIF, &out.ECHName,
+		&out.SocketBuffer, &out.BlockTier, &out.BlockTIF, &out.ECHName, &out.ECHSecret,
 		&out.ClientVersion, &out.ClientReleases, &out.IPv6)
 	if errors.Is(err, sql.ErrNoRows) {
 		return defaultNetworkSettings(), nil
@@ -565,14 +566,14 @@ func (d *DB) SaveNetworkSettings(s NetworkSettings) error {
 		        pool = ?, brutal_mbit = ?, bbr_profile = ?, max_streams = ?, stream_window = ?,
 		        max_stream_window = ?, conn_window = ?, max_conn_window = ?,
 		        idle_seconds = ?, keepalive_seconds = ?, socket_buffer = ?, block_tier = ?, block_tif = ?,
-		        ech_name = ?, client_version = ?, client_releases = ?, ipv6 = ?
+		        ech_name = ?, ech_secret = ?, client_version = ?, client_releases = ?, ipv6 = ?
 		 WHERE id = 1`,
 		s.RefreshMinutes, s.DNSPrimary, s.DNSSecondary,
 		s.DNSCache, s.DNSMinTTL, s.DNSMaxTTL, s.DNSStale,
 		s.MTU, s.StatsSeconds, s.Pool, s.BrutalMbit, s.BBRProfile,
 		s.MaxStreams, s.StreamWindow, s.MaxStreamWindow, s.ConnWindow, s.MaxConnWindow,
 		s.IdleSeconds, s.KeepAliveSeconds, s.SocketBuffer, s.BlockTier, s.BlockTIF,
-		s.ECHName, s.ClientVersion, s.ClientReleases, s.IPv6)
+		s.ECHName, s.ECHSecret, s.ClientVersion, s.ClientReleases, s.IPv6)
 	if err != nil {
 		return err
 	}

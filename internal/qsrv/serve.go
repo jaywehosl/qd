@@ -35,7 +35,7 @@ func routesFor(addresses []netip.Prefix) []connectip.IPRoute {
 
 func (n *Node) serveConnectIP(ctx context.Context) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		grant, ok := n.carrier(r)
+		grant, ok := n.carrier(r, true)
 		if !ok {
 			n.refused.Add(1)
 			n.site.ServeHTTP(w, r)
@@ -68,58 +68,59 @@ func (n *Node) routeFor(r *http.Request) string {
 }
 
 func (s *live) wentUp(n int) {
+	now := time.Now().Unix()
 	s.up.Add(uint64(n))
 	s.pktUp.Add(1)
-	s.lastSeen.Store(time.Now().Unix())
+	s.lastSeen.Store(now)
+	s.tot.up.Add(uint64(n))
+	s.tot.pktUp.Add(1)
+	s.tot.lastSeen.Store(now)
 }
 
 func (s *live) cameDown(n int) {
+	now := time.Now().Unix()
 	s.down.Add(uint64(n))
 	s.pktDown.Add(1)
-	s.lastSeen.Store(time.Now().Unix())
+	s.lastSeen.Store(now)
+	s.tot.down.Add(uint64(n))
+	s.tot.pktDown.Add(1)
+	s.tot.lastSeen.Store(now)
 }
 
 func (n *Node) carry(ctx context.Context, conn *connectip.Conn, qc *quic.Conn, grant Grant, route string) {
+	defer conn.Close()
 	address, early := n.pool.takeOwn(grant.Seat)
 	if !early {
 		if !settles(qc) {
-			conn.Close()
 			return
 		}
 		var err error
 		if address, err = n.pool.take(grant.Seat); err != nil {
-			conn.Close()
 			return
 		}
 	}
 
-	addresses := carried(address)
-	if err := conn.AssignAddresses(ctx, addresses); err != nil {
-		n.pool.give(address)
-		conn.Close()
-		return
-	}
-	if err := conn.AdvertiseRoute(ctx, routesFor(addresses)); err != nil {
-		n.pool.give(address)
-		conn.Close()
-		return
-	}
-	if !settles(qc) {
-		n.pool.give(address)
-		conn.Close()
-		return
-	}
-
-	s := newLive(grant, address, "", route)
+	s := n.newLive(grant, address, "", route, false)
 	s.conn = qc
 	s.marked = true
 	s.end = func() { conn.Close() }
-	defer conn.Close()
+	defer n.seat(s)()
+
+	addresses := carried(address)
+	if err := conn.AssignAddresses(ctx, addresses); err != nil {
+		return
+	}
+	if err := conn.AdvertiseRoute(ctx, routesFor(addresses)); err != nil {
+		return
+	}
+	if !settles(qc) {
+		return
+	}
 
 	n.runStack(ctx, s, counted{conn: conn, s: s})
 }
 
-func (n *Node) runStack(ctx context.Context, s *live, tun netstack.Tunnel) {
+func (n *Node) seat(s *live) func() {
 	seat := s.grant.Seat
 	n.mu.Lock()
 	was := n.held[seat]
@@ -127,7 +128,7 @@ func (n *Node) runStack(ctx context.Context, s *live, tun netstack.Tunnel) {
 	n.held[seat] = s
 	n.mu.Unlock()
 
-	defer func() {
+	return func() {
 		s.over.Store(true)
 		n.mu.Lock()
 		current := n.held[seat] == s
@@ -144,8 +145,10 @@ func (n *Node) runStack(ctx context.Context, s *live, tun netstack.Tunnel) {
 		if current && !back {
 			n.links.forget(seat)
 		}
-	}()
+	}
+}
 
+func (n *Node) runStack(ctx context.Context, s *live, tun netstack.Tunnel) {
 	stack, err := netstack.New(steered{node: n, grant: s.grant, s: s, hops: defaultHops}, n.Tunables().MTU, false)
 	if err != nil {
 		return
@@ -221,7 +224,7 @@ func (c countedTun) WritePacket(b []byte) ([]byte, error) {
 
 func (n *Node) serveIPOverTCP(ctx context.Context) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		grant, ok := n.carrier(r)
+		grant, ok := n.carrier(r, true)
 		if !ok {
 			n.refused.Add(1)
 			n.site.ServeHTTP(w, r)
@@ -247,13 +250,14 @@ func (n *Node) carryStream(ctx context.Context, tun *streamTun, end func(), gran
 		return
 	}
 
-	s := newLive(grant, address, peer, route)
+	s := n.newLive(grant, address, peer, route, false)
 	s.stream = true
 	s.end = end
 	if tun.marks > 0 {
 		s.marked, tun.note = true, s.noteMark
 	}
 
+	defer n.seat(s)()
 	n.runStack(ctx, s, countedTun{tun: tun, s: s})
 }
 
@@ -322,7 +326,7 @@ func (d refusing) DialUDP(context.Context, netip.AddrPort) (net.Conn, error) {
 }
 
 func (n *Node) serveConnect(w http.ResponseWriter, r *http.Request) {
-	grant, ok := n.carrier(r)
+	grant, ok := n.carrier(r, false)
 	if !ok {
 		n.refused.Add(1)
 		n.site.ServeHTTP(w, r)
@@ -460,16 +464,21 @@ func (d steered) route(ctx context.Context) string {
 const flowQuiet = 2 * time.Minute
 
 type tally struct {
-	to   io.Writer
-	sum  *atomic.Uint64
-	seen *atomic.Int64
+	to      io.Writer
+	sum     *atomic.Uint64
+	seen    *atomic.Int64
+	all     *atomic.Uint64
+	allSeen *atomic.Int64
 }
 
 func (t tally) Write(p []byte) (int, error) {
 	n, err := t.to.Write(p)
 	if n > 0 {
+		now := time.Now().Unix()
 		t.sum.Add(uint64(n))
-		t.seen.Store(time.Now().Unix())
+		t.seen.Store(now)
+		t.all.Add(uint64(n))
+		t.allSeen.Store(now)
 	}
 	return n, err
 }
@@ -478,11 +487,11 @@ func tallied(to io.Writer, s *live, up bool) io.Writer {
 	if s == nil {
 		return to
 	}
-	sum := &s.down
+	sum, all := &s.down, &s.tot.down
 	if up {
-		sum = &s.up
+		sum, all = &s.up, &s.tot.up
 	}
-	return tally{to: to, sum: sum, seen: &s.lastSeen}
+	return tally{to: to, sum: sum, seen: &s.lastSeen, all: all, allSeen: &s.tot.lastSeen}
 }
 
 func settles(qc *quic.Conn) bool {

@@ -3,6 +3,9 @@ package qdmobile
 import (
 	"time"
 
+	"github.com/quic-go/quic-go"
+	"github.com/quic-go/quic-go/http3"
+
 	"github.com/jaywehosl/qd/internal/clientdns"
 	"github.com/jaywehosl/qd/internal/clientstate"
 	"github.com/jaywehosl/qd/internal/qcli"
@@ -15,13 +18,23 @@ func (c *Client) upkeep() {
 	go c.api.Greet()
 }
 
+type heard struct {
+	lost, drops uint64
+}
+
+func heardWire() heard {
+	lost, _ := quic.LossStats()
+	_, missed := quic.DatagramStats()
+	return heard{lost: lost, drops: missed + quic.DatagramsShed() + http3.StreamDatagramsDropped()}
+}
+
 func (c *Client) meter() {
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
 
 	var prev qcli.Counters
 	var prevDNS clientdns.Stats
-	quiet := 0
+	prevWire := heardWire()
 
 	for {
 		select {
@@ -33,8 +46,9 @@ func (c *Client) meter() {
 		c.mu.Lock()
 		live, warm := c.live, c.dns
 		c.mu.Unlock()
+		now := heardWire()
 		if live == nil {
-			prev, prevDNS = qcli.Counters{}, clientdns.Stats{}
+			prev, prevDNS, prevWire = qcli.Counters{}, clientdns.Stats{}, now
 			continue
 		}
 
@@ -48,30 +62,27 @@ func (c *Client) meter() {
 		if up > 0 || down > 0 {
 			c.db.AddTraffic(up, down)
 		}
-		if got == prev && dns == prevDNS {
-			quiet++
-			if quiet%quietStep != 0 {
-				continue
-			}
-		} else {
-			quiet = 0
-		}
-		c.db.AddSample(clientstate.Sample{
+		sample := clientstate.Sample{
 			T:           time.Now().Unix(),
 			Up:          up,
 			Down:        down,
 			PktOut:      gap(got.Out, prev.Out),
 			PktIn:       gap(got.In, prev.In),
+			Lost:        gap(now.lost, prevWire.lost),
+			Drops:       gap(now.drops, prevWire.drops),
+			SendDrop:    gap(got.Shed, prev.Shed),
+			SendErr:     gap(got.Failed, prev.Failed),
 			DNSQueries:  gap(dns.Queries, prevDNS.Queries),
 			DNSCached:   gap(dns.Hits, prevDNS.Hits),
 			DNSUpstream: gap(dns.Upstream, prevDNS.Upstream),
 			Adblock:     gap(dns.Blocked, prevDNS.Blocked),
-		})
-		prev, prevDNS = got, dns
+		}
+		if !sample.Quiet() {
+			c.db.AddSample(sample)
+		}
+		prev, prevDNS, prevWire = got, dns, now
 	}
 }
-
-const quietStep = 30
 
 func gap(now, before uint64) int64 {
 	if now < before {

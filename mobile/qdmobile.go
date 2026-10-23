@@ -3,6 +3,7 @@ package qdmobile
 import (
 	"context"
 	"encoding/hex"
+	"log"
 	"net/netip"
 	"path/filepath"
 	"runtime"
@@ -20,6 +21,7 @@ import (
 	"github.com/jaywehosl/qd/internal/qcli/packet"
 	"github.com/jaywehosl/qd/internal/qdcrypt"
 	"github.com/jaywehosl/qd/internal/qsrv/uplink/quicconn"
+	"github.com/jaywehosl/qd/internal/quiet"
 	"github.com/jaywehosl/qd/internal/qwire"
 	"github.com/jaywehosl/qd/internal/update"
 )
@@ -109,6 +111,7 @@ func Open(stateDir string, host Host, protector Protector, deviceID, model, name
 	update.Kind = "android"
 	runtime.GOMAXPROCS(min(runtime.NumCPU(), coreThreads))
 	markJournal(stateDir)
+	log.SetOutput(quiet.Writer(log.Writer()))
 	say("open: state=%s version=%s", stateDir, update.Version)
 
 	db, err := clientstate.Open(filepath.Join(stateDir, "client.db"))

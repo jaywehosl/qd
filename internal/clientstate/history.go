@@ -8,8 +8,6 @@ type Sample struct {
 	PktIn       int64 `json:"pktIn"`
 	Lost        int64 `json:"lost"`
 	Drops       int64 `json:"drops"`
-	Reorder     int64 `json:"reorder"`
-	Retries     int64 `json:"retries"`
 	SendDrop    int64 `json:"sendDrop"`
 	SendErr     int64 `json:"sendErr"`
 	DNSQueries  int64 `json:"dnsQueries"`
@@ -18,27 +16,33 @@ type Sample struct {
 	Adblock     int64 `json:"adblock"`
 }
 
-const sampleCap = 3900
+const sampleKeep = 3900
+
+func (s Sample) Quiet() bool {
+	return s.Up == 0 && s.Down == 0 && s.PktOut == 0 && s.PktIn == 0 && s.Lost == 0 && s.Drops == 0 &&
+		s.SendDrop == 0 && s.SendErr == 0 && s.DNSQueries == 0 && s.DNSCached == 0 && s.DNSUpstream == 0 && s.Adblock == 0
+}
 
 func (d *DB) AddSample(s Sample) error {
 	if _, err := d.sql.Exec(`
 		INSERT OR REPLACE INTO samples
-			(t, up, down, pkt_out, pkt_in, lost, drops, reorder, retries,
+			(t, up, down, pkt_out, pkt_in, lost, drops,
 			 send_drop, send_err, dns_queries, dns_cached, dns_upstream, adblock)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		s.T, s.Up, s.Down, s.PktOut, s.PktIn, s.Lost, s.Drops, s.Reorder, s.Retries,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		s.T, s.Up, s.Down, s.PktOut, s.PktIn, s.Lost, s.Drops,
 		s.SendDrop, s.SendErr, s.DNSQueries, s.DNSCached, s.DNSUpstream, s.Adblock); err != nil {
 		return err
 	}
-	_, err := d.sql.Exec(
-		`DELETE FROM samples WHERE t NOT IN (SELECT t FROM samples ORDER BY t DESC LIMIT ?)`,
-		sampleCap)
+	if s.T%60 != 0 {
+		return nil
+	}
+	_, err := d.sql.Exec(`DELETE FROM samples WHERE t < ?`, s.T-sampleKeep)
 	return err
 }
 
 func (d *DB) Samples(since, until int64, points int) ([]Sample, error) {
 	rows, err := d.sql.Query(`
-		SELECT t, up, down, pkt_out, pkt_in, lost, drops, reorder, retries,
+		SELECT t, up, down, pkt_out, pkt_in, lost, drops,
 		       send_drop, send_err, dns_queries, dns_cached, dns_upstream, adblock
 		  FROM samples WHERE t >= ? ORDER BY t`, since)
 	if err != nil {
@@ -50,7 +54,7 @@ func (d *DB) Samples(since, until int64, points int) ([]Sample, error) {
 	for rows.Next() {
 		var s Sample
 		if err := rows.Scan(&s.T, &s.Up, &s.Down, &s.PktOut, &s.PktIn, &s.Lost, &s.Drops,
-			&s.Reorder, &s.Retries, &s.SendDrop, &s.SendErr,
+			&s.SendDrop, &s.SendErr,
 			&s.DNSQueries, &s.DNSCached, &s.DNSUpstream, &s.Adblock); err != nil {
 			return nil, err
 		}
@@ -103,8 +107,6 @@ func peak(dst *Sample, s Sample) {
 	dst.PktIn = max(dst.PktIn, s.PktIn)
 	dst.Lost = max(dst.Lost, s.Lost)
 	dst.Drops = max(dst.Drops, s.Drops)
-	dst.Reorder = max(dst.Reorder, s.Reorder)
-	dst.Retries = max(dst.Retries, s.Retries)
 	dst.SendDrop = max(dst.SendDrop, s.SendDrop)
 	dst.SendErr = max(dst.SendErr, s.SendErr)
 	dst.DNSQueries = max(dst.DNSQueries, s.DNSQueries)

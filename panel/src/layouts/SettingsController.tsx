@@ -109,7 +109,7 @@ export function SettingsControllerProvider({ children }: { children: ReactNode }
         fields={changedDangerFields}
         onConfirm={() => { setShowDanger(false); proceedSave(); }}
         onCancel={() => setShowDanger(false)}
-        onBackup={() => { window.location.href = (window.X_UI_BASE_PATH || '') + 'panel/api/server/getDb'; }}
+        onBackup={() => { window.location.href = '/panel/api/server/getDb'; }}
       />
     </SettingsControllerContext.Provider>
   );

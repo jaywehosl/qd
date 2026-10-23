@@ -16,8 +16,8 @@ import (
 )
 
 func (state *controlState) dnsConfig() dnsproxy.Config {
-	settings, _ := state.db.NetworkSettings()
-	rows, _ := state.db.DNSRecords()
+	settings, _ := state.data().NetworkSettings()
+	rows, _ := state.data().DNSRecords()
 
 	records := make([]dnsproxy.Record, 0, len(rows))
 	for _, r := range rows {
@@ -64,8 +64,8 @@ func (state *controlState) reloadResolver() {
 }
 
 func (state *controlState) loadLists() {
-	settings, _ := state.db.NetworkSettings()
-	rows, _ := state.db.DNSRecords()
+	settings, _ := state.data().NetworkSettings()
+	rows, _ := state.data().DNSRecords()
 	spared := make([]string, 0, len(rows))
 	for _, r := range rows {
 		if r.Enable {

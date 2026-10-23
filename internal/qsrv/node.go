@@ -39,6 +39,7 @@ type Grant struct {
 	AllowExit bool
 	Session   uint32
 	Seat      uint32
+	Via       uint32
 	Peer      bool
 }
 
@@ -81,6 +82,7 @@ type Config struct {
 
 	Verify func(raw string) (Grant, bool)
 	Admit  func(g Grant, version, build string) bool
+	Seat   func(g Grant, device string) bool
 	Reset  *quic.StatelessResetKey
 	Shelf  *update.Shelf
 	Peers  func() []Peer
@@ -115,6 +117,7 @@ type live struct {
 	conn    *quic.Conn
 	since   int64
 	transit bool
+	tot     *totals
 	stream  bool
 	marked  bool
 	end     func()
@@ -153,7 +156,77 @@ type Node struct {
 	mu   sync.Mutex
 	held map[uint32]*live
 
+	tally sync.Map
+
 	srv *http3.Server
+}
+
+type totalKey struct {
+	session uint32
+	transit bool
+}
+
+type totals struct {
+	up, down, pktUp, pktDown atomic.Uint64
+	lastSeen                 atomic.Int64
+}
+
+type Total struct {
+	Session  uint32
+	Transit  bool
+	Up       uint64
+	Down     uint64
+	PktUp    uint64
+	PktDown  uint64
+	LastSeen int64
+}
+
+const tallyKeep = time.Hour
+
+func (n *Node) total(session uint32, transit bool) *totals {
+	key := totalKey{session, transit}
+	if held, ok := n.tally.Load(key); ok {
+		return held.(*totals)
+	}
+	fresh := &totals{}
+	fresh.lastSeen.Store(time.Now().Unix())
+	held, _ := n.tally.LoadOrStore(key, fresh)
+	return held.(*totals)
+}
+
+func (n *Node) newLive(grant Grant, address netip.Prefix, peer, route string, transit bool) *live {
+	now := time.Now().Unix()
+	s := &live{grant: grant, address: address, peer: peer, since: now, transit: transit}
+	s.tot = n.total(grant.Session, transit)
+	s.lastSeen.Store(now)
+	s.route.Store(&route)
+	return s
+}
+
+func (n *Node) Totals() []Total {
+	n.mu.Lock()
+	inUse := make(map[totalKey]bool, len(n.held))
+	for _, s := range n.held {
+		inUse[totalKey{s.grant.Session, s.transit}] = true
+	}
+	n.mu.Unlock()
+
+	cut := time.Now().Add(-tallyKeep).Unix()
+	out := []Total{}
+	n.tally.Range(func(k, v any) bool {
+		key, t := k.(totalKey), v.(*totals)
+		if !inUse[key] && t.lastSeen.Load() < cut {
+			n.tally.Delete(k)
+			return true
+		}
+		out = append(out, Total{
+			Session: key.session, Transit: key.transit,
+			Up: t.up.Load(), Down: t.down.Load(), PktUp: t.pktUp.Load(), PktDown: t.pktDown.Load(),
+			LastSeen: t.lastSeen.Load(),
+		})
+		return true
+	})
+	return out
 }
 
 func New(cfg Config) *Node {
@@ -191,11 +264,6 @@ func (n *Node) Retune(t Tunables) {
 }
 
 func (n *Node) Tunables() Tunables { return *n.tune.Load() }
-
-func (n *Node) SetToken(token string) {
-	n.cfg.Token = token
-	n.links.setToken(token)
-}
 
 func (n *Node) Live() (sessions int, transits, refused uint64) {
 	n.mu.Lock()
@@ -256,7 +324,7 @@ func (n *Node) seatsOf(id uint32, drop bool) []*live {
 
 	going := []*live{}
 	for seat, s := range n.held {
-		if seat != id && s.grant.Session != id {
+		if seat != id && s.grant.Session != id && s.grant.Via != id {
 			continue
 		}
 		going = append(going, s)
@@ -270,18 +338,26 @@ func (n *Node) seatsOf(id uint32, drop bool) []*live {
 func (n *Node) Forget(id uint32) {
 	for _, s := range n.seatsOf(id, true) {
 		n.links.forget(s.grant.Seat)
-		if s.end == nil {
-			n.pool.give(s.address)
-			continue
-		}
 		n.mu.Lock()
 		ends := []func(){}
-		for at := s; at != nil && at.end != nil; at = at.under {
-			ends = append(ends, at.end)
+		conns := []*quic.Conn{}
+		for at := s; at != nil; at = at.under {
+			if at.end != nil {
+				ends = append(ends, at.end)
+			}
+			if at.conn != nil {
+				conns = append(conns, at.conn)
+			}
 		}
 		n.mu.Unlock()
+		if s.end == nil {
+			n.pool.give(s.address)
+		}
 		for _, end := range ends {
 			end()
+		}
+		for _, qc := range conns {
+			qc.CloseWithError(0, "")
 		}
 	}
 }
@@ -293,6 +369,16 @@ func (n *Node) Reset(id uint32) {
 		s.pktUp.Store(0)
 		s.pktDown.Store(0)
 	}
+	n.tally.Range(func(k, v any) bool {
+		if k.(totalKey).session == id {
+			t := v.(*totals)
+			t.up.Store(0)
+			t.down.Store(0)
+			t.pktUp.Store(0)
+			t.pktDown.Store(0)
+		}
+		return true
+	})
 }
 
 func (n *Node) quicConfig() *quic.Config {
@@ -380,20 +466,25 @@ func (n *Node) Run(ctx context.Context) error {
 	return srv.ServeListener(ln)
 }
 
-func (n *Node) carrier(r *http.Request) (Grant, bool) {
+func (n *Node) carrier(r *http.Request, opening bool) (Grant, bool) {
 	grant, ok := n.verified(r)
 	if !ok || grant.Session == 0 || grant.Seat == 0 {
 		return Grant{}, false
 	}
-	if n.cfg.Admit != nil && !grant.Peer &&
-		!n.cfg.Admit(grant, r.Header.Get(update.HeaderVersion), r.Header.Get(update.HeaderKind)) {
+	if grant.Peer {
+		return grant, true
+	}
+	if n.cfg.Admit != nil && !n.cfg.Admit(grant, r.Header.Get(update.HeaderVersion), r.Header.Get(update.HeaderKind)) {
+		return Grant{}, false
+	}
+	if opening && n.cfg.Seat != nil && !n.cfg.Seat(grant, r.Header.Get(HeaderDevice)) {
 		return Grant{}, false
 	}
 	return grant, true
 }
 
 func (n *Node) serveAuth(w http.ResponseWriter, r *http.Request) {
-	grant, ok := n.carrier(r)
+	grant, ok := n.carrier(r, true)
 	if !ok {
 		n.refused.Add(1)
 		n.site.ServeHTTP(w, r)

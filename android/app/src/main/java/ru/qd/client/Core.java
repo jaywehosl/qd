@@ -7,8 +7,6 @@ import android.content.Intent;
 import android.net.VpnService;
 import android.os.Build;
 import android.provider.Settings;
-import android.system.Os;
-import android.system.OsConstants;
 
 import org.json.JSONObject;
 
@@ -22,19 +20,7 @@ public final class Core {
     static final boolean ONLY_TCP = false;
 
     static {
-        boolean opened = false;
-        try {
-            Os.prctl(OsConstants.PR_SET_DUMPABLE, 1, 0, 0, 0);
-            opened = true;
-        } catch (Throwable ignored) {
-        }
         Qdmobile.setZone(java.util.TimeZone.getDefault().getID());
-        if (opened) {
-            try {
-                Os.prctl(OsConstants.PR_SET_DUMPABLE, 0, 0, 0, 0);
-            } catch (Throwable ignored) {
-            }
-        }
     }
 
     private static Client client;

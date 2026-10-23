@@ -39,6 +39,15 @@ func Open(path string) (*DB, error) {
 		handle.Close()
 		return nil, fmt.Errorf("clientstate: schema: %w", err)
 	}
+	for _, drop := range []string{
+		`ALTER TABLE rules DROP COLUMN matched`,
+		`ALTER TABLE domain_rules DROP COLUMN matched`,
+		`ALTER TABLE samples DROP COLUMN reorder`,
+		`ALTER TABLE samples DROP COLUMN retries`,
+		`DELETE FROM settings WHERE key = 'ratePinned'`,
+	} {
+		handle.Exec(drop)
+	}
 	return &DB{sql: handle}, nil
 }
 
@@ -206,7 +215,6 @@ type Settings struct {
 	Adblock bool `json:"-"`
 
 	FixedRate  int    `json:"fixedRate"`
-	RatePinned bool   `json:"ratePinned"`
 	BBRProfile string `json:"-"`
 }
 
@@ -251,8 +259,6 @@ func (d *DB) Settings() (Settings, error) {
 			s.Adblock = v == "1"
 		case "fixedRate":
 			s.FixedRate = atoiOr(v, 0)
-		case "ratePinned":
-			s.RatePinned = v == "1"
 		case "bbrProfile":
 			s.BBRProfile = v
 		}
@@ -277,7 +283,6 @@ func (d *DB) SaveSettings(s Settings) error {
 		"egress":             boolText(s.Egress),
 		"adblock":            boolText(s.Adblock),
 		"fixedRate":          strconv.Itoa(s.FixedRate),
-		"ratePinned":         boolText(s.RatePinned),
 		"bbrProfile":         s.BBRProfile,
 	} {
 		if _, err := tx.Exec(
@@ -306,14 +311,12 @@ func (d *DB) SetValue(key, value string) error {
 }
 
 func (d *DB) ResetSettings() error {
-	if _, err := d.sql.Exec(`DELETE FROM settings`); err != nil {
-		return err
+	for _, table := range []string{"settings", "rules", "domain_rules", "bundle_rules", "sites"} {
+		if _, err := d.sql.Exec(`DELETE FROM ` + table); err != nil {
+			return err
+		}
 	}
-	if _, err := d.sql.Exec(`DELETE FROM rules`); err != nil {
-		return err
-	}
-	_, err := d.sql.Exec(`DELETE FROM sites`)
-	return err
+	return nil
 }
 
 func atoiOr(s string, fallback int) int {

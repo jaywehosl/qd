@@ -18,19 +18,20 @@ const echRecheck = 5 * time.Second
 
 type echHolder struct {
 	db      func() *store.DB
-	secret  string
+	network string
 	renamed func(name string)
 
 	mu      sync.Mutex
 	checked time.Time
 	name    string
+	secret  string
 	keys    []tls.EncryptedClientHelloKey
 	list    []byte
 }
 
-func newECH(db func() *store.DB, secret, name string, renamed func(string)) *echHolder {
-	h := &echHolder{db: db, secret: secret, renamed: renamed, checked: time.Now()}
-	h.apply(name)
+func newECH(db func() *store.DB, network string, settings store.NetworkSettings, renamed func(string)) *echHolder {
+	h := &echHolder{db: db, network: network, renamed: renamed, checked: time.Now()}
+	h.apply(settings.ECHName, settings.ECHSecret)
 	go func() {
 		for range time.Tick(echRecheck) {
 			h.current()
@@ -47,18 +48,23 @@ func (h *echHolder) current() ([]tls.EncryptedClientHelloKey, []byte) {
 	defer h.mu.Unlock()
 	if time.Since(h.checked) > echRecheck {
 		h.checked = time.Now()
-		if settings, err := h.db().NetworkSettings(); err == nil && settings.ECHName != h.name {
-			h.apply(settings.ECHName)
+		if settings, err := h.db().NetworkSettings(); err == nil && (settings.ECHName != h.name || settings.ECHSecret != h.secret) {
+			h.apply(settings.ECHName, settings.ECHSecret)
 		}
 	}
 	return h.keys, h.list
 }
 
-func (h *echHolder) apply(name string) {
-	h.name = name
+func (h *echHolder) apply(name, secret string) {
+	renamed := name != h.name
+	h.name, h.secret = name, secret
 	h.keys, h.list = []tls.EncryptedClientHelloKey{}, nil
 	if name != "" {
-		mac := hmac.New(sha256.New, []byte(h.secret))
+		seed := secret
+		if seed == "" {
+			seed = h.network
+		}
+		mac := hmac.New(sha256.New, []byte(seed))
 		mac.Write([]byte("qd ech " + name))
 		key, list, err := qsrv.ECHKey(mac.Sum(nil), name)
 		if err != nil {
@@ -70,7 +76,7 @@ func (h *echHolder) apply(name string) {
 	} else {
 		fmt.Printf("ech        off\n")
 	}
-	if h.renamed != nil {
+	if renamed && h.renamed != nil {
 		go h.renamed(name)
 	}
 }

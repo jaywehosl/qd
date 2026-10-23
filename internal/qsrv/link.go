@@ -259,17 +259,6 @@ func (ls *links) to(at where, session uint32) *link {
 	return l
 }
 
-func (ls *links) setToken(token string) {
-	ls.mu.Lock()
-	ls.token = token
-	for _, l := range ls.held {
-		l.mu.Lock()
-		l.token = token
-		l.mu.Unlock()
-	}
-	ls.mu.Unlock()
-}
-
 func (ls *links) closeAll() {
 	ls.mu.Lock()
 	defer ls.mu.Unlock()

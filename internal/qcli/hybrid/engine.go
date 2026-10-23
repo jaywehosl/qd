@@ -247,6 +247,7 @@ func (e *Engine) pumpOutbound(ctx context.Context, rd packet.Reader, src packet.
 			icmp, err := e.carry(tun, p.Data, mark)
 			if err != nil {
 				e.cWriteErr.Add(1)
+				e.Meter.Failed.Add(1)
 				continue
 			}
 			if len(icmp) > 0 && e.inPieces(tun, p.Data, mark) {
@@ -265,6 +266,7 @@ func (e *Engine) pumpOutbound(ctx context.Context, rd packet.Reader, src packet.
 			beat.end()
 			if err != nil {
 				e.cInErr.Add(1)
+				e.Meter.Failed.Add(1)
 			}
 		}
 	}
@@ -329,6 +331,7 @@ func (e *Engine) pumpInbound(ctx context.Context, src packet.Source, tun Tunnel,
 		beat.end()
 		if err != nil {
 			e.cInErr.Add(1)
+			e.Meter.Failed.Add(1)
 		} else {
 			e.cInject.Add(uint64(len(batch)))
 			e.Meter.delivered(batch)
@@ -390,6 +393,7 @@ func (t *tcpTunnel) WritePacket(b []byte) ([]byte, error) {
 	default:
 		t.give(held)
 		t.cOutDrop.Add(1)
+		t.meter.Shed.Add(1)
 	}
 	return nil, nil
 }
@@ -405,6 +409,7 @@ func (t *tcpTunnel) deliver(st *netstack.Stack, w packet.Composer) {
 		t.beat.end()
 		if err != nil {
 			t.cWriteErr.Add(1)
+			t.meter.Failed.Add(1)
 		} else {
 			t.cWrite.Add(uint64(pending))
 		}

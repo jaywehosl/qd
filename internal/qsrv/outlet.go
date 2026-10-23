@@ -39,11 +39,23 @@ type here struct {
 	from origin
 }
 
-var errNear = errors.New("the node carries no flows to its own, link-local or unmapped stand-in addresses")
+var errNear = errors.New("the node carries no flows to its own, private, link-local or unmapped stand-in addresses")
 
-func near(dst netip.AddrPort) bool {
-	a := dst.Addr().Unmap()
-	return a.IsLoopback() || a.IsUnspecified() || a.IsLinkLocalUnicast() || a.IsMulticast() || synthetic.Contains(a)
+var carrierGrade = netip.MustParsePrefix("100.64.0.0/10")
+
+func near(dst netip.AddrPort) bool { return nearAddr(dst.Addr()) }
+
+func nearAddr(a netip.Addr) bool {
+	a = a.Unmap()
+	return a.IsLoopback() || a.IsUnspecified() || a.IsLinkLocalUnicast() || a.IsMulticast() ||
+		a.IsPrivate() || carrierGrade.Contains(a) || synthetic.Contains(a)
+}
+
+func (d here) Ping(ctx context.Context, dst netip.Addr, ttl uint8, payload []byte) (netstack.Echo, error) {
+	if nearAddr(dst) {
+		return netstack.Echo{}, errNear
+	}
+	return d.NetDialer.Ping(ctx, dst, ttl, payload)
 }
 
 func (d here) DialTCP(ctx context.Context, dst netip.AddrPort) (net.Conn, error) {

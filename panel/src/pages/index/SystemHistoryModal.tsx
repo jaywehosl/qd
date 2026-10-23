@@ -255,7 +255,7 @@ function SystemHistoryPanel({ tint, live }: SystemHistoryModalProps) {
     if (nodeId === null) return;
     const msg = await HttpUtil.get<string>(`/panel/api/nodes/${nodeId}/logs/download`);
     if (msg?.success && typeof msg.obj === 'string') {
-      const name = nodes.find((n) => n.id === nodeId)?.name || String(nodeId);
+      const name = nodes.find((n) => n.id === nodeId)?.tag || String(nodeId);
       FileManager.downloadTextFile(msg.obj, `${name}.log`);
     }
   }, [nodeId, nodes]);
@@ -269,7 +269,7 @@ function SystemHistoryPanel({ tint, live }: SystemHistoryModalProps) {
     if (nodeId === null) return;
     const msg = await HttpUtil.get<unknown>(`/panel/api/nodes/${nodeId}/history/export`, { window: span * 60 });
     if (!msg?.success) return;
-    const name = nodes.find((n) => n.id === nodeId)?.name || String(nodeId);
+    const name = nodes.find((n) => n.id === nodeId)?.tag || String(nodeId);
     FileManager.downloadTextFile(JSON.stringify(msg.obj, null, 2), `${name}-history.json`);
   }
 

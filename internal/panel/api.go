@@ -3,11 +3,11 @@ package panel
 import (
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/jaywehosl/qd/internal/netstate"
 	"github.com/jaywehosl/qd/internal/qdcrypt"
@@ -46,16 +46,14 @@ func (a *API) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("/panel/api/nodes/del/", a.remove("nodes.delete"))
 
 	mux.HandleFunc("/panel/api/clients/groups", a.groupsList)
-	mux.HandleFunc("/panel/api/clients/groups/create", a.save("groups.save"))
+	mux.HandleFunc("/panel/api/clients/groups/save", a.save("groups.save"))
 	mux.HandleFunc("/panel/api/clients/groups/delete", a.groupDelete)
 
 	mux.HandleFunc("/panel/api/clients/list", a.clientsList)
 	mux.HandleFunc("/panel/api/clients/list/paged", a.clientsPaged)
-	mux.HandleFunc("/panel/api/clients/add", a.clientSave(0))
-	mux.HandleFunc("/panel/api/clients/update/", a.clientSaveWithID)
+	mux.HandleFunc("/panel/api/clients/add", a.clientAdd)
+	mux.HandleFunc("/panel/api/clients/update/", a.clientUpdate)
 	mux.HandleFunc("/panel/api/clients/del/", a.clientDelete)
-
-	mux.HandleFunc("/panel/api/network/health", a.health)
 
 	a.extraRoutes(mux)
 	a.opsRoutes(mux)
@@ -78,48 +76,27 @@ func (a *API) save(op string) http.HandlerFunc {
 	}
 }
 
-func (a *API) saveWithID(op string) http.HandlerFunc {
+func (a *API) remove(op string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := lastPathSegment(r.URL.Path)
-
-		var row map[string]any
-		if err := bindBody(r, &row); err != nil {
+		n, err := strconv.Atoi(lastPathSegment(r.URL.Path))
+		if err != nil {
 			sendFail(w, err)
 			return
 		}
-		if row == nil {
-			row = map[string]any{}
-		}
-		if n, err := strconv.Atoi(id); err == nil {
-			row["ID"] = n
-		}
-
-		results, err := a.write(op, row)
-		if err != nil {
-			sendFailWith(w, err, results)
-			return
-		}
-		sendOK(w, map[string]any{"nodes": results})
-	}
-}
-
-func (a *API) remove(op string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		id := lastPathSegment(r.URL.Path)
-		n, err := strconv.Atoi(id)
-		if err != nil {
-			var body struct {
-				ID int `json:"id"`
-			}
-			bindBody(r, &body)
-			n = body.ID
-		}
 
 		skip := 0
+		var off *WriteResult
 		if op == "nodes.delete" {
 			skip = n
+			off = &WriteResult{NodeID: n, Tag: a.fleet.TagOf(n), OK: true}
+			if _, err := a.fleet.Ask(n, "nodes.save", map[string]any{"id": n, "enable": false}); err != nil {
+				off.OK, off.Error = false, "did not take its switch-off and keeps carrying until it is switched off by hand: "+err.Error()
+			}
 		}
 		results, err := a.writeExcept(op, map[string]int{"id": n}, skip)
+		if off != nil {
+			results = append(results, *off)
+		}
 		if err != nil {
 			sendFailWith(w, err, results)
 			return
@@ -138,16 +115,14 @@ func (a *API) updateNode(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) writeNode(w http.ResponseWriter, r *http.Request, id int) {
-	var row map[string]any
+	row := map[string]any{}
 	if err := bindBody(r, &row); err != nil {
 		sendFail(w, err)
 		return
 	}
-	if row == nil {
-		row = map[string]any{}
-	}
+	delete(row, "id")
 	if id > 0 {
-		row["ID"] = id
+		row["id"] = id
 	}
 
 	if text, _ := row["uuid"].(string); text == "" {
@@ -171,7 +146,7 @@ func (a *API) seedEntrypoints() {
 	}
 	var nodes []struct {
 		ID   int    `json:"id"`
-		Tag  string `json:"name"`
+		Tag  string `json:"tag"`
 		Port int    `json:"port"`
 	}
 	if json.Unmarshal(body, &nodes) != nil {
@@ -276,7 +251,7 @@ func (a *API) countPerNode(rows []map[string]any) {
 	groupExit := map[string]bool{}
 	if groups, err := a.groups(); err == nil {
 		for _, g := range groups {
-			groupExit[g.Name] = g.AllowExit
+			groupExit[g.Tag] = g.AllowExit
 		}
 	}
 	exits := []int{}
@@ -291,7 +266,7 @@ func (a *API) countPerNode(rows []map[string]any) {
 	online := map[int]int{}
 	for _, c := range clients {
 		here := map[int]bool{}
-		if ids, ok := c["inboundIds"].([]int); ok {
+		if ids, ok := c["entrypointIds"].([]int); ok {
 			for _, id := range ids {
 				here[nodeOfEntry[id]] = true
 			}
@@ -318,55 +293,12 @@ func (a *API) countPerNode(rows []map[string]any) {
 	}
 }
 
-func (a *API) health(w http.ResponseWriter, r *http.Request) {
-	sendOK(w, a.fleet.Health())
-}
-
 func bindBody(r *http.Request, dst any) error {
-	kind := r.Header.Get("Content-Type")
-
-	if strings.Contains(kind, "json") {
-		return json.NewDecoder(io.LimitReader(r.Body, 4<<20)).Decode(dst)
+	err := json.NewDecoder(io.LimitReader(r.Body, 4<<20)).Decode(dst)
+	if errors.Is(err, io.EOF) {
+		return nil
 	}
-
-	if err := r.ParseForm(); err != nil {
-		return err
-	}
-
-	fields := map[string]any{}
-	for name, values := range r.PostForm {
-		if len(values) == 0 {
-			continue
-		}
-		fields[name] = typed(values[0])
-	}
-
-	blob, err := json.Marshal(fields)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(blob, dst)
-}
-
-func typed(value string) any {
-	switch value {
-	case "true":
-		return true
-	case "false":
-		return false
-	}
-	if n, err := strconv.ParseFloat(value, 64); err == nil {
-		return n
-	}
-	return value
-}
-
-func lastPathSegment(path string) string {
-	trimmed := strings.TrimSuffix(path, "/")
-	if i := strings.LastIndexByte(trimmed, '/'); i >= 0 {
-		return trimmed[i+1:]
-	}
-	return trimmed
+	return err
 }
 
 func sendOK(w http.ResponseWriter, obj any) {

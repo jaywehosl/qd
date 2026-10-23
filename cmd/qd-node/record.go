@@ -20,7 +20,7 @@ func (state *controlState) recordTelemetry() {
 
 func (state *controlState) flush() {
 	stats := state.sessionStats()
-	clients, err := state.db.Clients()
+	clients, err := state.data().Clients()
 	if err != nil {
 		return
 	}
@@ -34,19 +34,21 @@ func (state *controlState) flush() {
 
 	now := time.Now().UnixMilli()
 	readings := make([]store.Reading, 0, len(stats))
+	exits := []store.Reading{}
 	for _, s := range stats {
 		id, known := owner[s.Session]
 		if !known {
 			continue
 		}
-		if s.Transit {
-			state.db.RecordExit(id, state.id, s.LastSeen, s.Up, s.Down)
-			continue
-		}
-		readings = append(readings, store.Reading{
+		reading := store.Reading{
 			ClientID: id, NodeID: state.id, Epoch: state.epoch,
 			Up: s.Up, Down: s.Down, At: now,
-		})
+		}
+		if s.Transit {
+			exits = append(exits, reading)
+			continue
+		}
+		readings = append(readings, reading)
 		if len(s.Seen) == 0 {
 			continue
 		}
@@ -57,10 +59,11 @@ func (state *controlState) flush() {
 			}
 			seen[a.IP] = a.LastSeen
 		}
-		state.db.RecordAddresses(id, state.id, s.Device, seen)
+		state.data().RecordAddresses(id, state.id, s.Device, seen)
 	}
 
-	state.db.RecordTraffic(readings)
+	state.data().RecordTraffic(readings)
+	state.data().RecordExits(exits)
 }
 
 func worthLogging(ip string) bool {

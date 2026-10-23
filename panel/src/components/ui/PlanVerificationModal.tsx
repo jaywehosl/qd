@@ -7,7 +7,6 @@ interface PlanVerificationModalProps {
   title: string;
   original: any;
   modified: any;
-  tasks?: string[];
   onConfirm: () => void;
   onCancel: () => void;
   confirmLoading?: boolean;
@@ -85,7 +84,6 @@ export default function PlanVerificationModal({
   title,
   original,
   modified,
-  tasks,
   onConfirm,
   onCancel,
   confirmLoading,
@@ -93,22 +91,6 @@ export default function PlanVerificationModal({
   const { t } = useTranslation();
 
   const diff = useMemo(() => generateJsonDiff(original, modified), [original, modified]);
-
-  const defaultTasks = useMemo(() => {
-    if (tasks && tasks.length > 0) return tasks;
-    const list = [];
-    if (!original) {
-      list.push(t('pages.inbounds.addInbound'));
-    } else if (!modified) {
-      list.push(t('delete') || 'Delete resource');
-    } else {
-      list.push(t('update') || 'Update configuration');
-    }
-    list.push('Compile and validate configuration schema');
-    list.push('Inject parameters into database transaction');
-    list.push('Safely push updates to active xray core instance');
-    return list;
-  }, [original, modified, tasks, t]);
 
   return (
     <Dialog
@@ -139,15 +121,6 @@ export default function PlanVerificationModal({
         description="Verify proposed configuration changes below before deployment. Review the auto-generated implementation plan and code diff."
         className="plan-alert"
       />
-
-      <div className="plan-section-title">Implementation Steps</div>
-      <ul className="plan-task-list">
-        {defaultTasks.map((task, idx) => (
-          <li key={idx} className="plan-task-item">
-            <span className="task-checkbox">[x]</span> {task}
-          </li>
-        ))}
-      </ul>
 
       <div className="plan-section-title">Configuration Diff (JSON)</div>
       <div className="plan-diff-viewport">

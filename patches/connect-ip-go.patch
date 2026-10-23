@@ -1,5 +1,5 @@
---- a/client.go	2026-09-29 23:09:41.737426500 +0300
-+++ b/client.go	2026-09-29 23:09:41.766145000 +0300
+--- a/client.go
++++ b/client.go
 @@ -12,7 +12,7 @@
  )
  
@@ -46,9 +46,9 @@
  		URL:    u,
  	}); err != nil {
  		return nil, nil, fmt.Errorf("connect-ip: failed to send request: %w", err)
---- a/conn.go	2026-09-29 23:09:41.739470000 +0300
-+++ b/conn.go	2026-09-29 23:09:41.770168900 +0300
-@@ -257,30 +257,34 @@
+--- a/conn.go
++++ b/conn.go
+@@ -257,30 +257,31 @@
  }
  
  func (c *Conn) ReadPacket(b []byte) (n int, err error) {
@@ -56,9 +56,6 @@
 +	return n, err
 +}
 +
-+// ReadPacketMarked reads a proxied packet and reports the context ID it arrived
-+// under. Context IDs other than zero carry a caller-defined meaning; the
-+// upstream library drops them.
 +func (c *Conn) ReadPacketMarked(b []byte) (n int, mark uint64, err error) {
  start:
  	data, err := c.str.ReceiveDatagram(context.Background())
@@ -91,7 +88,7 @@
  }
  
  func (c *Conn) handleIncomingProxiedPacket(data []byte) error {
-@@ -356,7 +360,14 @@
+@@ -356,7 +357,11 @@
  // If sending the packet fails, it might return an ICMP packet.
  // It is the caller's responsibility to send the ICMP packet to the sender.
  func (c *Conn) WritePacket(b []byte) (icmp []byte, err error) {
@@ -99,15 +96,12 @@
 +	return c.WritePacketMarked(b, 0)
 +}
 +
-+// WritePacketMarked writes an IP packet under the given context ID, so the peer
-+// can tell packets apart without inspecting them. Zero is the plain IP payload
-+// the upstream library speaks.
 +func (c *Conn) WritePacketMarked(b []byte, mark uint64) (icmp []byte, err error) {
 +	data, err := c.composeDatagram(b, mark)
  	if err != nil {
  		log.Printf("dropping proxied packet (%d bytes) that can't be proxied: %s", len(b), err)
  		return nil, nil
-@@ -380,7 +391,7 @@
+@@ -380,7 +385,7 @@
  	return nil, nil
  }
  
@@ -116,7 +110,7 @@
  	// TODO: implement src, dst and ipproto checks
  	if len(b) == 0 {
  		return nil, nil
-@@ -409,8 +420,12 @@
+@@ -409,8 +414,12 @@
  		}
  		b[7]-- // Decrement Hop Limit
  	}

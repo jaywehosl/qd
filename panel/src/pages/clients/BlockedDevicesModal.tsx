@@ -3,11 +3,9 @@ import { useTranslation } from 'react-i18next';
 
 import { Button, Dialog } from '@/components/ds';
 import { HttpUtil, IntlUtil } from '@/utils';
-import { useDatepicker } from '@/hooks/useDatepicker';
 import type { ClientDevice, ClientRecord } from '@/hooks/useClients';
 
-type Device = ClientDevice & { blocked?: boolean; model?: string; kind?: string; ip?: string };
-type Blocked = { email: string; device: Device };
+type Blocked = { id: number; tag: string; device: ClientDevice };
 
 interface BlockedDevicesModalProps {
   open: boolean;
@@ -17,27 +15,24 @@ interface BlockedDevicesModalProps {
 
 export default function BlockedDevicesModal({ open, onOpenChange, onChanged }: BlockedDevicesModalProps) {
   const { t } = useTranslation();
-  const { datepicker } = useDatepicker();
   const [rows, setRows] = useState<Blocked[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const msg = await HttpUtil.get<ClientRecord[]>('/panel/api/clients/list', undefined, { silent: true });
     const list = Array.isArray(msg?.obj) ? msg.obj : [];
-    setRows(list.flatMap((c) => ((c.devices ?? []) as Device[])
+    setRows(list.flatMap((c) => (c.devices ?? [])
       .filter((d) => d.blocked)
-      .map((device) => ({ email: c.email, device }))));
+      .map((device) => ({ id: c.id, tag: c.tag, device }))));
   }, []);
 
   useEffect(() => {
     if (open) void load();
   }, [open, load]);
 
-  const unblock = async ({ email, device }: Blocked) => {
-    setBusy(`${email}:${device.fingerprint}`);
-    await HttpUtil.post('/panel/api/clients/devices/block',
-      { email, fingerprint: device.fingerprint, blocked: false },
-      { headers: { 'Content-Type': 'application/json' } });
+  const unblock = async ({ id, device }: Blocked) => {
+    setBusy(`${id}:${device.fingerprint}`);
+    await HttpUtil.post('/panel/api/clients/devices/block', { clientId: id, fingerprint: device.fingerprint, blocked: false });
     await load();
     setBusy(null);
     onChanged();
@@ -56,19 +51,19 @@ export default function BlockedDevicesModal({ open, onOpenChange, onChanged }: B
           <div className="ms-items">
             {rows.map((row) => {
               const { device: d } = row;
-              const key = `${row.email}:${d.fingerprint}`;
+              const key = `${row.id}:${d.fingerprint}`;
               return (
                 <div key={key} className="ms-item">
                   <div className="ms-item__top">
                     <span className="ms-item__name">{d.model || d.platform || d.fingerprint.slice(0, 12)}</span>
-                    <span className="ms-item__owner">{row.email}</span>
+                    <span className="ms-item__owner">{row.tag}</span>
                   </div>
                   <span className="ms-item__line">
                     {[d.platform, d.kind, d.version || t('pages.clients.noVersion')].filter(Boolean).join(' · ')}
                   </span>
                   {d.ip && <span className="ms-item__line is-mono">{d.ip}</span>}
                   <span className="ms-item__line">
-                    {t('pages.clients.lastSeen')}: {d.lastSeen ? IntlUtil.formatDate(d.lastSeen, datepicker) : '—'}
+                    {t('pages.clients.lastSeen')}: {d.lastSeen ? IntlUtil.formatDate(d.lastSeen) : '—'}
                   </span>
                   <div className="ms-item__acts">
                     <Button size="sm" loading={busy === key} onClick={() => unblock(row)}>

@@ -8,19 +8,14 @@ import { sections } from '../src/pages/api-docs/endpoints.ts';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const outPath = join(__dirname, '..', 'public', 'openapi.json');
 
-const PANEL_VERSION = process.env.X_UI_VERSION || '3.x';
+const PANEL_VERSION = process.env.QD_VERSION || 'dev';
 
 const SECURITY_SCHEMES = {
-  bearerAuth: {
-    type: 'http',
-    scheme: 'bearer',
-    description: 'API token from Settings → Security → API Token. Send as `Authorization: Bearer <token>`.',
-  },
-  cookieAuth: {
+  localToken: {
     type: 'apiKey',
-    in: 'cookie',
-    name: '3x-ui',
-    description: 'Session cookie set by POST /login. Browser-only.',
+    in: 'header',
+    name: 'X-QD-Token',
+    description: 'Token of the local page, handed to it by the client.',
   },
 };
 
@@ -189,18 +184,17 @@ function buildSpec() {
   return {
     openapi: '3.0.3',
     info: {
-      title: '3X-UI Panel API',
+      title: 'qd panel API',
       version: PANEL_VERSION,
-      description:
-        'Programmatic interface to a 3X-UI panel. Authenticate either by logging in (cookie) or with an API token from Settings → Security → API Token (Bearer). All endpoints under /panel/api/* honour both modes.',
+      description: 'Local API of the qd client: the client page and the network panel of an administrator.',
     },
     servers: [
-      { url: '/', description: 'Current panel (basePath aware)' },
+      { url: '/', description: 'This client' },
     ],
     components: {
       securitySchemes: SECURITY_SCHEMES,
     },
-    security: [{ bearerAuth: [] }, { cookieAuth: [] }],
+    security: [{ localToken: [] }],
     tags,
     paths,
   };

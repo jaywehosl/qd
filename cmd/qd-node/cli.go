@@ -3,7 +3,6 @@
 package main
 
 import (
-	"context"
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
@@ -183,7 +182,7 @@ func runAdminAdd(cfg nodeConfig, dbFlag, tag, groupTag string) error {
 	}, now); err != nil {
 		return err
 	}
-	revision, err := db.Touch(now)
+	revision, err := db.Bump(now)
 	if err != nil {
 		return err
 	}
@@ -516,22 +515,6 @@ func runStatus(cfg nodeConfig, dbFlag string) error {
 	fmt.Printf("  knows      %d nodes, %d groups, %d clients, %d admins\n",
 		len(nodes), len(groups), len(clients), admins)
 
-	seen := ""
-	if progress, err := db.NodeProgress(); err == nil {
-		if p, ok := progress[id]; ok {
-			if p.LastSeen > 0 {
-				ago := time.Since(time.UnixMilli(p.LastSeen)).Round(time.Second)
-				seen = fmt.Sprintf("%s ago, applied revision %d, %s", ago, p.Applied, p.Status)
-			} else {
-				seen = fmt.Sprintf("applied revision %d, %s", p.Applied, p.Status)
-			}
-		}
-	}
-	if seen == "" {
-		seen = "the panel has not written anything about this node yet"
-	}
-	fmt.Printf("  panel says %s\n", seen)
-
 	if admins == 0 {
 		fmt.Printf("\n  no enabled administrator: nobody can open the panel.\n")
 		fmt.Printf("  qd-node -admin-add TAG makes one and prints its link.\n")
@@ -548,21 +531,4 @@ func orNone(text string) string {
 		return "(none)"
 	}
 	return text
-}
-
-func reportSelf(ctx context.Context, db func() *store.DB, nodeID int) {
-	tick := time.NewTicker(time.Minute)
-	defer tick.Stop()
-
-	for {
-		version, err := db().Version()
-		if err == nil {
-			db().RecordNodeProgress(nodeID, version, version, "online", time.Now().UnixMilli())
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-tick.C:
-		}
-	}
 }

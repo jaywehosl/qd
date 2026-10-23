@@ -372,7 +372,9 @@ export default function ConnectScreen({
       void submit(link);
       return;
     }
-    void onImport(link).then((next) => next && onSettle());
+    toast.warning(t('client.import.resetFirst', {
+      defaultValue: 'A subscription is already in use — reset the client before adding another one',
+    }));
   };
   const adoptRef = useRef(adopt);
   adoptRef.current = adopt;

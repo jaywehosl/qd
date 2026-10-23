@@ -219,19 +219,19 @@ func main() {
 		fmt.Printf("carrying   off, it answers the panel and takes no client traffic\n")
 	}
 	if certPath == "" {
-		fmt.Printf("tls        self-signed, clients pin the certificate\n")
+		fmt.Printf("tls        self-signed: clients refuse this node until it has a certificate they trust\n")
 	} else {
 		fmt.Printf("tls        %s, %d certificates served\n", certPath, len(tlsConf.Certificates[0].Certificate))
 	}
 	var state *controlState
 	held := func() *store.DB {
 		if state != nil {
-			return state.db
+			return state.data()
 		}
 		return db
 	}
 
-	ech := newECH(held, key, settings.ECHName, func(name string) { keepECH(*confFlag, name) })
+	ech := newECH(held, key, settings, func(name string) { keepECH(*confFlag, name) })
 	ech.serve(tlsConf)
 	quicconn.ECH = ech.publicList
 	keepPort(*confFlag, self.Port)
@@ -271,10 +271,13 @@ func main() {
 		Token:     key,
 		Verify:    admission.verify,
 		Admit:     admission.admit,
-		Reset:     resetKey(filepath.Dir(*dbPath)),
-		Shelf:     shelf,
-		Peers:     peersFrom(held, self.ID),
-		Tune:      func() qsrv.Tunables { return tunablesFrom(mustSettings(held())) },
+		Seat: func(g qsrv.Grant, device string) bool {
+			return state.seatFree(g, device)
+		},
+		Reset: resetKey(filepath.Dir(*dbPath)),
+		Shelf: shelf,
+		Peers: peersFrom(held, self.ID),
+		Tune:  func() qsrv.Tunables { return tunablesFrom(mustSettings(held())) },
 		Ask: func(op string, body []byte, auth string) (any, error) {
 			return askNode(state, op, body, auth)
 		},
@@ -286,7 +289,7 @@ func main() {
 	state = &controlState{
 		tag: self.Tag, role: string(self.Role), address: self.Address, uuid: self.UUID,
 		enable: self.Enable, key: key, id: self.ID, port: self.Port,
-		db: db, dbPath: *dbPath, started: time.Now(), shelf: shelf,
+		dbPath: *dbPath, started: time.Now(), shelf: shelf,
 		netKey:   &netKey,
 		metrics:  startMetrics(dev, watch.Live),
 		logs:     logs,
@@ -307,6 +310,8 @@ func main() {
 		},
 	}
 
+	state.base.Store(db)
+
 	if mine := state.mySession(); mine != 0 {
 		fmt.Printf("identity   session %d, the number peer nodes know this one by\n", mine)
 	} else {
@@ -314,6 +319,7 @@ func main() {
 	}
 	state.applySelf()
 	state.syncSessions()
+	go state.keepSessions()
 	state.startResolver()
 	servePprof()
 	go state.recordTelemetry()
@@ -342,7 +348,6 @@ func main() {
 	}
 
 	go node.Remember(ctx, *dbPath+".nat46")
-	go reportSelf(ctx, held, self.ID)
 	go runNode(ctx, node)
 
 	<-ctx.Done()
@@ -433,7 +438,7 @@ func primaryIPv4(link *net.Interface) (netip.Addr, error) {
 }
 
 func fatal(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, "error: "+format+"\n", args...)
+	fmt.Fprintf(failing, "error: "+format+"\n", args...)
 	os.Exit(1)
 }
 

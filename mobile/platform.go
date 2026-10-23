@@ -130,6 +130,7 @@ func (p platform) RulesChanged() {
 		p.c.marks.reload(p.c.db)
 	}
 	p.c.loadNames()
+	p.FlushDNS()
 	p.c.reroute()
 	p.c.restack()
 }

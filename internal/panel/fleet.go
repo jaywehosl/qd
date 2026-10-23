@@ -15,7 +15,7 @@ import (
 
 type NodeAddress struct {
 	ID      int    `json:"id"`
-	Tag     string `json:"name"`
+	Tag     string `json:"tag"`
 	Address string `json:"address"`
 	Port    int    `json:"port"`
 	Role    string `json:"role"`
@@ -39,7 +39,7 @@ type NodeHealth struct {
 	Revision  int     `json:"revision"`
 	Applied   int     `json:"appliedRevision"`
 	UptimeSec int64   `json:"uptimeSecs"`
-	Version   string  `json:"panelVersion"`
+	Version   string  `json:"version"`
 	Heartbeat int64   `json:"lastHeartbeat"`
 	CPUPct    float64 `json:"cpuPct"`
 	MemPct    float64 `json:"memPct"`
@@ -411,9 +411,6 @@ func (f *Fleet) Refresh() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for _, r := range rows {
-		if known, ok := f.nodes[r.ID]; ok {
-			r.Address = known.Address
-		}
 		if r.Address == "" {
 			continue
 		}

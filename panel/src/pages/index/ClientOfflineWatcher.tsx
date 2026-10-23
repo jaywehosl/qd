@@ -2,7 +2,7 @@ import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { z } from 'zod';
 
-import { clientsApi } from '@/generated/client';
+import { HttpUtil } from '@/utils';
 import { parseMsg } from '@/utils/zodValidate';
 import { subscribe, getSnapshot, pushEvent } from '@/stores/notificationStore';
 
@@ -20,7 +20,7 @@ export default function ClientOfflineWatcher() {
   const { data } = useQuery<LastOnlineMap>({
     queryKey: ['notif', 'clientLastOnline'],
     queryFn: async () => {
-      const msg = await clientsApi.lastOnline(undefined, { silent: true });
+      const msg = await HttpUtil.get('/panel/api/clients/lastOnline', undefined, { silent: true });
       const v = parseMsg(msg, LastOnlineMapSchema, 'clients/lastOnline');
       return v?.obj ?? {};
     },
@@ -40,7 +40,7 @@ export default function ClientOfflineWatcher() {
       if (over && !firing.current[email]) {
         firing.current[email] = true;
         const hours = Math.floor((now - ts) / 3600000);
-        pushEvent('warning', `Client "${email}" offline for ${hours}h (threshold ${cfg.threshold}h)`, `client:${email}`);
+        pushEvent('warning', `Client "" offline for ${hours}h (threshold ${cfg.threshold}h)`, `client:${email}`);
       } else if (!over && firing.current[email]) {
         firing.current[email] = false;
       }

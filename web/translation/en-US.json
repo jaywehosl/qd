@@ -1,5 +1,4 @@
 {
-  "password": "Password",
   "confirm": "Confirm",
   "cancel": "Cancel",
   "close": "Close",
@@ -10,32 +9,22 @@
   "update": "Update",
   "copy": "Copy",
   "copied": "Copied",
-  "download": "Download",
-  "remark": "Remark",
   "enable": "Enabled",
-  "protocol": "Protocol",
   "search": "Search",
-  "filter": "Filter",
   "all": "All",
-  "from": "From",
-  "to": "To",
   "done": "Done",
   "loading": "Loading...",
   "refresh": "Refresh",
   "clear": "Clear",
-  "second": "Second",
   "minute": "Minute",
   "hour": "Hour",
   "day": "Day",
-  "check": "Check",
-  "unlimited": "Unlimited",
   "none": "None",
   "info": "More Information",
   "edit": "Edit",
   "delete": "Delete",
   "reset": "Reset",
   "noData": "Nothing here yet",
-  "sure": "Sure",
   "host": "Host",
   "path": "Path",
   "status": "Status",
@@ -45,15 +34,11 @@
   "depletingSoon": "Depleting",
   "offline": "Offline",
   "online": "Online",
-  "certificate": "Digital Certificate",
-  "fail": "Failed",
   "comment": "Comment",
   "success": "Success",
   "lastOnline": "Last Online",
   "install": "Install",
   "clients": "Clients",
-  "usage": "Usage",
-  "remained": "Remaining",
   "security": "Security",
   "somethingWentWrong": "Something went wrong",
   "subscription": {
@@ -98,9 +83,7 @@
       "historyTabConnections": "Connections",
       "historyTabDiskUsage": "Disk Usage",
       "toggleIpVisibility": "Toggle visibility of the IP",
-      "download": "Download",
       "logs": "Logs",
-      "backup": "Backup",
       "backupTitle": "Backup & Restore",
       "exportDatabase": "Back Up",
       "exportDatabaseDesc": "Click to download a .db file containing a backup of your current database to your device.",
@@ -109,30 +92,15 @@
       "importDatabaseDesc": "Click to select and upload a .db file from your device to restore your database from a backup.",
       "importDatabaseSuccess": "The database has been successfully imported.",
       "importDatabaseError": "An error occurred while importing the database.",
-      "backupPostgresNote": "This panel runs on PostgreSQL. Back Up downloads a pg_dump archive (.dump) and Restore loads it back with pg_restore. The server needs the PostgreSQL client tools (pg_dump and pg_restore) installed.",
-      "exportDatabasePgDesc": "Click to download a PostgreSQL dump (.dump) of your current database to your device.",
-      "importDatabasePgDesc": "Click to select and upload a .dump file to restore your PostgreSQL database. This replaces all current data.",
       "notifyNodesNone": "No node is online — traffic has nowhere to go.",
       "notifyNodesPartial": "{missing} of {total} nodes are not answering."
     },
     "inbounds": {
       "resetTraffic": "Reset Traffic",
-      "addInbound": "Add Inbound",
-      "resetTrafficContent": "Are you sure you want to reset traffic?",
-      "toasts": {
-        "savedNodeOfflineWillSync": "Saved locally. A backing node is offline or disabled — the change will sync once it reconnects."
-      }
+      "resetTrafficContent": "Are you sure you want to reset traffic?"
     },
     "clients": {
-      "add": "Add Client",
-      "bulk": "Add Bulk",
-      "clearAll": "Clear all",
-      "first": "First",
-      "last": "Last",
-      "delayedStart": "Start After First Use",
-      "renew": "Auto Renew",
       "searchPlaceholder": "Search tag or comment…",
-      "clearAllFilters": "Clear all",
       "showingCount": "Showing {shown} of {total}",
       "sortOldest": "Oldest first",
       "sortNewest": "Newest first",
@@ -143,16 +111,15 @@
       "sortMostTraffic": "Most traffic",
       "sortExpiringSoonest": "Expiring soonest",
       "sortCustom": "Column order",
-      "has": "Has",
-      "hasNot": "Doesn't have",
       "actions": "Actions",
       "expiryTime": "Expiry",
       "addClients": "Add Clients",
-      "subId": "Subscription ID",
       "online": "Online",
-      "email": "Email",
-      "emailInvalidChars": "Email cannot contain spaces, '/', '\\', or control characters",
-      "subIdInvalidChars": "Subscription ID cannot contain spaces, '/', '\\', or control characters",
+      "tagRequired": "The client needs a tag",
+      "tagInvalidChars": "A tag cannot contain spaces, '/', '\\', or control characters",
+      "uuidRequired": "The client needs a key",
+      "uuidInvalidChars": "A key cannot contain spaces, '/', '\\', or control characters",
+      "statusAll": "All",
       "group": "Group",
       "groupPlaceholder": "e.g. customer-a",
       "comment": "Comment",
@@ -161,15 +128,12 @@
       "addClient": "Add Client",
       "editClient": "Edit Client",
       "clientInfo": "Client Information",
-      "delete": "Delete",
-      "reset": "Reset Traffic",
       "client": "Client",
       "enabled": "Enabled",
       "duration": "Duration",
       "attachedGroup": "Attached Group",
       "connectionUri": "Connection URI",
       "used": "Used",
-      "limit": "Limit",
       "connection": "Connection",
       "details": "Details",
       "noConnectionUri": "No entrypoints — assign a group with entrypoints first.",
@@ -191,16 +155,10 @@
       "unitHours": "hours",
       "unitMinute": "minute",
       "unitMinutes": "minutes",
-      "selectInbound": "Select one or more inbounds",
-      "resetNotPossible": "Attach this client to an inbound first.",
+      "groupRequired": "Choose a group: it decides which entrypoints the client reaches",
       "deleteConfirmTitle": "Delete client {email}?",
       "deleteConfirmContent": "This removes the client from every attached inbound and drops its traffic record. This cannot be undone.",
-      "attach": "Attach",
-      "bulkAdjustNothing": "Set days or traffic before applying.",
       "uuid": "UUID",
-      "telegramId": "Telegram user ID",
-      "created": "Created",
-      "updated": "Updated",
       "toasts": {
         "deleted": "Client deleted",
         "trafficReset": "Traffic reset"
@@ -268,7 +226,6 @@
         "unknown": "Unknown"
       },
       "toasts": {
-        "delete": "Delete node",
         "deleted": "Node deleted",
         "fillRequired": "Name, address, port and API token are required",
         "noNatSlot": "All 32 address slots for IPv6-only sites are taken, remove a node first",
@@ -344,15 +301,8 @@
       "mtuDesc": "Largest packet the node carries for a client.",
       "statsSeconds": "Counter Interval",
       "statsSecondsDesc": "How often a node samples its datapath counters. (0 = disable, unit: second)",
-      "datepicker": "Calendar Type",
-      "datepickerDescription": "Scheduled tasks will run based on this calendar.",
       "expireTimeDiff": "Expiration Date Notification",
       "expireTimeDiffDesc": "Get notified about expiration date when reaching this threshold. (unit: day)",
-      "trafficDiff": "Traffic Cap Notification",
-      "trafficDiffDesc": "Get notified about traffic cap when reaching this threshold. (unit: GB)",
-      "timeZone": "Time Zone",
-      "timeZoneDesc": "Scheduled tasks will run based on this time zone.",
-      "subSettings": "Subscription",
       "notifications": "Notifications",
       "preferences": "Preferences",
       "language": "Language",
@@ -394,36 +344,6 @@
       "idleDesc": "Seconds a silent connection is held, and how often it is pinged to stay open through NAT."
     }
   },
-  "publish": {
-    "publish": "Publish",
-    "discard": "Discard",
-    "title": "Publish to the network",
-    "next": "Next",
-    "finish": "Finish",
-    "retry": "Retry {count} failed",
-    "revision": "revision {n}",
-    "attempts": "{n} attempts",
-    "skippedHint": "Nodes without a control channel are skipped — they pick this revision up when they reconnect.",
-    "phase": {
-      "plan": "Plan",
-      "push": "Upload",
-      "apply": "Apply"
-    },
-    "hint": {
-      "plan": "Building each node’s configuration from the draft.",
-      "push": "Uploading. Nothing is live yet — a node stores the revision until it is told to apply it.",
-      "apply": "Switching the nodes onto the new revision. Established sessions are kept."
-    },
-    "state": {
-      "planned": "ready",
-      "pushing": "uploading",
-      "staged": "uploaded",
-      "applying": "applying",
-      "applied": "applied",
-      "failed": "failed",
-      "skipped": "skipped"
-    }
-  },
   "client": {
     "menu": {
       "connect": "Connect",
@@ -439,7 +359,8 @@
       "fromClipboard": "From clipboard",
       "failedTitle": "Import failed",
       "failed": "No node accepted this link.",
-      "clipboardDenied": "The browser would not hand over the clipboard — paste it instead."
+      "clipboardDenied": "The browser would not hand over the clipboard — paste it instead.",
+      "resetFirst": "A subscription is already in use — reset the client before adding another one"
     },
     "setup": {
       "wizardHead": "Installation Wizard",
@@ -616,10 +537,26 @@
       "journalSave": "Save to Downloads",
       "open": "Open",
       "host": {
-        "notify": { "yes": "Notifications are allowed", "no": "Notifications are blocked", "unsure": "Notifications: check manually" },
-        "battery": { "yes": "Excluded from battery optimization", "no": "Not excluded from battery optimization", "unsure": "Battery optimization: check manually" },
-        "vpn": { "yes": "Always-on VPN is on", "no": "Always-on VPN is off", "unsure": "Always-on VPN: check manually" },
-        "autostart": { "yes": "Autostart is allowed", "no": "Autostart is not allowed", "unsure": "Autostart: check manually" }
+        "notify": {
+          "yes": "Notifications are allowed",
+          "no": "Notifications are blocked",
+          "unsure": "Notifications: check manually"
+        },
+        "battery": {
+          "yes": "Excluded from battery optimization",
+          "no": "Not excluded from battery optimization",
+          "unsure": "Battery optimization: check manually"
+        },
+        "vpn": {
+          "yes": "Always-on VPN is on",
+          "no": "Always-on VPN is off",
+          "unsure": "Always-on VPN: check manually"
+        },
+        "autostart": {
+          "yes": "Autostart is allowed",
+          "no": "Autostart is not allowed",
+          "unsure": "Autostart: check manually"
+        }
       },
       "resetData": "Reset settings",
       "resetDataDesc": "Settings and the resolver history go back to defaults. The subscription is kept and the tunnel is not interrupted.",

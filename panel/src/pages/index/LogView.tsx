@@ -30,10 +30,7 @@ function parseLogLine(line: string): ParsedLog {
 
   let service = '';
   let body = message || '';
-  if (body.startsWith('XRAY:')) {
-    service = 'XRAY:';
-    body = body.slice('XRAY:'.length).trimStart();
-  } else if (body) {
+  if (body) {
     service = 'QD:';
   }
 

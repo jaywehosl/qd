@@ -6,10 +6,6 @@ export class AllSetting {
   blockTier = 'pro';
   blockTif = false;
   expireDiff = 0;
-  trafficDiff = 0;
-  remarkModel = '-io';
-  datepicker: 'gregorian' | 'jalalian' = 'gregorian';
-  timeLocation = 'Local';
   dnsPrimary = '1.1.1.1';
   dnsSecondary = '8.8.8.8';
   dnsCache = 4096;

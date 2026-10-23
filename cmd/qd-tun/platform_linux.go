@@ -108,9 +108,7 @@ func startShell(db *clientstate.DB, tun *tunnel, ui *localapi.Server, api *clien
 	return false, func() {}
 }
 
-func openPage(url string) {
-	fmt.Printf("page     %s\n", url)
-}
+func openPage(string) {}
 
 const (
 	guardPage = true

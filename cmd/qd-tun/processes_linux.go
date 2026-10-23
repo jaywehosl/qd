@@ -13,6 +13,7 @@ import (
 )
 
 func snapshotProcesses() []processInfo {
+	open := connectionsByPid()
 	out := []processInfo{}
 	for _, name := range dirNames("/proc") {
 		pid, err := strconv.ParseUint(name, 10, 32)
@@ -25,8 +26,38 @@ func snapshotProcesses() []processInfo {
 		}
 		out = append(out, processInfo{
 			Name: ident.name, Path: ident.path, Icon: appIcon(uint32(pid), ident), PID: int(pid),
+			Connections: open[uint32(pid)],
 		})
 	}
+	return out
+}
+
+func connectionsByPid() map[uint32]int {
+	inodes := map[uint64]bool{}
+	for _, file := range []string{"/proc/net/tcp", "/proc/net/tcp6"} {
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			continue
+		}
+		for i, line := range strings.Split(string(raw), "\n") {
+			fields := strings.Fields(line)
+			if i == 0 || len(fields) < 10 || fields[3] == "0A" {
+				continue
+			}
+			if inode, err := strconv.ParseUint(fields[9], 10, 64); err == nil && inode != 0 {
+				inodes[inode] = true
+			}
+		}
+	}
+	out := map[uint32]int{}
+	if len(inodes) == 0 {
+		return out
+	}
+	eachSocket(func(pid uint32, inode uint64) {
+		if inodes[inode] {
+			out[pid]++
+		}
+	})
 	return out
 }
 

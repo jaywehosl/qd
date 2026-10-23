@@ -32,7 +32,7 @@ type Rule struct {
 }
 
 func (d *DB) Rules() ([]Rule, error) {
-	rows, err := d.sql.Query(`SELECT id, process, path, role, matched FROM rules ORDER BY id`)
+	rows, err := d.sql.Query(`SELECT id, process, path, role FROM rules ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -41,7 +41,7 @@ func (d *DB) Rules() ([]Rule, error) {
 	out := []Rule{}
 	for rows.Next() {
 		var r Rule
-		if err := rows.Scan(&r.ID, &r.Process, &r.Path, &r.Role, &r.Matched); err != nil {
+		if err := rows.Scan(&r.ID, &r.Process, &r.Path, &r.Role); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -109,7 +109,6 @@ func (d *DB) ReplaceRules(defaultRole string, rules []Rule) error {
 		seen[key] = true
 		if old, found := byTarget[key]; found {
 			r.ID = old.ID
-			r.Matched = old.Matched
 		}
 		kept = append(kept, r)
 	}
@@ -126,14 +125,14 @@ func (d *DB) ReplaceRules(defaultRole string, rules []Rule) error {
 	for _, r := range kept {
 		if r.ID > 0 {
 			if _, err := tx.Exec(
-				`INSERT INTO rules (id, process, path, role, matched) VALUES (?, ?, ?, ?, ?)`,
-				r.ID, r.Process, r.Path, r.Role, r.Matched); err != nil {
+				`INSERT INTO rules (id, process, path, role) VALUES (?, ?, ?, ?)`,
+				r.ID, r.Process, r.Path, r.Role); err != nil {
 				return err
 			}
 			continue
 		}
 		if _, err := tx.Exec(
-			`INSERT INTO rules (process, path, role, matched) VALUES (?, ?, ?, 0)`,
+			`INSERT INTO rules (process, path, role) VALUES (?, ?, ?)`,
 			r.Process, r.Path, r.Role); err != nil {
 			return err
 		}
@@ -173,7 +172,7 @@ func CleanDomain(raw string) string {
 }
 
 func (d *DB) DomainRules() ([]DomainRule, error) {
-	rows, err := d.sql.Query(`SELECT id, domain, role, matched FROM domain_rules ORDER BY id`)
+	rows, err := d.sql.Query(`SELECT id, domain, role FROM domain_rules ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -182,7 +181,7 @@ func (d *DB) DomainRules() ([]DomainRule, error) {
 	out := []DomainRule{}
 	for rows.Next() {
 		var r DomainRule
-		if err := rows.Scan(&r.ID, &r.Domain, &r.Role, &r.Matched); err != nil {
+		if err := rows.Scan(&r.ID, &r.Domain, &r.Role); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -207,15 +206,6 @@ func (d *DB) DomainRulesInForce() ([]DomainRule, error) {
 }
 
 func (d *DB) ReplaceDomainRules(rules []DomainRule) error {
-	held, err := d.DomainRules()
-	if err != nil {
-		return err
-	}
-	matched := map[string]int{}
-	for _, r := range held {
-		matched[r.Domain] = r.Matched
-	}
-
 	tx, err := d.sql.Begin()
 	if err != nil {
 		return err
@@ -238,8 +228,8 @@ func (d *DB) ReplaceDomainRules(rules []DomainRule) error {
 			continue
 		}
 		seen[name] = true
-		if _, err := tx.Exec(`INSERT INTO domain_rules (domain, role, matched) VALUES (?, ?, ?)`,
-			name, r.Role, matched[name]); err != nil {
+		if _, err := tx.Exec(`INSERT INTO domain_rules (domain, role) VALUES (?, ?)`,
+			name, r.Role); err != nil {
 			return err
 		}
 	}

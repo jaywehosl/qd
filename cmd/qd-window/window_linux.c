@@ -13,6 +13,28 @@ static const char *qd_bridge =
 
 static const char *qd_edges[] = {"topleft", "top", "topright", "left", "right", "bottomleft", "bottom", "bottomright"};
 
+static char qd_home[256];
+
+static void qd_remember_home(const char *uri) {
+	const char *rest = strstr(uri, "://");
+	const char *end = rest ? strchr(rest + 3, '/') : NULL;
+	size_t n = end ? (size_t)(end - uri + 1) : strlen(uri);
+	if (n >= sizeof(qd_home)) n = sizeof(qd_home) - 1;
+	memcpy(qd_home, uri, n);
+	qd_home[n] = 0;
+}
+
+static gboolean qd_decide(WebKitWebView *view, WebKitPolicyDecision *decision, WebKitPolicyDecisionType type, gpointer data) {
+	if (type != WEBKIT_POLICY_DECISION_TYPE_NAVIGATION_ACTION) return FALSE;
+	WebKitNavigationAction *action = webkit_navigation_policy_decision_get_navigation_action(WEBKIT_NAVIGATION_POLICY_DECISION(decision));
+	const char *uri = webkit_uri_request_get_uri(webkit_navigation_action_get_request(action));
+	if (!uri || !(g_str_has_prefix(uri, "http://") || g_str_has_prefix(uri, "https://"))) return FALSE;
+	if (qd_home[0] && g_str_has_prefix(uri, qd_home)) return FALSE;
+	g_app_info_launch_default_for_uri(uri, NULL, NULL);
+	webkit_policy_decision_ignore(decision);
+	return TRUE;
+}
+
 static GtkWidget *qd_elsewhere(WebKitWebView *view, WebKitNavigationAction *action, gpointer data) {
 	WebKitURIRequest *req = webkit_navigation_action_get_request(action);
 	const char *uri = webkit_uri_request_get_uri(req);
@@ -209,8 +231,9 @@ void qd_show(const char *uri) {
 	webkit_user_content_manager_register_script_message_handler(content, "qd");
 	WebKitWebView *view = WEBKIT_WEB_VIEW(webkit_web_view_new_with_user_content_manager(content));
 	g_signal_connect(view, "create", G_CALLBACK(qd_elsewhere), NULL);
+	g_signal_connect(view, "decide-policy", G_CALLBACK(qd_decide), NULL);
 	g_signal_connect(view, "permission-request", G_CALLBACK(qd_permit), NULL);
-	webkit_settings_set_enable_developer_extras(webkit_web_view_get_settings(view), TRUE);
+	webkit_settings_set_enable_developer_extras(webkit_web_view_get_settings(view), FALSE);
 	static gboolean watching;
 	if (!watching) {
 		watching = TRUE;
@@ -227,6 +250,7 @@ void qd_show(const char *uri) {
 	gtk_container_add(GTK_CONTAINER(qd_window), GTK_WIDGET(view));
 	g_signal_connect(qd_window, "destroy", G_CALLBACK(qd_gone), NULL);
 
+	qd_remember_home(uri);
 	webkit_web_view_load_uri(view, uri);
 	gtk_widget_show_all(qd_window);
 }

@@ -1,6 +1,5 @@
 import axios from 'axios';
 import type { AxiosError, AxiosRequestConfig, AxiosResponse } from 'axios';
-import i18next from 'i18next';
 import { getMessage } from './messageBus';
 import { saveOnPhone } from '@/lib/phone';
 
@@ -20,7 +19,6 @@ export class Msg<T = unknown> {
 
 export interface HttpOptions extends AxiosRequestConfig {
   silent?: boolean;
-  skipAuthRedirect?: boolean;
 }
 
 export interface HttpModal {
@@ -35,14 +33,6 @@ export class HttpUtil {
     }
     const messageType = msg.success ? 'success' : 'error';
     getMessage()[messageType](msg.msg);
-    if (
-      msg.success &&
-      msg.obj &&
-      typeof msg.obj === 'object' &&
-      (msg.obj as { nodePending?: unknown }).nodePending === true
-    ) {
-      getMessage().warning(i18next.t('pages.inbounds.toasts.savedNodeOfflineWillSync'));
-    }
   }
 
   static _respToMsg(resp: AxiosResponse | undefined): Msg {
@@ -402,68 +392,6 @@ export class NumberFormatter {
   }
 }
 
-const COLORS = {
-  success: '#389e0a',
-  warning: '#faad14',
-  danger: '#ff4d4f',
-  purple: '#722ed1',
-} as const;
-
-export type UsageColor = 'purple' | 'green' | 'orange' | 'red';
-
-export interface ClientUsageStats {
-  total: number;
-  up: number;
-  down: number;
-}
-
-export interface ExpiryClient {
-  enable: boolean;
-  expiryTime: number | null;
-}
-
-export class ColorUtils {
-  static usageColor(
-    data: number | null | undefined,
-    threshold: number,
-    total: number | { valueOf(): number } | null | undefined,
-  ): UsageColor {
-    const t = Number(total ?? 0);
-    const d = Number(data);
-    switch (true) {
-      case data === null || data === undefined: return 'purple';
-      case t < 0: return 'green';
-      case t == 0: return 'purple';
-      case d < t - threshold: return 'green';
-      case d < t: return 'orange';
-      default: return 'red';
-    }
-  }
-
-  static clientUsageColor(clientStats: ClientUsageStats | null | undefined, trafficDiff: number): string {
-    switch (true) {
-      case !clientStats || clientStats.total == 0: return COLORS.purple;
-      case clientStats!.up + clientStats!.down < clientStats!.total - trafficDiff: return COLORS.success;
-      case clientStats!.up + clientStats!.down < clientStats!.total: return COLORS.warning;
-      default: return COLORS.danger;
-    }
-  }
-
-  static userExpiryColor(threshold: number, client: ExpiryClient, isDark: boolean = false): string {
-    if (!client.enable) return isDark ? '#2c3950' : '#bcbcbc';
-    const now = new Date().getTime();
-    const expiry = client.expiryTime;
-    switch (true) {
-      case expiry === null: return COLORS.purple;
-      case (expiry as number) < 0: return COLORS.success;
-      case (expiry as number) == 0: return COLORS.purple;
-      case now < (expiry as number) - threshold: return COLORS.success;
-      case now < (expiry as number): return COLORS.warning;
-      default: return COLORS.danger;
-    }
-  }
-}
-
 export interface SupportedLanguage {
   name: string;
   value: string;
@@ -499,13 +427,10 @@ export class FileManager {
   }
 }
 
-export type CalendarKind = 'gregorian' | 'jalalian';
-
 export class IntlUtil {
-  static formatDate(date: string | number | Date | null | undefined, calendar: CalendarKind = 'gregorian'): string {
+  static formatDate(date: string | number | Date | null | undefined): string {
     if (date == null) return '';
-    const language = LanguageManager.getLanguage();
-    const locale = calendar === 'jalalian' ? 'fa-IR' : language;
+    const locale = LanguageManager.getLanguage();
 
     const intlOptions: Intl.DateTimeFormatOptions = {
       year: 'numeric',

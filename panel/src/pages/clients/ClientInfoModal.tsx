@@ -4,18 +4,15 @@ import { CopyOutlined, DownOutlined } from '@ant-design/icons';
 
 import { Button, Dialog, Tag, Tooltip, TooltipProvider } from '@/components/ds';
 import { getMessage } from '@/utils/messageBus';
-import { ClipboardManager, IntlUtil, SizeFormatter } from '@/utils';
+import { ClipboardManager, HttpUtil, IntlUtil, SizeFormatter } from '@/utils';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
-import { useDatepicker } from '@/hooks/useDatepicker';
 import { useNodesQuery } from '@/api/queries/useNodesQuery';
 import type { ClientRecord } from '@/hooks/useClients';
 interface ClientInfoModalProps {
   open: boolean;
   client: ClientRecord | null;
   isOnline: boolean;
-  onDevice?: (action: 'block' | 'forget', fingerprint: string, blocked: boolean) => void;
-  onAddress?: (ip: string) => void;
-  onExit?: (nodeId: number) => void;
+  onChanged: () => void;
   onOpenChange: (open: boolean) => void;
   actions?: { edit: () => void; reset: () => void; remove: () => void };
 }
@@ -24,13 +21,10 @@ export default function ClientInfoModal({
   open,
   client,
   isOnline,
-  onDevice,
-  onAddress,
-  onExit,
+  onChanged,
   onOpenChange,
   actions,
 }: ClientInfoModalProps) {
-  const { datepicker } = useDatepicker();
   const { t } = useTranslation();
   const message = getMessage();
   const { nodes } = useNodesQuery();
@@ -38,11 +32,11 @@ export default function ClientInfoModal({
 
   const nodeName = useMemo(() => {
     const byId = new Map<number, string>();
-    for (const n of nodes) byId.set(n.id, n.name || n.address || String(n.id));
+    for (const n of nodes) byId.set(n.id, n.tag || n.address || String(n.id));
     return (id?: number) => (id ? byId.get(id) ?? String(id) : '—');
   }, [nodes]);
 
-  const dateLabel = (ts?: number) => (!ts || ts <= 0 ? '—' : IntlUtil.formatDate(ts, datepicker));
+  const dateLabel = (ts?: number) => (!ts || ts <= 0 ? '—' : IntlUtil.formatDate(ts));
 
   const spanText = (ms: number): string => {
     const minutes = Math.max(0, Math.floor(ms / 60000));
@@ -56,11 +50,17 @@ export default function ClientInfoModal({
     return parts.join(' ');
   };
 
-  const expiryLabel = (ts?: number) => {
-    if (!ts) return '∞';
-    if (ts < 0) { const days = Math.round(ts / -86400000); return `${t('pages.clients.delayedStart')}: ${days}d`; }
-    return IntlUtil.formatDate(ts, datepicker);
-  };
+  const expiryLabel = (ts?: number) => (ts ? IntlUtil.formatDate(ts) : '∞');
+
+  async function act(path: string, body: Record<string, unknown>) {
+    if (!client) return;
+    await HttpUtil.post(path, { clientId: client.id, ...body });
+    onChanged();
+  }
+  const onDevice = (action: 'block' | 'forget', fingerprint: string, blocked: boolean) =>
+    act(`/panel/api/clients/devices/${action}`, { fingerprint, blocked });
+  const onAddress = (ip: string) => act('/panel/api/clients/addresses/forget', { ip });
+  const onExit = (nodeId: number) => act('/panel/api/clients/exits/forget', { nodeId });
 
   async function copyValue(text: string) {
     if (!text) return;
@@ -85,8 +85,8 @@ export default function ClientInfoModal({
   }
 
   const devices = client?.devices ?? [];
-  const ipLog = client?.ipLog ?? [];
-  const exitLog = client?.exitLog ?? [];
+  const ipLog = client?.addresses ?? [];
+  const exitLog = client?.exits ?? [];
 
   const deviceLabel = useMemo(() => {
     const byPrint = new Map<string, string>();
@@ -124,7 +124,7 @@ export default function ClientInfoModal({
       return;
     }
     setAsking(null);
-    onDevice?.(action, print, blocked);
+    void onDevice(action, print, blocked);
   };
 
   const confirmAddress = (ip: string) => {
@@ -135,7 +135,7 @@ export default function ClientInfoModal({
       return;
     }
     setAsking(null);
-    onAddress?.(ip);
+    void onAddress(ip);
   };
 
   const confirmExit = (nodeId: number) => {
@@ -146,7 +146,7 @@ export default function ClientInfoModal({
       return;
     }
     setAsking(null);
-    onExit?.(nodeId);
+    void onExit(nodeId);
   };
 
   const fold = (key: 'devices' | 'ips' | 'exits', label: string, count: number) => (
@@ -201,11 +201,10 @@ export default function ClientInfoModal({
               <span className="ms-row__hint">↑ {SizeFormatter.sizeFormat(c.traffic?.up ?? 0)} ↓ {SizeFormatter.sizeFormat(c.traffic?.down ?? 0)}</span>
             </>
           ))}
-          {row(t('pages.clients.limit'), (c.totalGB ?? 0) > 0 ? SizeFormatter.sizeFormat(c.totalGB ?? 0) : '∞')}
           {row(t('pages.clients.duration'), (
             <>
-              {expiryLabel(c.expiryTime)}
-              {(c.expiryTime ?? 0) > 0 && <span className="ms-row__hint">{IntlUtil.formatRelativeTime(c.expiryTime)}</span>}
+              {expiryLabel(c.expiryAt)}
+              {(c.expiryAt ?? 0) > 0 && <span className="ms-row__hint">{IntlUtil.formatRelativeTime(c.expiryAt)}</span>}
             </>
           ))}
           {row(t('pages.clients.group'), c.group || '—')}
@@ -326,7 +325,7 @@ export default function ClientInfoModal({
       <Dialog
         open={open}
         onOpenChange={(o) => !o && onOpenChange(false)}
-        title={client ? (isMobile ? client.email : `${t('pages.clients.clientInfo')} — ${client.email}`) : t('pages.clients.clientInfo')}
+        title={client ? (isMobile ? client.tag : `${t('pages.clients.clientInfo')} — ${client.tag}`) : t('pages.clients.clientInfo')}
         width={760}
         autoHeight
         footer={actions ? (
@@ -364,10 +363,8 @@ export default function ClientInfoModal({
             <div className="ci-pair">
               {field(t('pages.clients.duration'), (
                 <span className="ci-value-row">
-                  {!client.expiryTime
-                    ? <Tag tone="primary" className="ci-duration">∞</Tag>
-                    : <Tag tone={client.expiryTime < 0 ? 'primary' : 'neutral'} className="ci-duration">{expiryLabel(client.expiryTime)}</Tag>}
-                  {(client.expiryTime ?? 0) > 0 && <span className="hint">{IntlUtil.formatRelativeTime(client.expiryTime)}</span>}
+                  <Tag tone={client.expiryAt ? 'neutral' : 'primary'} className="ci-duration">{expiryLabel(client.expiryAt)}</Tag>
+                  {(client.expiryAt ?? 0) > 0 && <span className="hint">{IntlUtil.formatRelativeTime(client.expiryAt)}</span>}
                 </span>
               ))}
               {field(t('pages.clients.attachedGroup'), (

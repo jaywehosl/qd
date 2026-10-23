@@ -18,7 +18,6 @@ func main() {
 	auth := flag.String("auth", "", "admin token, the uuid from a qd:// link")
 	op := flag.String("op", "hello", "operation to ask for")
 	body := flag.String("body", "", "json body for the operation")
-	_ = flag.Duration("timeout", 4*time.Second, "kept for habit: the wait now lives in the transport")
 	statePath := flag.String("state", "", "a client state file to write a subscription into")
 	link := flag.String("link", "", "qd:// link to subscribe that state file to")
 	flag.Parse()

@@ -46,7 +46,7 @@ func main() {
 	flag.IntVar(&opts.Readers, "readers", 1, "capture threads: 1 keeps packet order, more only helps downloads")
 	flag.BoolVar(&opts.Connect, "connect", false, "bring the tunnel up at start instead of waiting for the page")
 	flag.BoolVar(&opts.Autostart, "autostart", false, "started by the system, so follow the autostart behaviour setting")
-	flag.StringVar(&opts.Key, "key", "", "network key, 64 hex chars, empty leaves the transport in the clear")
+	flag.StringVar(&opts.Key, "key", "", "network key, 64 hex chars; the link of a subscription carries it, so this is only for a client without one")
 	flag.DurationVar(&opts.Duration, "duration", 0, "stop after this long, 0 = until interrupt")
 
 	flag.BoolVar(&opts.DNS, "dns", true, "answer names on the tun adapter through the node's resolver")

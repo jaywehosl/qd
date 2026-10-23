@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jaywehosl/qd/internal/netstate"
+	"github.com/jaywehosl/qd/internal/qsrv"
 	"github.com/jaywehosl/qd/internal/store"
 	"github.com/jaywehosl/qd/internal/update"
 )
@@ -32,12 +33,42 @@ func (claim deviceClaim) device() store.Device {
 	}
 }
 
+type owner struct {
+	client int
+	limit  int
+}
+
+func (state *controlState) seatFree(grant qsrv.Grant, device string) bool {
+	who, known := state.gate.ownerOf(grant.Session)
+	if !known {
+		return true
+	}
+	if device == "" {
+		return who.limit <= 0
+	}
+	db := state.data()
+	held, seen, err := db.Device(who.client, device)
+	if err != nil {
+		return true
+	}
+	if seen {
+		return !held.Blocked
+	}
+	if who.limit > 0 {
+		if count, err := db.CountDevices(who.client); err == nil && count >= who.limit {
+			return false
+		}
+	}
+	db.RecordDevice(who.client, state.id, store.Device{Fingerprint: device}, time.Now().UnixMilli())
+	return true
+}
+
 func (state *controlState) admit(client netstate.Client, group *netstate.Group, claim deviceClaim) string {
 	if claim.Fingerprint == "" {
 		return ""
 	}
 
-	known, seen, err := state.db.Device(client.ID, claim.Fingerprint)
+	known, seen, err := state.data().Device(client.ID, claim.Fingerprint)
 	if err != nil {
 		return ""
 	}
@@ -47,14 +78,14 @@ func (state *controlState) admit(client netstate.Client, group *netstate.Group, 
 
 	if !seen {
 		if limit := deviceLimit(client, group); limit > 0 {
-			count, err := state.db.CountDevices(client.ID)
+			count, err := state.data().CountDevices(client.ID)
 			if err == nil && count >= limit {
 				return "this subscription already uses its allowance of devices"
 			}
 		}
 	}
 
-	state.db.RecordDevice(client.ID, state.id, claim.device(), time.Now().UnixMilli())
+	state.data().RecordDevice(client.ID, state.id, claim.device(), time.Now().UnixMilli())
 	return ""
 }
 
@@ -69,10 +100,10 @@ func (state *controlState) seeAgain(client netstate.Client, claim deviceClaim) {
 	if claim.Fingerprint == "" {
 		return
 	}
-	if _, seen, err := state.db.Device(client.ID, claim.Fingerprint); err != nil || !seen {
+	if _, seen, err := state.data().Device(client.ID, claim.Fingerprint); err != nil || !seen {
 		return
 	}
-	state.db.RecordDevice(client.ID, state.id, claim.device(), time.Now().UnixMilli())
+	state.data().RecordDevice(client.ID, state.id, claim.device(), time.Now().UnixMilli())
 }
 
 func (claim deviceClaim) built() string {

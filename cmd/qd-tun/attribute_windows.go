@@ -241,9 +241,9 @@ func (p *platformRouter) read(shape tableShape) ([]byte, bool) {
 	return nil, false
 }
 
-func extendedTable(proc *syscall.LazyProc, class uintptr) ([]byte, bool) {
+func extendedTable(proc *syscall.LazyProc, family, class uintptr) ([]byte, bool) {
 	var size uint32
-	proc.Call(0, uintptr(unsafe.Pointer(&size)), 0, afInet, class, 0)
+	proc.Call(0, uintptr(unsafe.Pointer(&size)), 0, family, class, 0)
 	if size == 0 {
 		return nil, false
 	}
@@ -252,7 +252,7 @@ func extendedTable(proc *syscall.LazyProc, class uintptr) ([]byte, bool) {
 	r, _, _ := proc.Call(
 		uintptr(unsafe.Pointer(&buf[0])),
 		uintptr(unsafe.Pointer(&size)),
-		0, afInet, class, 0,
+		0, family, class, 0,
 	)
 	if r != 0 || size < 4 {
 		return nil, false
@@ -340,7 +340,7 @@ type tcpRow struct {
 }
 
 func tcpRowsWithPid() []tcpRow {
-	buf, ok := extendedTable(procGetExtendedTcpTable, tcpTableOwnerPidAll)
+	buf, ok := extendedTable(procGetExtendedTcpTable, afInet, tcpTableOwnerPidAll)
 	if !ok {
 		return nil
 	}
@@ -388,6 +388,37 @@ func openRemotes() []netip.Addr {
 	for _, row := range rows {
 		if addr := row.remoteAddr; addr != 0 {
 			out = append(out, netip.AddrFrom4([4]byte{byte(addr), byte(addr >> 8), byte(addr >> 16), byte(addr >> 24)}))
+		}
+	}
+	if buf, ok := extendedTable(procGetExtendedTcpTable, afInet6, tcpTableOwnerPidAll); ok && len(buf) >= 4 {
+		const rowSize = 56
+		n := int(binary.LittleEndian.Uint32(buf[0:4]))
+		for i := 0; i < n && 4+(i+1)*rowSize <= len(buf); i++ {
+			remote := netip.AddrFrom16([16]byte(buf[4+i*rowSize+24 : 4+i*rowSize+40]))
+			if !remote.IsUnspecified() {
+				out = append(out, remote.Unmap())
+			}
+		}
+	}
+	return out
+}
+
+func connectionsByPid() map[uint32]int {
+	const listening = 2
+	out := map[uint32]int{}
+	for _, row := range tcpRowsWithPid() {
+		if row.state != listening && row.pid != 0 {
+			out[row.pid]++
+		}
+	}
+	if buf, ok := extendedTable(procGetExtendedTcpTable, afInet6, tcpTableOwnerPidAll); ok && len(buf) >= 4 {
+		const rowSize = 56
+		n := int(binary.LittleEndian.Uint32(buf[0:4]))
+		for i := 0; i < n && 4+(i+1)*rowSize <= len(buf); i++ {
+			row := buf[4+i*rowSize:]
+			if state, pid := binary.LittleEndian.Uint32(row[48:52]), binary.LittleEndian.Uint32(row[52:56]); state != listening && pid != 0 {
+				out[pid]++
+			}
 		}
 	}
 	return out

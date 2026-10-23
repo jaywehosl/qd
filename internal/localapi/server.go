@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"path"
 	"strconv"
 	"strings"
@@ -130,6 +131,14 @@ func (s *Server) URL() string {
 		return ""
 	}
 	return fmt.Sprintf("http://%s/client", addr.String())
+}
+
+func (s *Server) Entry() string {
+	page := s.URL()
+	if page == "" {
+		return ""
+	}
+	return page + "?t=" + url.QueryEscape(s.Token())
 }
 
 func (s *Server) Allow(origin string) {

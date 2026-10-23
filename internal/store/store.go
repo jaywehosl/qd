@@ -77,8 +77,18 @@ func Open(path string) (*DB, error) {
 		`ALTER TABLE dns_records ADD COLUMN allow INTEGER NOT NULL DEFAULT 0`,
 		`UPDATE network SET max_streams = 65536 WHERE max_streams = 4096`,
 		`ALTER TABLE network ADD COLUMN ipv6 INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE network ADD COLUMN ech_secret TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE exit_log ADD COLUMN epoch INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE exit_log ADD COLUMN last_up INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE exit_log ADD COLUMN last_down INTEGER NOT NULL DEFAULT 0`,
+		`DROP INDEX IF EXISTS idx_revisions_published`,
+		`ALTER TABLE revisions DROP COLUMN published_at`,
+		`ALTER TABLE revisions DROP COLUMN state_json`,
+		`DROP TABLE IF EXISTS node_state`,
+		`DROP TABLE IF EXISTS node_metrics`,
 	} {
-		if _, err := h.Exec(add); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+		if _, err := h.Exec(add); err != nil && !strings.Contains(err.Error(), "duplicate column") &&
+			!strings.Contains(err.Error(), "no such column") {
 			h.Close()
 			return nil, fmt.Errorf("store: %s: %w", add, err)
 		}

@@ -48,7 +48,7 @@ func (c *Client) Page() (string, error) {
 			}
 		}),
 		Index: func(token string) ([]byte, error) {
-			return web.IndexWith(map[string]string{"X_UI_BASE_PATH": "/", "QD_TOKEN": token})
+			return web.IndexWith(map[string]string{"QD_TOKEN": token})
 		},
 	})
 	if err != nil {

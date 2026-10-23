@@ -61,7 +61,6 @@ type frame struct {
 	handle uintptr
 	prev   uintptr
 	bar    int32
-	holes  []rect
 }
 
 var chrome frame
@@ -76,23 +75,6 @@ func (f *frame) setBar(height int32) {
 	f.mu.Lock()
 	f.bar = height
 	f.mu.Unlock()
-}
-
-func (f *frame) setHoles(list []rect) {
-	f.mu.Lock()
-	f.holes = list
-	f.mu.Unlock()
-}
-
-func (f *frame) inHole(x, y int32) bool {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	for _, h := range f.holes {
-		if x >= h.Left && x < h.Right && y >= h.Top && y < h.Bottom {
-			return true
-		}
-	}
-	return false
 }
 
 func metric(index int32) int32 {
@@ -215,7 +197,7 @@ func (f *frame) hit(handle uintptr, lParam uintptr) uintptr {
 		}
 	}
 
-	if y < box.Top+f.barHeight() && !f.inHole(x-box.Left, y-box.Top) {
+	if y < box.Top+f.barHeight() {
 		return htCaption
 	}
 	return htClient

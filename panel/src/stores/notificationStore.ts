@@ -1,7 +1,7 @@
 export type Severity = 'danger' | 'warning' | 'info';
 export type NotifSource = 'toast' | 'alert' | 'event';
 
-export type AlertCategory = 'security' | 'xray';
+export type AlertCategory = 'security' | 'nodes';
 
 export interface NotifRecord {
   id: string;
@@ -14,7 +14,7 @@ export interface NotifRecord {
 
 export interface AlertPrefs {
   security: boolean;
-  xray: boolean;
+  nodes: boolean;
 }
 
 export type SensorKey = 'cpu' | 'mem' | 'disk' | 'sockets' | 'udpSockets' | 'clientOffline';
@@ -58,7 +58,7 @@ const DEFAULT_MAINTENANCE: MaintenancePrefs = {
   lastBackupAt: 0,
 };
 
-const DEFAULT_PREFS: AlertPrefs = { security: true, xray: true };
+const DEFAULT_PREFS: AlertPrefs = { security: true, nodes: true };
 
 const DEFAULT_SENSORS: SensorPrefs = {
   cpu: { enabled: true, threshold: 55 },

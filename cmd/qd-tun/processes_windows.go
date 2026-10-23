@@ -22,12 +22,14 @@ func snapshotProcesses() []processInfo {
 	if err := windows.Process32First(snap, &entry); err != nil {
 		return out
 	}
+	open := connectionsByPid()
 	for {
 		name := windows.UTF16ToString(entry.ExeFile[:])
 		if name != "" && !strings.EqualFold(name, "System") {
 			path := lookupProcess(entry.ProcessID).path
 			out = append(out, processInfo{
 				Name: name, Path: path, Icon: processIcon(path), PID: int(entry.ProcessID),
+				Connections: open[entry.ProcessID],
 			})
 		}
 		if err := windows.Process32Next(snap, &entry); err != nil {

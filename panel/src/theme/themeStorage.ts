@@ -2,7 +2,6 @@ import { applyTheme, applyThemeMode, DEFAULT_THEME, type PanelTheme } from './th
 import { HttpUtil } from '@/utils';
 
 const STORAGE_KEY = 'uup.panelTheme';
-const basePath = () => (typeof window !== 'undefined' && window.X_UI_BASE_PATH) || '/';
 
 export function loadTheme(): PanelTheme {
   if (typeof localStorage === 'undefined') return {};
@@ -23,7 +22,7 @@ function cacheLocal(theme: PanelTheme): void {
 
 async function fetchServerTheme(): Promise<PanelTheme | null> {
   try {
-    const res = await fetch(basePath() + 'theme.json', { cache: 'no-cache' });
+    const res = await fetch('/theme.json', { cache: 'no-cache' });
     if (!res.ok) return null;
     const data: unknown = await res.json();
     return data && typeof data === 'object' && !Array.isArray(data) ? (data as PanelTheme) : null;
@@ -37,8 +36,6 @@ export async function saveTheme(theme: PanelTheme): Promise<boolean> {
   try {
     const msg = await HttpUtil.post('/panel/setting/theme', theme, {
       silent: true,
-      headers: { 'Content-Type': 'application/json' },
-      skipAuthRedirect: true,
     });
     return Boolean(msg && (msg as { success?: boolean }).success);
   } catch {
@@ -47,12 +44,10 @@ export async function saveTheme(theme: PanelTheme): Promise<boolean> {
 }
 
 export function bootstrapTheme(): void {
-  const injected = typeof window !== 'undefined' ? window.X_UI_THEME : undefined;
-  const hasInjected = injected && Object.keys(injected).length > 0;
   const local = loadTheme();
   const hasLocal = Object.keys(local).length > 0;
 
-  const theme = hasInjected ? { ...injected } : (hasLocal ? { ...local } : { ...DEFAULT_THEME });
+  const theme = hasLocal ? { ...local } : { ...DEFAULT_THEME };
   if (local.mode) {
     theme.mode = local.mode;
   }
@@ -60,11 +55,6 @@ export function bootstrapTheme(): void {
   applyTheme(theme);
   if (theme.mode) {
     applyThemeMode(theme.mode);
-  }
-
-  if (hasInjected) {
-    cacheLocal(theme);
-    return;
   }
 
   void fetchServerTheme().then((srv) => {

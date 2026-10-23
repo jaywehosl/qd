@@ -124,7 +124,7 @@ func hostWindow(args []string) {
 }
 
 const (
-	guardPage = false
+	guardPage = true
 	headless  = false
 )
 
@@ -198,21 +198,10 @@ func (s *shell) carry(url string) {
 	view.Bind("qdWindowTheme", func(dark bool) {
 		view.Dispatch(func() { dress(handle, dark) })
 	})
-	view.Bind("qdTitleBar", func(height float64, holes [][]float64) {
+	view.Bind("qdTitleBar", func(height float64) {
 		if height > 0 {
 			chrome.setBar(int32(height))
 		}
-		out := make([]rect, 0, len(holes))
-		for _, h := range holes {
-			if len(h) < 4 {
-				continue
-			}
-			out = append(out, rect{
-				Left: int32(h[0]), Top: int32(h[1]),
-				Right: int32(h[0] + h[2]), Bottom: int32(h[1] + h[3]),
-			})
-		}
-		chrome.setHoles(out)
 	})
 	view.Bind("qdWindowCommand", func(what string) {
 		view.Dispatch(func() { command(handle, what) })
@@ -229,8 +218,7 @@ func (s *shell) carry(url string) {
 	if paneDev != "" {
 		seed, err := json.Marshal(paneToken)
 		if err == nil {
-			view.Init(fmt.Sprintf("window.QD_TOKEN=%s;window.X_UI_BASE_PATH='/';"+
-				"try{sessionStorage.setItem('qd.token',%s)}catch(e){}", seed, seed))
+			view.Init(fmt.Sprintf("window.QD_TOKEN=%s;try{sessionStorage.setItem('qd.token',%s)}catch(e){}", seed, seed))
 		}
 		url = paneDev
 		fmt.Printf("window   dev page %s, api token %s\n", url, paneToken)

@@ -72,7 +72,12 @@ func (p hostPlatform) Processes() []clientapi.Process {
 	return out
 }
 
-func (p hostPlatform) RulesChanged() { reloadProcessRules(p.db) }
+func (p hostPlatform) RulesChanged() {
+	reloadProcessRules(p.db)
+	if d := p.tun.DNS(); d != nil {
+		d.Flush()
+	}
+}
 
 func deviceOf() clientapi.Device {
 	me := identify()

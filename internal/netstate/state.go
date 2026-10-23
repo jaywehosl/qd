@@ -17,7 +17,7 @@ var (
 
 type Node struct {
 	ID      int    `json:"id"`
-	Tag     string `json:"name"`
+	Tag     string `json:"tag"`
 	Address string `json:"address"`
 	Port    int    `json:"port"`
 	Role    Role   `json:"role"`
@@ -46,7 +46,7 @@ type Entrypoint struct {
 
 type Group struct {
 	ID            int    `json:"id"`
-	Tag           string `json:"name"`
+	Tag           string `json:"tag"`
 	AllowExit     bool   `json:"allowExit"`
 	AllowDev      bool   `json:"allowDev"`
 	AllowCore     bool   `json:"allowCore"`
@@ -56,14 +56,14 @@ type Group struct {
 
 type Client struct {
 	ID          int    `json:"id"`
-	Tag         string `json:"email"`
+	Tag         string `json:"tag"`
 	UUID        string `json:"uuid"`
 	GroupID     int    `json:"groupId"`
 	Enable      bool   `json:"enable"`
-	ExpiryAt    int64  `json:"expiryTime"`
+	ExpiryAt    int64  `json:"expiryAt"`
 	Comment     string `json:"comment"`
 	Admin       bool   `json:"admin"`
-	DeviceLimit int    `json:"limitIp"`
+	DeviceLimit int    `json:"deviceLimit"`
 	AllowExit   int    `json:"allowExit"`
 	CreatedAt   int64  `json:"createdAt"`
 }

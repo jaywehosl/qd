@@ -215,22 +215,20 @@ public class TunnelService extends VpnService {
                 Core.say(this, "java: v6 could not be held: " + e.getMessage());
             }
 
-            if (Build.VERSION.SDK_INT >= 33) {
-                JSONArray peers = p.optJSONArray("peers");
-                int spared = 0;
-                for (int i = 0; peers != null && i < peers.length(); i++) {
-                    spared += spare(builder, peers.getString(i));
-                }
-                Core.say(this, "java: kept " + spared + " node addresses off the tunnel");
-
-                JSONArray lan = p.optJSONArray("lan");
-                for (int i = 0; lan != null && i < lan.length(); i++) {
-                    String[] cut = lan.getString(i).split("/");
-                    builder.excludeRoute(new IpPrefix(InetAddress.getByName(cut[0]), Integer.parseInt(cut[1])));
-                }
-                builder.addRoute(p.getString("dns"), 32);
-                Core.say(this, "java: local networks stay off the tunnel: " + lan);
+            JSONArray peers = p.optJSONArray("peers");
+            int spared = 0;
+            for (int i = 0; peers != null && i < peers.length(); i++) {
+                spared += spare(builder, peers.getString(i));
             }
+            Core.say(this, "java: kept " + spared + " node addresses off the tunnel");
+
+            JSONArray lan = p.optJSONArray("lan");
+            for (int i = 0; lan != null && i < lan.length(); i++) {
+                String[] cut = lan.getString(i).split("/");
+                builder.excludeRoute(new IpPrefix(InetAddress.getByName(cut[0]), Integer.parseInt(cut[1])));
+            }
+            builder.addRoute(p.getString("dns"), 32);
+            Core.say(this, "java: local networks stay off the tunnel: " + lan);
 
             builder.setMtu(p.getInt("mtu"));
             builder.setSession("qd");

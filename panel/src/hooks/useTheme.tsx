@@ -30,9 +30,8 @@ if (localStorage.getItem(CACHE_RESET_KEY) !== 'true') {
 const getInitialMode = () => {
   if (typeof window === 'undefined') return { dark: false, ultra: false };
   if (localStorage.getItem(STORAGE_FOLLOW) === 'true') return { dark: systemDark(), ultra: false };
-  const injected = (window as any).X_UI_THEME;
   const local = loadTheme();
-  const mode = local.mode ?? injected?.mode ?? 'light';
+  const mode = local.mode ?? 'light';
   return {
     dark: mode === 'dark' || mode === 'ultra-dark',
     ultra: mode === 'ultra-dark',

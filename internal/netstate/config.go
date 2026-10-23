@@ -6,11 +6,13 @@ type NodeConfig struct {
 }
 
 type CfgClient struct {
-	UUID      string
-	ExpiryAt  int64
-	AllowExit bool
-	AllowDev  bool
-	AllowCore bool
+	ID          int
+	UUID        string
+	ExpiryAt    int64
+	DeviceLimit int
+	AllowExit   bool
+	AllowDev    bool
+	AllowCore   bool
 }
 
 type CfgPeer struct {
