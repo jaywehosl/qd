@@ -15,6 +15,8 @@ MODE=""
 WANT_VERSION=""
 LOCAL_DIR=""
 ASSUME_YES=0
+PURGE=0
+LE="/etc/letsencrypt"
 
 PORT=443
 DOMAIN=""
@@ -93,6 +95,8 @@ asks nothing and writes exactly what the panel handed it.
   --mode install|update|fresh|over|uninstall
                                      what to do when something is already here
   --uninstall                        short for --mode uninstall
+  --purge                            uninstall without questions, and also delete the
+                                     certificate of the node and certbot itself
   --version vX.Y.Z                   release to install, default: latest
   --from DIR                         install from files already on this machine
                                      instead of downloading them
@@ -124,13 +128,14 @@ Modes when something is already installed:
   update    keep the database, swap the binary, roll back if it will not start
   fresh     back the database up, remove everything, build a new network
   over      overwrite the files, leave the database alone
-  uninstall remove the node, its database and its unit
+  uninstall remove the node, its database and its unit; asks about the
+            certificate and certbot
 USAGE
 }
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --no-cert|--uninstall|--yes|-y|--help|-h) ;;
+        --no-cert|--uninstall|--purge|--yes|-y|--help|-h) ;;
         -*) [ $# -ge 2 ] || die "$1 needs a value" ;;
     esac
     case "$1" in
@@ -160,6 +165,7 @@ while [ $# -gt 0 ]; do
         --dns-max-ttl) DNS_MAX_TTL="${2:-}"; shift 2 ;;
         --dns-stale)   DNS_STALE="${2:-}"; shift 2 ;;
         --uninstall)   MODE="uninstall"; shift ;;
+        --purge)       MODE="uninstall"; PURGE=1; shift ;;
         --yes|-y)      ASSUME_YES=1; shift ;;
         --help|-h)     usage; exit 0 ;;
         *)             die "unknown argument: $1" ;;
@@ -518,7 +524,8 @@ This machine already carries a node. Pick one:
   2  fresh   back the database up, remove unit and files, build a NEW network.
              The current network key and every client on it stop working here.
   3  over    overwrite the binary, leave the database alone.
-  4  remove  take qd off this machine entirely: unit, files, database.
+  4  remove  take qd off this machine entirely: unit, files, database;
+             asks whether the certificate and certbot go too.
   5  cancel
 
 MENU
@@ -643,6 +650,7 @@ open_firewall() {
     command -v ufw >/dev/null 2>&1 || return 0
     ufw status 2>/dev/null | grep -q "^Status: active" || return 0
     if ufw allow "$1/udp" >/dev/null 2>&1; then say "ufw: opened $1/udp"; fi
+    if ufw allow "$1/tcp" >/dev/null 2>&1; then say "ufw: opened $1/tcp"; fi
     return 0
 }
 
@@ -902,38 +910,127 @@ do_over() {
     say "the files are now $(installed_version), database and unit untouched"
 }
 
-do_uninstall() {
-    if ! anything_here; then
-        step "nothing to remove"
-        say "no unit, no files and no database of qd on this machine"
+ask_yes() {
+    local answer="" hint="[y/N]"
+    if ! interactive; then [ "$2" = "yes" ]; return; fi
+    [ "$2" = "yes" ] && hint="[Y/n]"
+    read -r -p "  $1 $hint: " answer </dev/tty || answer=""
+    case "${answer:-$2}" in
+        y|Y|yes|Yes|YES) return 0 ;;
+    esac
+    return 1
+}
+
+node_certificate() {
+    [ -r "$CONF" ] || return 0
+    awk -F= '/^[[:space:]]*cert[[:space:]]*=/ {gsub(/[[:space:]]/, "", $2); print $2; exit}' "$CONF" \
+        | sed -n "s#^$LE/live/\([^/]*\)/.*#\1#p"
+}
+
+other_certificates() {
+    local dir name
+    for dir in "$LE"/live/*/; do
+        name="$(basename "$dir")"
+        if [ -d "$LE/live/$name" ] && [ "$name" != "$1" ]; then printf "%s " "$name"; fi
+    done
+    return 0
+}
+
+certbot_held() { command -v dpkg >/dev/null 2>&1 && dpkg -s certbot >/dev/null 2>&1; }
+
+drop_certificate() {
+    if command -v certbot >/dev/null 2>&1 &&
+        certbot delete --cert-name "$1" --non-interactive >/dev/null 2>&1; then
         return 0
     fi
+    rm -rf "$LE/live/$1" "$LE/archive/$1" "$LE/renewal/$1.conf"
+}
 
-    report_state
-    confirm_uninstall
+drop_certbot() {
+    DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq certbot >/dev/null 2>&1 || true
+    DEBIAN_FRONTEND=noninteractive apt-get autoremove -y -qq --purge >/dev/null 2>&1 || true
+    rm -rf "$LE" /var/lib/letsencrypt /var/log/letsencrypt
+}
 
-    local port
+do_uninstall() {
+    local port cert others copy="" drop_cert=0 drop_bot=0 tuned=0 present=0
+    if anything_here; then
+        present=1
+        report_state
+        confirm_uninstall
+    else
+        step "no node here"
+        say "no unit, no files and no database of qd; clearing what may be left around them"
+    fi
+
     port="$(running_port)"
+    cert="$(node_certificate)"
+    if [ -f /etc/sysctl.d/99-qd.conf ]; then tuned=1; fi
 
-    step "stopping the node"
-    systemctl disable --now "$SERVICE" >/dev/null 2>&1 || true
-    sleep 2
+    step "what else goes"
+    if has_db && [ "$PURGE" -eq 0 ] && ask_yes "keep a copy of the database and the network key in /root" no; then
+        copy="/root/qd-node-$(stamp)"
+    fi
+    if [ -n "$cert" ] && [ -d "$LE/live/$cert" ]; then
+        if [ "$PURGE" -eq 1 ] || ask_yes "delete the certificate for $cert" no; then
+            drop_cert=1
+        fi
+    fi
+    if certbot_held; then
+        if [ "$drop_cert" -eq 1 ]; then
+            others="$(other_certificates "$cert")"
+        else
+            others="$(other_certificates "")"
+        fi
+        if [ -n "$others" ]; then
+            say "certbot stays: it still holds ${others% }"
+        elif [ "$PURGE" -eq 1 ] || ask_yes "remove certbot, the packages it brought and $LE" no; then
+            drop_bot=1
+        fi
+    fi
+
+    if [ "$present" -eq 1 ]; then
+        step "stopping the node"
+        systemctl disable --now "$SERVICE" >/dev/null 2>&1 || true
+        sleep 2
+    fi
     rm -f "$UNIT"
     rm -rf "/etc/systemd/system/$SERVICE.d"
     systemctl daemon-reload >/dev/null 2>&1 || true
 
+    if [ -n "$copy" ]; then
+        mkdir -p "$copy"
+        chmod 0700 "$copy"
+        cp -a "$DB" "$DB-wal" "$DB-shm" "$STATE/first-node.txt" "$CONF" "$copy/" 2>/dev/null || true
+        good "database, config and network key copied to $copy"
+    fi
+
     step "removing what the installer set up around it"
-    rm -f /etc/systemd/journald.conf.d/qd.conf /etc/sysctl.d/99-qd.conf /etc/letsencrypt/renewal-hooks/deploy/qd-node.sh
+    rm -f /etc/systemd/journald.conf.d/qd.conf /etc/sysctl.d/99-qd.conf \
+        "$LE/renewal-hooks/deploy/qd-node.sh" /tmp/qd-certbot.log
     systemctl restart systemd-journald >/dev/null 2>&1 || true
     sysctl --system >/dev/null 2>&1 || true
-
-    step "removing files"
-    rm -rf "$PREFIX" "$STATE" "$(dirname "$CONF")"
+    if [ "$tuned" -eq 1 ]; then say "socket buffer limits go back to the system defaults after a reboot"; fi
 
     if [ -n "$port" ] && command -v ufw >/dev/null 2>&1; then
-        if ufw --force delete allow "$port/udp" >/dev/null 2>&1; then
-            say "ufw: closed $port/udp"
-        fi
+        for proto in udp tcp; do
+            if ufw show added 2>/dev/null | grep -q "allow $port/$proto\$" &&
+                ufw --force delete allow "$port/$proto" >/dev/null 2>&1; then
+                say "ufw: closed $port/$proto"
+            fi
+        done
+    fi
+
+    if [ "$present" -eq 1 ]; then step "removing files"; fi
+    rm -rf "$PREFIX" "$STATE" "$(dirname "$CONF")"
+
+    if [ "$drop_cert" -eq 1 ]; then
+        step "removing the certificate for $cert"
+        drop_certificate "$cert"
+    fi
+    if [ "$drop_bot" -eq 1 ]; then
+        step "removing certbot"
+        drop_certbot
     fi
 
     step "what is left"
@@ -941,6 +1038,10 @@ do_uninstall() {
     left "unit"     "$(yesno test -f "$UNIT")"
     left "$PREFIX"  "$(yesno test -d "$PREFIX")"
     left "$STATE"   "$(yesno test -d "$STATE")"
+    left "$(dirname "$CONF")" "$(yesno test -d "$(dirname "$CONF")")"
+    if [ "$drop_cert" -eq 1 ]; then left "certificate $cert" "$(yesno test -d "$LE/live/$cert")"; fi
+    if [ "$drop_bot" -eq 1 ]; then left "certbot" "$(yesno certbot_held)"; fi
+    if [ -n "$copy" ]; then say "kept: $copy"; fi
     printf "\n" >&2
 }
 
