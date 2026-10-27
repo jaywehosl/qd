@@ -4,6 +4,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -242,7 +243,17 @@ func runClient(opts runOptions) error {
 			close(quit)
 		}()
 	} else {
-		go answerKnocks(func() { openPage(ui.Entry()) }, stop)
+		go answerKnocks(func() {
+			held, _ := db.Settings()
+			if held.ManualBehaviour == "connect" || held.ManualBehaviour == "openConnect" {
+				go func() {
+					if err := api.Connect(); err != nil {
+						fmt.Printf("connect  %v\n", err)
+					}
+				}()
+			}
+			openPage(ui.Entry())
+		}, stop)
 		trayed, untray = startShell(db, tun, ui, api, quit, stop)
 	}
 	defer untray()
@@ -262,8 +273,10 @@ func runClient(opts runOptions) error {
 		db.SetValue(resumeKey, "")
 	}
 	if (opts.Connect || resume != "" || behaviour == "connect" || behaviour == "openConnect") && sub.Imported {
-		if err := api.Connect(); err != nil {
-			fmt.Printf("connect  %v\n", err)
+		if err := api.Connect(); err != nil && !errors.Is(err, clientapi.ErrStopped) {
+			fmt.Printf("connect  %v, trying again until the network lets it\n", err)
+			tun.wanted.Store(true)
+			go tun.cfg.Lost()
 		}
 	}
 	if !embedded && (!trayed || arrived || behaviour == "open" || behaviour == "openConnect") {

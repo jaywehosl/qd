@@ -16,6 +16,7 @@ const SEVERITY_ICON: Record<ClientNotif['severity'], ReactNode> = {
   error: <ExclamationCircleOutlined />,
   warning: <WarningOutlined />,
   info: <CheckCircleOutlined />,
+  done: <CheckCircleOutlined />,
 };
 
 function ago(ts: number, t: TFunction): string {

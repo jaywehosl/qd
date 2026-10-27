@@ -1,16 +1,8 @@
 
 
 .content-shell,
-.content-area,
-.docs-wrapper {
+.content-area {
   width: 100%;
   box-sizing: border-box;
 }
 
-.docs-wrapper {
-  display: flex;
-  flex-direction: column;
-  gap: var(--gap-card);
-}
-
-.is-skipped { opacity: 0.5; }

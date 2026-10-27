@@ -48,16 +48,25 @@ func knock() bool {
 	if windows.SetEvent(handle) != nil {
 		return false
 	}
-	time.Sleep(knockWait)
+	for waited := time.Duration(0); waited < knockWait; waited += knockPoll {
+		time.Sleep(knockPoll)
+		if state, _ := windows.WaitForSingleObject(handle, 0); state != uint32(windows.WAIT_OBJECT_0) {
+			return true
+		}
+		windows.SetEvent(handle)
+	}
 	if state, _ := windows.WaitForSingleObject(handle, 0); state != uint32(windows.WAIT_OBJECT_0) {
 		return true
 	}
-	fmt.Printf("single   the running client does not answer, ending it and taking its place\n")
+	fmt.Printf("single   the running client did not answer in %s, ending it and taking its place\n", knockWait)
 	endOthers()
 	return false
 }
 
-const knockWait = 1500 * time.Millisecond
+const (
+	knockWait = 10 * time.Second
+	knockPoll = 100 * time.Millisecond
+)
 
 func endOthers() {
 	exe, err := os.Executable()

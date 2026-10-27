@@ -67,6 +67,14 @@ signed() {
     rm -f "$pub" "$sig"
     return $ok
 }
+check_signature() {
+    if ! openssl pkeyutl -help 2>&1 | grep -q -- '-rawin'; then
+        warn "$(openssl version | cut -d' ' -f1-2) cannot check Ed25519 signatures (OpenSSL 3.0 can), only the checksums are verified"
+        return 0
+    fi
+    signed "$1" || die "$2 are not signed by the qd release key, refusing to install"
+    good "release signature verified"
+}
 rule() { printf "  ${DIM}%s${OFF}\n" "--------------------------------------------------------" >&2; }
 
 banner() {
@@ -409,8 +417,7 @@ stage_from_dir() {
         cp "$dir/checksums.txt" "$STAGE/checksums.txt"
         if [ -f "$dir/checksums.txt.sig" ]; then
             cp "$dir/checksums.txt.sig" "$STAGE/checksums.txt.sig"
-            signed "$STAGE/checksums.txt" || die "the checksums in $dir are not signed by the qd release key, refusing to install"
-            good "release signature verified"
+            check_signature "$STAGE/checksums.txt" "the checksums in $dir"
         else
             warn "no checksums.txt.sig in $dir, the checksums are unsigned"
         fi
@@ -438,8 +445,7 @@ fetch_release() {
     curl -fsSL -o "$STAGE/checksums.txt" "$base/checksums.txt" 2>/dev/null \
         && curl -fsSL -o "$STAGE/checksums.txt.sig" "$base/checksums.txt.sig" 2>/dev/null \
         || die "$tag carries no signed checksums, refusing to install"
-    signed "$STAGE/checksums.txt" || die "the checksums of $tag are not signed by the qd release key, refusing to install"
-    good "release signature verified"
+    check_signature "$STAGE/checksums.txt" "the checksums of $tag"
     if ( cd "$STAGE" && sed 's/qd-node-linux-amd64/qd-node/' checksums.txt | grep -E '[ *]qd-node$' | sha256sum -c --status - ); then
         good "checksums verified"
     else

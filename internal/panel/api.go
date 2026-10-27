@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"sync/atomic"
 
 	"github.com/jaywehosl/qd/internal/netstate"
 	"github.com/jaywehosl/qd/internal/qdcrypt"
@@ -19,9 +20,10 @@ type Prefs interface {
 }
 
 type API struct {
-	fleet *Fleet
-	prefs Prefs
-	cache *cache
+	fleet    *Fleet
+	prefs    Prefs
+	cache    *cache
+	revision atomic.Int64
 }
 
 func NewAPI(fleet *Fleet, prefs Prefs) *API {
@@ -215,6 +217,13 @@ func (a *API) nodeNames(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) nodeRowsWithCounts() []map[string]any {
 	health := a.fleet.Health()
+	top := 0
+	for _, h := range health {
+		top = max(top, h.Revision)
+	}
+	if a.revision.Swap(int64(top)) != int64(top) {
+		a.cache.forget()
+	}
 
 	rows := make([]map[string]any, 0, len(health))
 	for _, h := range health {

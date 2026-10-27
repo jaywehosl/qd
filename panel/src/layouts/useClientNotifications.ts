@@ -6,7 +6,7 @@ import { HttpUtil } from '@/utils';
 
 export interface ClientNotif {
   id: number;
-  severity: 'info' | 'warning' | 'danger' | 'error';
+  severity: 'info' | 'done' | 'warning' | 'danger' | 'error';
   text: string;
   ts: number;
   read: boolean;

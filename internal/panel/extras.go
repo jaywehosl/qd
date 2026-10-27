@@ -284,7 +284,7 @@ func (a *API) lastOnline(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) Live() map[string]any {
-	out := map[string]any{"nodes": a.nodeRowsWithCounts()}
+	out := map[string]any{"nodes": a.nodeRowsWithCounts(), "revision": a.revision.Load()}
 
 	clients, _, err := a.readClients()
 	if err != nil {

@@ -118,7 +118,8 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
     link.download = msg.obj.name;
     link.click();
     URL.revokeObjectURL(url);
-  }, []);
+    toast.success(t('client.routing.rulesSaved', { name: msg.obj.name }));
+  }, [t]);
 
   const doImport = useCallback(async (file: File) => {
     const msg = await HttpUtil.post<{ rules: number }>(
@@ -238,7 +239,7 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
                     )}
                   </span>
                 </div>
-                {b.matched ? <Tag>{t('client.routing.flows', { count: b.matched })}</Tag> : null}
+                {b.matched ? <Tag className="rt-flows">{t('client.routing.flows', { count: b.matched })}</Tag> : null}
                 {!allowExit && (role === 'egress' || role === 'noEgress') && <Tag tone="warning">{t('client.routing.noExit')}</Tag>}
                 <Select
                   className={`rt-role rt-role--${role}`}
@@ -256,7 +257,7 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
               <div className="rt-rule__id">
                 <span className="rt-rule__name">{d.domain}</span>
               </div>
-              {d.matched ? <Tag>{t('client.routing.flows', { count: d.matched })}</Tag> : null}
+              {d.matched ? <Tag className="rt-flows">{t('client.routing.flows', { count: d.matched })}</Tag> : null}
               {!allowExit && !plain(d.role) && <Tag tone="warning">{t('client.routing.noExit')}</Tag>}
               <Select
                 className={`rt-role rt-role--${d.role}`}
@@ -284,7 +285,7 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
                 <span className="rt-rule__name">{r.title || r.process}</span>
                 {(r.path || r.title) && <span className="rt-rule__path">{r.path || r.process}</span>}
               </div>
-              {r.matched ? <Tag>{t('client.routing.flows', { count: r.matched })}</Tag> : null}
+              {r.matched ? <Tag className="rt-flows">{t('client.routing.flows', { count: r.matched })}</Tag> : null}
               {!allowExit && !plain(r.role) && <Tag tone="warning">{t('client.routing.noExit')}</Tag>}
               <Select
                 className={`rt-role rt-role--${r.role}`}

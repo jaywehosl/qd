@@ -147,21 +147,11 @@ func (r *procRouter) ownerOf(key portKey, src netip.Addr, opens, resets bool) (p
 		}
 	}
 
-	watched := seen && o.pid != 0 && !o.closed && o.bound.name != ""
-	var pid uint32
-	var found, read bool
-	if watched {
-		pid, found, read = o.pid, true, true
-	} else {
-		pid, found, read = r.pidOf(key, src)
-	}
+	pid, found, read := r.pidOf(key, src)
 	switch {
 	case !read && o.decided:
 	case found:
-		ident := o.bound
-		if !watched {
-			ident = identOf(pid)
-		}
+		ident := identOf(pid)
 		if ident.name != "" || !o.decided || o.by != pid {
 			o.ident = ident
 		}

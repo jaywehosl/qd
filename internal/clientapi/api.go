@@ -974,7 +974,7 @@ func (a *API) addNotification(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if body.Severity != "warning" && body.Severity != "error" {
-		body.Severity = "info"
+		body.Severity = "done"
 	}
 	now := time.Now().UnixMilli()
 	if held, _, err := a.db.Notifications(); err == nil {

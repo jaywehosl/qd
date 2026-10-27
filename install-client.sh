@@ -36,6 +36,14 @@ signed() {
     rm -f "$pub" "$sig"
     return $ok
 }
+check_signature() {
+    if ! openssl pkeyutl -help 2>&1 | grep -q -- '-rawin'; then
+        warn "$(openssl version | cut -d' ' -f1-2) cannot check Ed25519 signatures (OpenSSL 3.0 can), only the checksums are verified"
+        return 0
+    fi
+    signed "$1" || die "$2 are not signed by the qd release key, refusing to install"
+    good "release signature verified"
+}
 
 usage() {
     cat <<'USAGE'
@@ -141,8 +149,7 @@ verify() {
         return 0
     fi
     if [ -f "$STAGE/checksums.txt.sig" ]; then
-        signed "$STAGE/checksums.txt" || die "the checksums are not signed by the qd release key, refusing to install"
-        good "release signature verified"
+        check_signature "$STAGE/checksums.txt" "the checksums"
     else
         [ -n "$LOCAL_DIR" ] || die "the release carries no signed checksums, refusing to install"
         warn "no checksums.txt.sig, the checksums are unsigned"

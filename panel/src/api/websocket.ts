@@ -162,7 +162,7 @@ export class WebSocketClient {
   }
 
   #emit(event: string, ...args: unknown[]): void {
-    const throttledEvents = ['client_stats', 'outbounds', 'nodes', 'traffic'];
+    const throttledEvents = ['client_stats', 'nodes', 'traffic'];
     if (throttledEvents.includes(event)) {
       let state = this.throttledEmits.get(event);
       if (!state) {

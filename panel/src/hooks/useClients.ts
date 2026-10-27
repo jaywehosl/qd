@@ -4,7 +4,6 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import { HttpUtil, Msg } from '@/utils';
 import { parseMsg } from '@/utils/zodValidate';
 import { keys } from '@/api/queryKeys';
-import { markLocalInvalidate } from '@/api/invalidationTracker';
 import { useAllSettings } from '@/api/queries/useAllSettings';
 import {
   ClientPageResponseSchema,
@@ -95,7 +94,6 @@ export function useClients() {
   }, [listQuery.data?.summary, onlinesQuery.data]);
 
   const invalidateAll = useCallback(() => {
-    markLocalInvalidate();
     return queryClient.invalidateQueries({ queryKey: keys.clients.root() });
   }, [queryClient]);
 

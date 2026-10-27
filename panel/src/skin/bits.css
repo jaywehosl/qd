@@ -197,7 +197,8 @@ html.in-phone .notif-row__ts { min-width: 78px; box-sizing: border-box; text-ali
 
 .notif-row--error .notif-row__icon { color: #e03a2f; }
 .notif-row--warning .notif-row__icon { color: #f0a020; }
-.notif-row--info .notif-row__icon { color: var(--good); }
+.notif-row--info .notif-row__icon,
+.notif-row--done .notif-row__icon { color: var(--good); }
 
 .notif-row__dismiss {
   flex: 0 0 auto;

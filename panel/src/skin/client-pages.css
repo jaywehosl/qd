@@ -48,6 +48,8 @@
 
 .rt-rule + .rt-rule { border-top: 1px solid var(--edge); }
 
+.ds-tag.rt-flows { background: var(--press); color: var(--text); }
+
 .rt-rule__name {
   flex: 0 0 auto;
   min-width: 0;

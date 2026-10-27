@@ -25,9 +25,8 @@ import {
   NodesIcon,
   SettingsIcon,
 
-  ApiDocsIcon,
 } from '@/components/ui';
-type IconName = 'team' | 'groups' | 'setting' | 'cluster' | 'apidocs';
+type IconName = 'team' | 'groups' | 'setting' | 'cluster';
 
 const iconByName: Record<IconName, ComponentType> = {
   team: ClientsIcon,
@@ -35,7 +34,6 @@ const iconByName: Record<IconName, ComponentType> = {
   setting: SettingsIcon,
 
   cluster: NodesIcon,
-  apidocs: ApiDocsIcon,
 };
 
 export default function AppSidebar() {
