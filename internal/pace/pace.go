@@ -3,11 +3,12 @@ package pace
 import "time"
 
 const (
-	Stagger       = 250 * time.Millisecond
-	QUICHeadStart = time.Second
-	LateFor       = 6 * time.Second
-	DialWait      = 20 * time.Second
-	ControlWait   = 8 * time.Second
+	Stagger        = 250 * time.Millisecond
+	QUICHeadStart  = time.Second
+	RelayHeadStart = 2 * time.Second
+	LateFor        = 6 * time.Second
+	DialWait       = 20 * time.Second
+	ControlWait    = 8 * time.Second
 
 	ProbeEvery = 2 * time.Minute
 	ProbeWait  = 4 * time.Second

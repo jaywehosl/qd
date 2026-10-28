@@ -125,9 +125,9 @@ type live struct {
 	under   *live
 
 	route  atomic.Pointer[string]
-	marks  [markSlots / 64]atomic.Uint64
 	flowMu sync.Mutex
-	flows  map[uint32][]io.Closer
+	heads  map[flowAt]uint64
+	flows  map[flowAt][]io.Closer
 
 	outMu   sync.Mutex
 	outlets map[uint32]*outlet
@@ -295,7 +295,7 @@ func (n *Node) Sessions() []Session {
 			Down:      s.down.Load(),
 			PktUp:     s.pktUp.Load(),
 			PktDown:   s.pktDown.Load(),
-			AllowExit: s.grant.AllowExit,
+			AllowExit: n.mayExit(s.grant),
 			Transit:   s.transit,
 			Carriage:  s.carriage(),
 		})
@@ -572,34 +572,39 @@ func slotOf(v6 bool, port uint16) uint32 {
 	return uint32(port)
 }
 
+type flowAt struct{ src, dst netip.AddrPort }
+
+func flowOf(src, dst netip.AddrPort) flowAt {
+	return flowAt{
+		src: netip.AddrPortFrom(src.Addr().Unmap(), src.Port()),
+		dst: netip.AddrPortFrom(dst.Addr().Unmap(), dst.Port()),
+	}
+}
+
+const headsCap = 1 << 14
+
 func (s *live) noteMark(pkt []byte, mark uint64) {
-	port, ok := ippkt.SrcPort(pkt)
+	src, dst, _, ok := ippkt.Flow(pkt)
 	if !ok {
 		return
 	}
-	slot := slotOf(pkt[0]>>4 == 6, port)
-	word, bit := &s.marks[slot>>6], uint64(1)<<(slot&63)
-	out := mark == MarkEgress
-	if (word.Load()&bit != 0) == out {
+	at := flowOf(src, dst)
+
+	s.flowMu.Lock()
+	was, seen := s.heads[at]
+	if seen && was == mark {
+		s.flowMu.Unlock()
 		return
 	}
-	if out {
-		word.Or(bit)
-	} else {
-		word.And(^bit)
+	if s.heads == nil || len(s.heads) >= headsCap {
+		s.heads = map[flowAt]uint64{}
 	}
-	s.shutFlow(slot)
-}
-
-func (s *live) leaves(src netip.AddrPort) bool {
-	slot := slotOf(src.Addr().Is6() && !src.Addr().Is4In6(), src.Port())
-	return s.marks[slot>>6].Load()&(1<<(slot&63)) != 0
-}
-
-func (s *live) shutFlow(slot uint32) {
-	s.flowMu.Lock()
-	held := s.flows[slot]
-	delete(s.flows, slot)
+	s.heads[at] = mark
+	var held []io.Closer
+	if seen {
+		held = s.flows[at]
+		delete(s.flows, at)
+	}
 	s.flowMu.Unlock()
 
 	for _, shut := range held {
@@ -607,29 +612,35 @@ func (s *live) shutFlow(slot uint32) {
 	}
 }
 
-func (s *live) holdFlow(src netip.AddrPort, shut io.Closer) func() {
-	slot := slotOf(src.Addr().Is6() && !src.Addr().Is4In6(), src.Port())
+func (s *live) leaves(src, dst netip.AddrPort) bool {
+	s.flowMu.Lock()
+	defer s.flowMu.Unlock()
+	return s.heads[flowOf(src, dst)] == MarkEgress
+}
+
+func (s *live) holdFlow(src, dst netip.AddrPort, shut io.Closer) func() {
+	at := flowOf(src, dst)
 
 	s.flowMu.Lock()
 	if s.flows == nil {
-		s.flows = map[uint32][]io.Closer{}
+		s.flows = map[flowAt][]io.Closer{}
 	}
-	s.flows[slot] = append(s.flows[slot], shut)
+	s.flows[at] = append(s.flows[at], shut)
 	s.flowMu.Unlock()
 
 	return func() {
 		s.flowMu.Lock()
 		defer s.flowMu.Unlock()
-		held := s.flows[slot]
-		at := slices.Index(held, shut)
-		if at < 0 {
+		held := s.flows[at]
+		i := slices.Index(held, shut)
+		if i < 0 {
 			return
 		}
-		if held = slices.Delete(held, at, at+1); len(held) == 0 {
-			delete(s.flows, slot)
+		if held = slices.Delete(held, i, i+1); len(held) == 0 {
+			delete(s.flows, at)
 			return
 		}
-		s.flows[slot] = held
+		s.flows[at] = held
 	}
 }
 

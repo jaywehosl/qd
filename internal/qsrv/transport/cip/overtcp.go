@@ -38,23 +38,30 @@ type Over struct {
 	dgramR  io.ReadCloser
 }
 
-func ReachH2(ctx context.Context, endpoint string, keep func(fd uintptr)) (net.Conn, *http2.ClientConn, error) {
+type Via func(ctx context.Context, endpoint string) (net.Conn, error)
+
+func ReachH2(ctx context.Context, endpoint string, keep func(fd uintptr), via Via) (net.Conn, *http2.ClientConn, error) {
 	host, _, err := net.SplitHostPort(endpoint)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	dialer := &net.Dialer{}
-	if keep != nil {
-		dialer.Control = func(_, _ string, rc syscall.RawConn) error {
-			return rc.Control(keep)
+	if via == nil {
+		dialer := &net.Dialer{}
+		if keep != nil {
+			dialer.Control = func(_, _ string, rc syscall.RawConn) error {
+				return rc.Control(keep)
+			}
+		}
+		via = func(ctx context.Context, endpoint string) (net.Conn, error) {
+			return roads.ReachTCP(ctx, dialer, endpoint)
 		}
 	}
 	open := &tls.Config{ServerName: host, NextProtos: []string{"h2"}, RootCAs: roots.Pool()}
 	hidden := quicconn.Hidden(open)
-	held, err := shake(ctx, dialer, endpoint, cmp.Or(hidden, open))
+	held, err := shake(ctx, via, endpoint, cmp.Or(hidden, open))
 	if err != nil && hidden != nil && ctx.Err() == nil {
-		if held, err = shake(ctx, dialer, endpoint, open); err == nil {
+		if held, err = shake(ctx, via, endpoint, open); err == nil {
 			quicconn.NoteECH(open, hidden)
 		}
 	}
@@ -78,8 +85,8 @@ func ReachH2(ctx context.Context, endpoint string, keep func(fd uintptr)) (net.C
 	return held, cc, nil
 }
 
-func shake(ctx context.Context, dialer *net.Dialer, endpoint string, conf *tls.Config) (*tls.Conn, error) {
-	raw, err := roads.ReachTCP(ctx, dialer, endpoint)
+func shake(ctx context.Context, via Via, endpoint string, conf *tls.Config) (*tls.Conn, error) {
+	raw, err := via(ctx, endpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -91,8 +98,8 @@ func shake(ctx context.Context, dialer *net.Dialer, endpoint string, conf *tls.C
 	return held, nil
 }
 
-func DialOver(ctx context.Context, endpoint, token, device, route, authURL string, keep func(fd uintptr)) (*Over, error) {
-	conn, cc, err := ReachH2(ctx, endpoint, keep)
+func DialOver(ctx context.Context, endpoint, token, device, route, authURL string, keep func(fd uintptr), via Via) (*Over, error) {
+	conn, cc, err := ReachH2(ctx, endpoint, keep, via)
 	if err != nil {
 		return nil, err
 	}

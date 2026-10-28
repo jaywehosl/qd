@@ -45,6 +45,10 @@ func Open(path string) (*DB, error) {
 		`ALTER TABLE samples DROP COLUMN reorder`,
 		`ALTER TABLE samples DROP COLUMN retries`,
 		`DELETE FROM settings WHERE key = 'ratePinned'`,
+		`INSERT OR IGNORE INTO relays (link, enabled, created)
+		 SELECT value, 1, CAST(strftime('%s', 'now') AS INTEGER) * 1000 FROM settings WHERE key = 'relay' AND value != ''`,
+		`DELETE FROM settings WHERE key = 'relay'`,
+		`DROP TABLE IF EXISTS sites`,
 	} {
 		handle.Exec(drop)
 	}
@@ -216,13 +220,22 @@ type Settings struct {
 
 	FixedRate  int    `json:"fixedRate"`
 	BBRProfile string `json:"-"`
+
+	RelayMode string `json:"relayMode"`
 }
+
+const (
+	RelayOff  = "off"
+	RelayAuto = "auto"
+	RelayOnly = "only"
+)
 
 func defaultSettings() Settings {
 	return Settings{
 		RefreshMinutes:     60,
 		AutostartBehaviour: "tray",
 		ManualBehaviour:    "open",
+		RelayMode:          RelayAuto,
 	}
 }
 
@@ -261,6 +274,8 @@ func (d *DB) Settings() (Settings, error) {
 			s.FixedRate = atoiOr(v, 0)
 		case "bbrProfile":
 			s.BBRProfile = v
+		case "relayMode":
+			s.RelayMode = v
 		}
 	}
 	return s, rows.Err()
@@ -284,6 +299,7 @@ func (d *DB) SaveSettings(s Settings) error {
 		"adblock":            boolText(s.Adblock),
 		"fixedRate":          strconv.Itoa(s.FixedRate),
 		"bbrProfile":         s.BBRProfile,
+		"relayMode":          s.RelayMode,
 	} {
 		if _, err := tx.Exec(
 			`INSERT INTO settings (key, value) VALUES (?, ?)
@@ -311,7 +327,7 @@ func (d *DB) SetValue(key, value string) error {
 }
 
 func (d *DB) ResetSettings() error {
-	for _, table := range []string{"settings", "rules", "domain_rules", "bundle_rules", "sites"} {
+	for _, table := range []string{"settings", "rules", "domain_rules", "bundle_rules", "relays"} {
 		if _, err := d.sql.Exec(`DELETE FROM ` + table); err != nil {
 			return err
 		}

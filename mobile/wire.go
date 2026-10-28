@@ -31,6 +31,7 @@ func (c *Client) wire() *qwire.Dialer {
 	}
 
 	fresh := qwire.NewKept(c.keeper())
+	fresh.Relays = c.relays.Vias
 	fresh.SetToken(c.netKeyHex())
 
 	c.mu.Lock()

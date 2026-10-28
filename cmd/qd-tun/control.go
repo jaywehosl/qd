@@ -6,4 +6,8 @@ import (
 	"github.com/jaywehosl/qd/internal/qwire"
 )
 
-var nodeTalk = qwire.NewKept(keepSocket)
+var nodeTalk = func() *qwire.Dialer {
+	d := qwire.NewKept(keepSocket)
+	d.Relays = relays.Vias
+	return d
+}()

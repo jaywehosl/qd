@@ -47,7 +47,7 @@ func (c *Client) carry(servers []string, session uint32) error {
 		was()
 	}
 
-	seen := c.seen
+	adblock := c.adblock
 	carried := c.carriage()
 	round, giveUp := context.WithCancel(context.Background())
 	c.mu.Lock()
@@ -60,8 +60,12 @@ func (c *Client) carry(servers []string, session uint32) error {
 		c.mu.Unlock()
 	}()
 
+	c.relays.Renew()
+	relays, relayOnly := c.relays.Now()
 	held, err := clientrun.Carry(round, clientrun.Plan{
 		Dial: qcli.Options{
+			Relays:    relays,
+			RelayOnly: relayOnly,
 			Endpoints: servers,
 			Token:     c.token(),
 			Device:    c.device.ID,
@@ -88,16 +92,11 @@ func (c *Client) carry(servers []string, session uint32) error {
 			Say:      say,
 			Device:   c.device.ID,
 			Exit:     c.nameLeaves,
-			Adblock:  func() bool { return seen != nil && seen.Adblock() },
+			Adblock:  func() bool { return adblock != nil && adblock.On() },
 			Answered: c.names.Learn,
 			Native: func(name string) bool {
 				role, known := c.names.RoleOfName(name)
 				return known && role == clientstate.RoleDirect
-			},
-			Seen: func(name string) {
-				if seen != nil {
-					seen.Note(name)
-				}
 			},
 		},
 		Source: func(ctx context.Context, live *qcli.Tunnel) (packet.Source, error) {

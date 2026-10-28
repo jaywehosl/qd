@@ -302,7 +302,7 @@ func (n *Node) dialerFor(ctx context.Context, grant Grant, route string, hops in
 	if route == "" || route == n.cfg.SelfID || route == n.cfg.SelfTag {
 		return local
 	}
-	if !grant.AllowExit {
+	if !n.mayExit(grant) {
 		return refusing{why: fmt.Errorf("this subscription may not take an exit")}
 	}
 
@@ -313,6 +313,14 @@ func (n *Node) dialerFor(ctx context.Context, grant Grant, route string, hops in
 
 	n.transits.Add(1)
 	return chained{cc: won, ls: n.links, endpoint: endpoint, seat: grant.Seat, hops: hops - 1, from: from}
+}
+
+func (n *Node) mayExit(grant Grant) bool {
+	if grant.Peer || n.cfg.Verify == nil {
+		return grant.AllowExit
+	}
+	fresh, ok := n.cfg.Verify(grant.Client)
+	return ok && fresh.AllowExit
 }
 
 type refusing struct{ why error }
@@ -455,7 +463,7 @@ func (d steered) route(ctx context.Context) string {
 	if !ok || !d.s.marked {
 		return d.s.heading()
 	}
-	if d.s.leaves(flow.Src) {
+	if d.s.leaves(flow.Src, flow.Dst) {
 		return AnyExit
 	}
 	return ""

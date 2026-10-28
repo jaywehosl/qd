@@ -52,11 +52,20 @@ type Options struct {
 	Loud      bool
 	Keep      func(fd uintptr)
 	Tickets   tls.ClientSessionCache
+	Relays    []Relay
+	RelayOnly bool
+}
+
+type Relay struct {
+	ID   int
+	Name string
+	Via  cip.Via
 }
 
 type Tunnel struct {
 	road     road
 	overTCP  bool
+	relay    *Relay
 	opts     Options
 	endpoint string
 	assigned []netip.Prefix
@@ -172,14 +181,20 @@ const slowAddress = 2 * time.Second
 
 func climb(ctx context.Context, opts Options, endpoint string, straight bool) (*Tunnel, error) {
 	var tries []roads.Try[*Tunnel]
-	if straight && !roads.OnlyTCP() {
+	direct := straight && !opts.RelayOnly
+	if direct && !roads.OnlyTCP() {
 		tries = append(tries, roads.Try[*Tunnel]{Rung: roads.QUIC, Run: func(ctx context.Context) (*Tunnel, error) {
 			return overQUIC(ctx, opts, endpoint)
 		}})
 	}
-	if straight {
+	if direct {
 		tries = append(tries, roads.Try[*Tunnel]{Rung: roads.TCP, Run: func(ctx context.Context) (*Tunnel, error) {
 			return overTCP(ctx, opts, endpoint)
+		}})
+	}
+	for _, r := range opts.Relays {
+		tries = append(tries, roads.Try[*Tunnel]{Rung: roads.Relay, Run: func(ctx context.Context) (*Tunnel, error) {
+			return overRelay(ctx, opts, endpoint, r)
 		}})
 	}
 	var held atomic.Pointer[Tunnel]
@@ -201,9 +216,11 @@ func climb(ctx context.Context, opts Options, endpoint string, straight bool) (*
 	switch rung {
 	case roads.TCP:
 		fmt.Printf("carriage %s over tcp, datagrams ride an h2 stream\n", endpoint)
-		if over, ok := t.road.(*cip.Over); ok && !over.Marked() {
-			fmt.Printf("carriage this node takes no exit per packet on tcp, udp of every app follows the global exit\n")
-		}
+	case roads.Relay:
+		fmt.Printf("carriage %s through the relay %q, datagrams ride an h2 stream\n", endpoint, t.relay.Name)
+	}
+	if over, ok := t.road.(*cip.Over); ok && !over.Marked() {
+		fmt.Printf("carriage this node takes no exit per packet on tcp, udp of every app follows the global exit\n")
 	}
 	if rung != roads.QUIC {
 		go t.seek()
@@ -226,11 +243,30 @@ func overQUIC(ctx context.Context, opts Options, endpoint string) (*Tunnel, erro
 }
 
 func overTCP(ctx context.Context, opts Options, endpoint string) (*Tunnel, error) {
-	over, err := cip.DialOver(ctx, endpoint, opts.Token, opts.Device, opts.Route, "https://"+endpoint+qsrv.AuthPath, opts.Keep)
+	over, err := cip.DialOver(ctx, endpoint, opts.Token, opts.Device, opts.Route, "https://"+endpoint+qsrv.AuthPath, opts.Keep, nil)
 	if err != nil {
 		return nil, fmt.Errorf("tcp: %w", err)
 	}
 	return settle(ctx, opts, endpoint, over, true)
+}
+
+func overRelay(ctx context.Context, opts Options, endpoint string, r Relay) (*Tunnel, error) {
+	over, err := cip.DialOver(ctx, endpoint, opts.Token, opts.Device, opts.Route, "https://"+endpoint+qsrv.AuthPath, opts.Keep, r.Via)
+	if err != nil {
+		return nil, fmt.Errorf("relay %q: %w", r.Name, err)
+	}
+	t, err := settle(ctx, opts, endpoint, over, true)
+	if err == nil {
+		t.relay = &r
+	}
+	return t, err
+}
+
+func (t *Tunnel) RelayID() int {
+	if t.relay == nil {
+		return 0
+	}
+	return t.relay.ID
 }
 
 func settle(ctx context.Context, opts Options, endpoint string, held road, overTCP bool) (*Tunnel, error) {
@@ -299,7 +335,7 @@ func (t *Tunnel) Six() (netip.Prefix, bool) {
 
 func (t *Tunnel) Path() roads.Path {
 	hidden, _ := t.road.(interface{ Hidden() bool })
-	return roads.Path{Endpoint: t.endpoint, OverTCP: t.overTCP, Hidden: hidden != nil && hidden.Hidden()}
+	return roads.Path{Endpoint: t.endpoint, OverTCP: t.overTCP, Hidden: hidden != nil && hidden.Hidden(), Relayed: t.relay != nil}
 }
 
 func (t *Tunnel) Peers() []netip.Addr { return t.peers }
@@ -649,7 +685,7 @@ func (t *Tunnel) improve() { t.once.Do(func() { close(t.better) }) }
 
 func (t *Tunnel) seek() {
 	host, _, err := net.SplitHostPort(t.endpoint)
-	if err != nil {
+	if err != nil || t.opts.RelayOnly {
 		return
 	}
 	tick := time.NewTicker(pace.ProbeEvery)

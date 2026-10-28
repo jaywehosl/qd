@@ -23,7 +23,7 @@ import (
 type API struct {
 	db       *clientstate.DB
 	platform Platform
-	seen     *Visits
+	adblock  *Adblock
 
 	OnImport func()
 	Raise    func() error
@@ -49,8 +49,8 @@ type API struct {
 	failed atomic.Value
 }
 
-func New(db *clientstate.DB, platform Platform, seen *Visits, key *qdcrypt.Key) *API {
-	a := &API{db: db, platform: platform, seen: seen, netKey: key}
+func New(db *clientstate.DB, platform Platform, adblock *Adblock, key *qdcrypt.Key) *API {
+	a := &API{db: db, platform: platform, adblock: adblock, netKey: key}
 	a.noteVersion()
 	return a
 }
@@ -80,6 +80,11 @@ func (a *API) Routes() http.Handler {
 	mux.HandleFunc("/client/api/routing/import", a.importRules)
 
 	mux.HandleFunc("/client/api/settings", a.settings)
+	mux.HandleFunc("/client/api/relays", a.relays)
+	mux.HandleFunc("/client/api/relays/add", a.addRelay)
+	mux.HandleFunc("/client/api/relays/enable", a.enableRelay)
+	mux.HandleFunc("/client/api/relays/remove", a.removeRelay)
+	mux.HandleFunc("/client/api/relays/probe", a.probeRelays)
 	mux.HandleFunc("/client/api/about", a.about)
 	mux.HandleFunc("/client/api/update", a.updateState)
 	mux.HandleFunc("/client/api/update/postpone", a.postponeUpdate)
@@ -679,10 +684,10 @@ func (a *API) SetAdblock(on bool) error {
 }
 
 func (a *API) turnAdblock(on bool) {
-	if a.seen.Adblock() == on {
+	if a.adblock.On() == on {
 		return
 	}
-	a.seen.SetAdblock(on)
+	a.adblock.Set(on)
 	if held, ok := a.platform.(interface{ FlushDNS() }); ok {
 		held.FlushDNS()
 	}
@@ -821,6 +826,11 @@ func (a *API) SaveSettingsJSON(raw string) error {
 	}
 	next.FixedRate = current.FixedRate
 	next.RefreshMinutes = min(max(next.RefreshMinutes, 1), 1440)
+	switch next.RelayMode {
+	case clientstate.RelayOff, clientstate.RelayAuto, clientstate.RelayOnly:
+	default:
+		return fmt.Errorf("%q is not a relay mode", next.RelayMode)
+	}
 
 	if next.Autostart != current.Autostart {
 		if err := a.platform.HoldAutostart(next.Autostart); err != nil {
@@ -831,6 +841,7 @@ func (a *API) SaveSettingsJSON(raw string) error {
 		return err
 	}
 	a.platform.SetCarriage(next.FixedRate, next.BBRProfile)
+	a.applyRelays()
 	return nil
 }
 
@@ -852,6 +863,7 @@ func (a *API) Reset(subscription bool) error {
 	a.platform.SetExit(fresh.Egress)
 	a.turnAdblock(fresh.Adblock)
 	a.platform.RulesChanged()
+	a.applyRelays()
 
 	if !subscription {
 		return nil
@@ -1152,16 +1164,13 @@ func (a *API) about(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	up, down, _ := a.db.Traffic()
-	sites, _ := a.db.TopSites(10)
 
 	ok(w, map[string]any{
 		"version":   update.Version,
 		"tag":       sub.Tag,
-		"createdAt": sub.CreatedAt,
 		"up":        up,
 		"down":      down,
 		"expiresAt": sub.ExpiresAt,
-		"topSites":  sites,
 	})
 }
 

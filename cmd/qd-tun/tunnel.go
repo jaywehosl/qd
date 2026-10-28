@@ -30,7 +30,6 @@ type tunnelConfig struct {
 
 	Token func() string
 
-	OnQuery func(name string)
 	Adblock func() bool
 
 	Peers func() []string
@@ -208,7 +207,6 @@ func (t *tunnel) bring(ctx context.Context, servers []string) (*clientrun.Carrie
 		plan.DNS = &clientdns.Config{
 			Node: servers[0], Token: t.token(), Ask: nodeTalk.Ask,
 			Adblock:  t.cfg.Adblock,
-			Seen:     t.cfg.OnQuery,
 			Answered: routeByDomain.Learn,
 			Native:   namedDirect,
 			Device:   deviceOf().ID,
@@ -234,6 +232,8 @@ func (t *tunnel) bring(ctx context.Context, servers []string) (*clientrun.Carrie
 		Loud:      true,
 		Tickets:   t.cfg.Tickets,
 	}
+	relays.Renew()
+	plan.Dial.Relays, plan.Dial.RelayOnly = relays.Now()
 	plan.Wait = dialWait
 	plan.Say = func(format string, args ...any) { fmt.Printf(format+"\n", args...) }
 	plan.Lost = func(err error) {

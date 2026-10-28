@@ -1,34 +1,25 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { InfoCircleOutlined, SettingOutlined } from '@ant-design/icons';
 
 import { Button, Card, Dialog, Input, Select, Switch, Tag, toast } from '@/components/ds';
-import { SettingListItem, Spin, VerticalTabs } from '@/components/ui';
+import { SettingListItem, Spin } from '@/components/ui';
 import { HttpUtil, SizeFormatter } from '@/utils';
 import { useClientState } from '@/hooks/useClientState';
 import { useClientSettings } from '@/layouts/ClientSettingsController';
 import { resetAll } from '@/stores/notificationStore';
 import UpdateButton from './UpdateButton';
+import RelaysCard, { useRelays } from './RelaysCard';
 import { useTheme } from '@/hooks/useTheme';
-import { HOST_EVENT, hostChecks, navLow, phone, setNavLow, worded } from '@/lib/phone';
-
-const TAB_SLUGS = ['preferences', 'about'];
+import { HOST_EVENT, hostChecks, navLow, phone, setNavLow } from '@/lib/phone';
 
 interface AboutPayload {
   version?: string;
   tag?: string;
-  createdAt?: number;
   up?: number;
   down?: number;
   expiresAt?: number;
-  topSites?: { host: string; hits: number }[];
-}
-
-function dateLabel(ms?: number): string {
-  if (!ms) return '—';
-  return new Date(ms).toLocaleString();
 }
 
 function remainingLabel(ms: number | undefined, never: string): string {
@@ -43,13 +34,10 @@ function remainingLabel(ms: number | undefined, never: string): string {
 export default function ClientSettingsPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { hash } = useLocation();
   const queryClient = useQueryClient();
   const { reset } = useClientState();
   const { settings, patch } = useClientSettings();
-
-  const slug = hash.replace(/^#/, '');
-  const activeSlug = TAB_SLUGS.includes(slug) ? slug : 'preferences';
+  const { data: relays } = useRelays();
 
   const [confirm, setConfirm] = useState<'data' | 'all' | null>(null);
   const [low, setLow] = useState(navLow);
@@ -74,83 +62,61 @@ export default function ClientSettingsPage() {
       const msg = await HttpUtil.get<AboutPayload>('/client/api/about', undefined, { silent: true });
       return msg?.success ? (msg.obj ?? null) : null;
     },
-    enabled: activeSlug === 'about',
+    refetchInterval: 10000,
   });
 
   const doReset = useCallback(async (withSubscription: boolean) => {
     await reset(withSubscription);
     if (withSubscription) resetAll();
-    await queryClient.invalidateQueries({ queryKey: ['client', 'settings'] });
+    await queryClient.invalidateQueries({ queryKey: ['client'] });
     setConfirm(null);
     if (withSubscription) navigate('/client');
   }, [reset, queryClient, navigate]);
 
-  const tabItems = useMemo(() => [
-    { key: 'preferences', label: t('pages.settings.preferences'), icon: <SettingOutlined /> },
-    { key: 'about', label: t('client.settings.about'), icon: <InfoCircleOutlined /> },
-  ], [t]);
-
-  const body = () => {
-
-    if (activeSlug === 'about') {
-      return (
-        <div className="cset-about">
-          <div className="cset-grid">
-            <div><span>{t('client.settings.version')}</span><b>{about?.version || '—'}</b></div>
-            <div><span>{t('client.settings.tag')}</span><Tag tone="primary">{about?.tag || '—'}</Tag></div>
-            <div><span>{t('client.settings.created')}</span><b>{dateLabel(about?.createdAt)}</b></div>
-            <div>
-              <span>{t('client.settings.moved')}</span>
-              <b>↑ {SizeFormatter.sizeFormat(about?.up ?? 0)} ↓ {SizeFormatter.sizeFormat(about?.down ?? 0)}</b>
-            </div>
-            <div>
-              <span>{t('client.settings.expires')}</span>
-              <b>{remainingLabel(about?.expiresAt, t('client.settings.noExpiry'))}</b>
-            </div>
-          </div>
-
-          <Card title={t('client.settings.topSites')} flush>
-            <div className="cset-sites">
-              {(about?.topSites ?? []).length === 0 ? (
-                <div className="cset-empty">{t('client.settings.noSites')}</div>
-              ) : (about?.topSites ?? []).map((s) => (
-                <div key={s.host} className="cset-site">
-                  <span>{s.host}</span>
-                  <b>{s.hits.toLocaleString()}</b>
-                </div>
-              ))}
-            </div>
-            <p className="cset-note">{t('client.settings.sitesNote', worded())}</p>
-          </Card>
-
-          <div className="cset-danger">
-            <Button danger onClick={() => setConfirm('data')}>{t('client.settings.resetData')}</Button>
-            <Button danger onClick={() => setConfirm('all')}>{t('client.settings.resetAll')}</Button>
-          </div>
-        </div>
-      );
-    }
-
-    if (!settings) return <Spin spinning size="large" />;
-
+  if (!settings) {
     return (
-      <>
-        <SettingListItem
-          paddings="small"
-          title={t('client.settings.refreshInterval')}
-          description={t('client.settings.refreshIntervalDesc')}
-        >
-          <Input
-            type="number"
-            min={1}
-            max={1440}
-            value={settings.refreshMinutes}
-            onChange={(e) => patch({ refreshMinutes: Number(e.target.value) || 1 })}
-          />
-        </SettingListItem>
+      <section className="feed-section">
+        <Spin spinning size="large" />
+      </section>
+    );
+  }
 
-        {onPhone && (
-          <>
+  return (
+    <section className="feed-section">
+      <div className="section-header">
+        <h2>{t('client.menu.settings')}</h2>
+        <UpdateButton />
+      </div>
+
+      <div className="client-settings cset">
+        <Card title={t('client.settings.subscription')}>
+          <div className="cset-facts">
+            <Tag tone="primary">{about?.tag || '—'}</Tag>
+            <Tag>{remainingLabel(about?.expiresAt, t('client.settings.noExpiry'))}</Tag>
+            <Tag>↑ {SizeFormatter.sizeFormat(about?.up ?? 0)} ↓ {SizeFormatter.sizeFormat(about?.down ?? 0)}</Tag>
+          </div>
+          <SettingListItem
+            paddings="small"
+            title={t('client.settings.refreshInterval')}
+            description={t('client.settings.refreshIntervalDesc')}
+          >
+            <Input
+              type="number"
+              min={1}
+              max={1440}
+              value={settings.refreshMinutes}
+              onChange={(e) => patch({ refreshMinutes: Number(e.target.value) || 1 })}
+            />
+          </SettingListItem>
+          <div className="cset-foot">
+            <Button danger size="sm" onClick={() => setConfirm('all')}>{t('client.settings.resetAll')}</Button>
+          </div>
+        </Card>
+
+        {relays?.supported && <RelaysCard data={relays} />}
+
+        {onPhone ? (
+          <Card title={t('client.settings.device')}>
             <SettingListItem paddings="small" title={t('client.settings.connectOnLaunch')}>
               <Switch
                 checked={settings.manualBehaviour === 'openConnect' || settings.manualBehaviour === 'connect'}
@@ -208,73 +174,52 @@ export default function ClientSettingsPage() {
                 {t('client.settings.journalSave')}
               </Button>
             </SettingListItem>
-          </>
-        )}
-
-        {!onPhone && (
-        <>
-        <SettingListItem paddings="small" title={t('client.settings.autostart')}>
-          <Switch checked={settings.autostart} onChange={(v) => patch({ autostart: v })} />
-        </SettingListItem>
-
-        <SettingListItem
-          paddings="small"
-          title={t('client.settings.autostartBehaviour')}
-          description={t('client.settings.autostartBehaviourDesc')}
-        >
-          <Select
-            value={settings.autostartBehaviour}
-            disabled={!settings.autostart}
-            onChange={(v) => patch({ autostartBehaviour: v })}
-            options={[
-              { value: 'tray', label: t('client.settings.behavTray') },
-              { value: 'open', label: t('client.settings.behavOpen') },
-              { value: 'connect', label: t('client.settings.behavConnect') },
-              { value: 'openConnect', label: t('client.settings.behavOpenConnect') },
-            ]}
-          />
-        </SettingListItem>
-
-        <SettingListItem
-          paddings="small"
-          title={t('client.settings.manualBehaviour')}
-          description={t('client.settings.manualBehaviourDesc')}
-        >
-          <Select
-            value={settings.manualBehaviour}
-            onChange={(v) => patch({ manualBehaviour: v })}
-            options={[
-              { value: 'tray', label: t('client.settings.behavTray') },
-              { value: 'open', label: t('client.settings.behavOpen') },
-              { value: 'openConnect', label: t('client.settings.behavOpenConnect') },
-            ]}
-          />
-        </SettingListItem>
-        </>
-        )}
-
-      </>
-    );
-  };
-
-  return (
-    <section className="feed-section">
-      <div className="section-header">
-        <h2>{t('client.menu.settings')}</h2>
-        <UpdateButton />
-      </div>
-      <div className="client-settings">
-        <div className="cset-layout">
-          <div className="inb-roles">
-            <VerticalTabs
-              items={tabItems}
-              activeKey={activeSlug}
-              onChange={(key) => navigate(`/client/settings#${key}`)}
-            />
-          </div>
-          <Card style={{ minHeight: 420 }}>
-            <div className="qd-page-swap" key={activeSlug}>{body()}</div>
           </Card>
+        ) : (
+          <Card title={t('client.settings.startup')}>
+            <SettingListItem paddings="small" title={t('client.settings.autostart')}>
+              <Switch checked={settings.autostart} onChange={(v) => patch({ autostart: v })} />
+            </SettingListItem>
+
+            <SettingListItem
+              paddings="small"
+              title={t('client.settings.autostartBehaviour')}
+              description={t('client.settings.autostartBehaviourDesc')}
+            >
+              <Select
+                value={settings.autostartBehaviour}
+                disabled={!settings.autostart}
+                onChange={(v) => patch({ autostartBehaviour: v })}
+                options={[
+                  { value: 'tray', label: t('client.settings.behavTray') },
+                  { value: 'open', label: t('client.settings.behavOpen') },
+                  { value: 'connect', label: t('client.settings.behavConnect') },
+                  { value: 'openConnect', label: t('client.settings.behavOpenConnect') },
+                ]}
+              />
+            </SettingListItem>
+
+            <SettingListItem
+              paddings="small"
+              title={t('client.settings.manualBehaviour')}
+              description={t('client.settings.manualBehaviourDesc')}
+            >
+              <Select
+                value={settings.manualBehaviour}
+                onChange={(v) => patch({ manualBehaviour: v })}
+                options={[
+                  { value: 'tray', label: t('client.settings.behavTray') },
+                  { value: 'open', label: t('client.settings.behavOpen') },
+                  { value: 'openConnect', label: t('client.settings.behavOpenConnect') },
+                ]}
+              />
+            </SettingListItem>
+          </Card>
+        )}
+
+        <div className="cset-end">
+          <span>qd {about?.version || ''}</span>
+          <Button size="sm" onClick={() => setConfirm('data')}>{t('client.settings.resetData')}</Button>
         </div>
       </div>
 

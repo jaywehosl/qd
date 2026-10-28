@@ -20,7 +20,6 @@ type Config struct {
 	Token    string
 	Ask      Ask
 	Adblock  func() bool
-	Seen     func(name string)
 	Answered func(name string, addrs []netip.Addr)
 	Native   func(name string) bool
 	Say      func(format string, args ...any)
@@ -41,7 +40,6 @@ type Resolver struct {
 	ask     Ask
 	say     func(string, ...any)
 	adblock func() bool
-	seen    func(name string)
 	learned func(name string, addrs []netip.Addr)
 	native  func(name string) bool
 
@@ -61,7 +59,7 @@ func New(cfg Config) (*Resolver, error) {
 		return nil, err
 	}
 
-	r := &Resolver{conn: conn, token: cfg.Token, device: cfg.Device, exit: cfg.Exit, ask: cfg.Ask, say: cfg.Say, adblock: cfg.Adblock, seen: cfg.Seen, learned: cfg.Answered, native: cfg.Native}
+	r := &Resolver{conn: conn, token: cfg.Token, device: cfg.Device, exit: cfg.Exit, ask: cfg.Ask, say: cfg.Say, adblock: cfg.Adblock, learned: cfg.Answered, native: cfg.Native}
 	r.node.Store(&cfg.Node)
 	r.cache = dnsproxy.New(dnsproxy.Config{Cache: cacheSize, MaxTTL: cacheMaxTTL, Stale: cacheStale, Negative: cacheMaxTTL, Forward: r.fromNode})
 	return r, nil
@@ -153,9 +151,6 @@ func (r *Resolver) handle(query []byte, from *net.UDPAddr) {
 		r.hits.Add(1)
 	} else {
 		r.upstream.Add(1)
-	}
-	if r.seen != nil && len(answer) > 3 && answer[3]&0x0F == 0 {
-		r.seen(name)
 	}
 	addrs := dnsproxy.Addrs(answer)
 	if r.native != nil && r.native(name) && slices.ContainsFunc(addrs, ippkt.StandIn.Contains) {

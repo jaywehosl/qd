@@ -109,7 +109,6 @@ type Table struct {
 	names map[string]answer
 	addrs map[netip.Addr]learned
 
-	quiet     map[string]string
 	quietLow  map[string]string
 	quietFew  []Net
 	quietMany []spans
@@ -119,31 +118,31 @@ type Table struct {
 func New() *Table {
 	return &Table{
 		rules: map[string]string{}, lower: map[string]Entry{}, names: map[string]answer{}, addrs: map[netip.Addr]learned{},
-		quiet: map[string]string{}, quietLow: map[string]string{}, heard: map[netip.Addr]learned{},
+		quietLow: map[string]string{}, heard: map[netip.Addr]learned{},
 	}
 }
 
 func (t *Table) Load(rules map[string]string, lower map[string]Entry, nets []Net) {
-	quiet, quietLow := map[string]string{}, map[string]string{}
+	quietLow := map[string]string{}
 	for name, e := range lower {
 		if e.Role == clientstate.RoleTunnel {
 			quietLow[name] = e.Rule
 		}
 	}
-	for name, role := range rules {
-		if role == clientstate.RoleTunnel {
-			quiet[name] = name
+	opinions := 0
+	for _, role := range rules {
+		if role != clientstate.RoleTunnel {
+			opinions++
 		}
 	}
 	quietFew, quietMany := sortNets(slices.DeleteFunc(slices.Clone(nets), func(n Net) bool { return n.Role != clientstate.RoleTunnel }))
-	maps.DeleteFunc(rules, func(_, role string) bool { return role == clientstate.RoleTunnel })
 	maps.DeleteFunc(lower, func(_ string, e Entry) bool { return e.Role == clientstate.RoleTunnel })
 	nets = slices.DeleteFunc(nets, func(n Net) bool { return n.Role == clientstate.RoleTunnel })
 	now := time.Now().Unix()
 	few, many := sortNets(nets)
 	t.mu.Lock()
 	t.rules, t.lower, t.few, t.many = rules, lower, few, many
-	t.quiet, t.quietLow, t.quietFew, t.quietMany = quiet, quietLow, quietFew, quietMany
+	t.quietLow, t.quietFew, t.quietMany = quietLow, quietFew, quietMany
 	t.addrs = map[netip.Addr]learned{}
 	t.heard = map[netip.Addr]learned{}
 	for name, held := range t.names {
@@ -154,7 +153,7 @@ func (t *Table) Load(rules map[string]string, lower map[string]Entry, nets []Net
 		t.place(name, held)
 	}
 	t.mu.Unlock()
-	t.active.Store(len(rules)+len(lower)+len(nets) > 0)
+	t.active.Store(opinions+len(lower)+len(nets) > 0)
 }
 
 func (t *Table) Active() bool { return t.active.Load() }
@@ -198,13 +197,10 @@ func (t *Table) RoleOfName(name string) (string, bool) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	found, ok := t.ruleOf(strings.Trim(strings.ToLower(name), "."))
-	return found.role, ok
+	return found.role, ok && found.role != clientstate.RoleTunnel
 }
 
 func (t *Table) held(addr netip.Addr) (learned, bool) {
-	if !t.active.Load() {
-		return learned{}, false
-	}
 	addr = addr.Unmap()
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -225,8 +221,11 @@ func (t *Table) held(addr netip.Addr) (learned, bool) {
 }
 
 func (t *Table) RoleOf(addr netip.Addr) (string, bool) {
+	if !t.active.Load() {
+		return "", false
+	}
 	held, ok := t.held(addr)
-	return held.role, ok
+	return held.role, ok && held.role != clientstate.RoleTunnel
 }
 
 func (t *Table) RuleOf(addr netip.Addr) (string, bool) {
@@ -253,16 +252,11 @@ func (t *Table) RuleOf(addr netip.Addr) (string, bool) {
 }
 
 func (t *Table) quietOf(name string) (rule string, ok bool) {
-	for _, set := range []map[string]string{t.quiet, t.quietLow} {
-		tails(name, func(tail string) bool {
-			rule, ok = set[tail]
-			return ok
-		})
-		if ok {
-			return rule, true
-		}
-	}
-	return "", false
+	tails(name, func(tail string) bool {
+		rule, ok = t.quietLow[tail]
+		return ok
+	})
+	return rule, ok
 }
 
 func (t *Table) place(name string, got answer) {
@@ -284,7 +278,7 @@ func (t *Table) place(name string, got answer) {
 		}
 		t.addrs[a] = found
 	}
-	if t.Placed != nil {
+	if t.Placed != nil && found.role != clientstate.RoleTunnel {
 		t.Placed(found.role, got.addrs)
 	}
 }

@@ -23,6 +23,7 @@ import (
 	"github.com/jaywehosl/qd/internal/qsrv/uplink/quicconn"
 	"github.com/jaywehosl/qd/internal/quiet"
 	"github.com/jaywehosl/qd/internal/qwire"
+	"github.com/jaywehosl/qd/internal/relay"
 	"github.com/jaywehosl/qd/internal/update"
 )
 
@@ -58,16 +59,17 @@ type Host interface {
 type Client struct {
 	mu sync.Mutex
 
-	db     *clientstate.DB
-	seen   *clientapi.Visits
-	api    *clientapi.API
-	host   Host
-	device clientapi.Device
+	db      *clientstate.DB
+	adblock *clientapi.Adblock
+	api     *clientapi.API
+	host    Host
+	device  clientapi.Device
 
 	protector Protector
 	talk      *qwire.Dialer
 	marks     *marks
 	names     *domainroute.Table
+	relays    *relay.Pool
 	key       *qdcrypt.Key
 	session   uint32
 	mtu       int
@@ -141,11 +143,14 @@ func Open(stateDir string, host Host, protector Protector, deviceID, model, name
 	}
 	c.rate.Store(int64(settings.FixedRate))
 	c.profile.Store(&settings.BBRProfile)
-	c.seen = clientapi.NewVisits(db, settings.Adblock)
+	c.adblock = clientapi.NewAdblock(settings.Adblock)
 	c.marks = newMarks(host)
 	c.marks.reload(db)
 	c.names = domainroute.New()
 	c.loadNames()
+	c.relays = &relay.Pool{Keep: c.keeper(), Riding: c.ridingRelay}
+	c.loadRelays()
+	go c.relays.Follow(c.entrypoints)
 
 	if raw, err := hex.DecodeString(settings.NetworkKey); err == nil && len(raw) == qdcrypt.KeySize {
 		var k qdcrypt.Key
@@ -153,7 +158,7 @@ func Open(stateDir string, host Host, protector Protector, deviceID, model, name
 		c.key = &k
 	}
 
-	c.api = clientapi.New(db, platform{c: c}, c.seen, c.key)
+	c.api = clientapi.New(db, platform{c: c}, c.adblock, c.key)
 	c.upkeep()
 	return c, nil
 }
@@ -171,7 +176,6 @@ func lookupOn(protector Protector, host string) []netip.Addr {
 func (c *Client) Close() error {
 	close(c.quit)
 	c.Disconnect()
-	c.seen.Close()
 	return c.db.Close()
 }
 
@@ -304,4 +308,24 @@ func (c *Client) Ping() int {
 	}
 
 	return -1
+}
+
+func (c *Client) loadRelays() {
+	list, _ := c.db.Relays()
+	settings, _ := c.db.Settings()
+	c.relays.Set(list, settings.RelayMode)
+}
+
+func (c *Client) ridingRelay() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.live == nil {
+		return 0
+	}
+	return c.live.RelayID()
+}
+
+func (c *Client) entrypoints() []string {
+	nodes, _ := c.db.Nodes()
+	return clientapi.Entrypoints(nodes)
 }

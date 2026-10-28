@@ -22,6 +22,8 @@ import (
 )
 
 type Dialer struct {
+	Relays func() (vias []cip.Via, only bool)
+
 	keep    func(fd uintptr)
 	mu      sync.Mutex
 	token   string
@@ -121,7 +123,12 @@ func (d *Dialer) conn(endpoint string) (asker, func(http.Header), error) {
 		d.dialing[endpoint] = pending
 		d.mu.Unlock()
 
-		link, err := dialControl(endpoint, d.keep)
+		var vias []cip.Via
+		only := false
+		if d.Relays != nil {
+			vias, only = d.Relays()
+		}
+		link, err := dialControl(endpoint, d.keep, vias, only)
 
 		d.mu.Lock()
 		delete(d.dialing, endpoint)
@@ -151,7 +158,7 @@ func (l *controlLink) alive() bool {
 	return l.h2 != nil && l.h2.CanTakeNewRequest()
 }
 
-func dialControl(endpoint string, keep func(fd uintptr)) (*controlLink, error) {
+func dialControl(endpoint string, keep func(fd uintptr), vias []cip.Via, only bool) (*controlLink, error) {
 	host, _, err := net.SplitHostPort(endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("endpoint %q: %w", endpoint, err)
@@ -161,7 +168,7 @@ func dialControl(endpoint string, keep func(fd uintptr)) (*controlLink, error) {
 	defer stop()
 
 	var tries []roads.Try[*controlLink]
-	if !roads.OnlyTCP() {
+	if !only && !roads.OnlyTCP() {
 		tries = append(tries, roads.Try[*controlLink]{Rung: roads.QUIC, Run: func(ctx context.Context) (*controlLink, error) {
 			conn, err := quicconn.Dialer{TLS: &tls.Config{ServerName: host, RootCAs: roots.Pool()}, QUIC: controlConfig(), Keep: keep}.Dial(ctx, endpoint)
 			if err != nil {
@@ -171,13 +178,24 @@ func dialControl(endpoint string, keep func(fd uintptr)) (*controlLink, error) {
 			return &controlLink{tr: tr, conn: conn, cc: tr.NewClientConn(conn.QUIC())}, nil
 		}})
 	}
-	tries = append(tries, roads.Try[*controlLink]{Rung: roads.TCP, Run: func(ctx context.Context) (*controlLink, error) {
-		conn, cc, err := cip.ReachH2(ctx, endpoint, keep)
-		if err != nil {
-			return nil, fmt.Errorf("tcp: %w", err)
-		}
-		return &controlLink{tcp: conn, h2: cc}, nil
-	}})
+	if !only {
+		tries = append(tries, roads.Try[*controlLink]{Rung: roads.TCP, Run: func(ctx context.Context) (*controlLink, error) {
+			conn, cc, err := cip.ReachH2(ctx, endpoint, keep, nil)
+			if err != nil {
+				return nil, fmt.Errorf("tcp: %w", err)
+			}
+			return &controlLink{tcp: conn, h2: cc}, nil
+		}})
+	}
+	for _, via := range vias {
+		tries = append(tries, roads.Try[*controlLink]{Rung: roads.Relay, Run: func(ctx context.Context) (*controlLink, error) {
+			conn, cc, err := cip.ReachH2(ctx, endpoint, keep, via)
+			if err != nil {
+				return nil, fmt.Errorf("relay: %w", err)
+			}
+			return &controlLink{tcp: conn, h2: cc}, nil
+		}})
+	}
 	link, _, err := roads.Climb(ctx, endpoint, tries, func(late *controlLink) { late.close() }, nil)
 	return link, err
 }

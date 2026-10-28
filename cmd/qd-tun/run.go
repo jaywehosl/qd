@@ -75,13 +75,17 @@ func runClient(opts runOptions) error {
 
 	reloadProcessRules(db)
 	setCarriage(settingsCarriage(db))
+	settingsRelays(db)
+	go relays.Follow(func() []string {
+		nodes, _ := db.Nodes()
+		return clientapi.Entrypoints(nodes)
+	})
 
 	settings, err := db.Settings()
 	if err != nil {
 		return err
 	}
-	seen := clientapi.NewVisits(db, settings.Adblock)
-	defer seen.Close()
+	adblock := clientapi.NewAdblock(settings.Adblock)
 
 	keyText := opts.Key
 	if keyText == "" {
@@ -119,8 +123,7 @@ func runClient(opts runOptions) error {
 		Workers: opts.Readers,
 		Tickets: db.Tickets(),
 		DNS:     opts.DNS,
-		OnQuery: seen.Note,
-		Adblock: seen.Adblock,
+		Adblock: adblock.On,
 		Token: func() string {
 			sub, err := db.Subscription()
 			if err != nil {
@@ -141,6 +144,7 @@ func runClient(opts runOptions) error {
 			if admin != nil {
 				out = append(out, admin.Peers()...)
 			}
+			out = append(out, relays.Hosts()...)
 			return out
 		},
 		Lost: func() {
@@ -179,7 +183,7 @@ func runClient(opts runOptions) error {
 		Key: key,
 	})
 
-	api = clientapi.New(db, hostPlatform{tun: tun, db: db}, seen, opts.key)
+	api = clientapi.New(db, hostPlatform{tun: tun, db: db}, adblock, opts.key)
 	api.Fake(opts.FakeUpdate)
 
 	if !embedded {

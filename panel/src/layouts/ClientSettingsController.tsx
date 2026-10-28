@@ -11,6 +11,8 @@ export interface ClientSettings {
   autostartBehaviour: string;
   manualBehaviour: string;
   fixedRate?: number;
+  relay?: string;
+  relayMode?: string;
 }
 
 const SETTLE_MS = 600;

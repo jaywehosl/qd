@@ -55,6 +55,20 @@ func (p hostPlatform) SetCarriage(mbit int, profile string) {
 	}
 }
 
+func (p hostPlatform) SetRelays(list []clientstate.Relay, mode string) {
+	if relays.Set(list, mode) {
+		fmt.Println("relay    the relays changed, the tunnel comes back with them")
+		p.tun.Redial()
+	}
+}
+
+func (p hostPlatform) RelayStates() map[int]clientapi.RelayState { return relays.States() }
+
+func (p hostPlatform) ProbeRelays() {
+	nodes, _ := p.db.Nodes()
+	go relays.Probe(clientapi.Entrypoints(nodes))
+}
+
 func (p hostPlatform) Wire() clientapi.Asker { return nodeTalk }
 
 func (p hostPlatform) Identify() clientapi.Device { return deviceOf() }

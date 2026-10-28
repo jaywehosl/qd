@@ -276,3 +276,20 @@ func (p platform) Install(tag string, open update.Opener, tick func(done, total 
 	}
 	return nil
 }
+
+func (p platform) SetRelays(list []clientstate.Relay, mode string) {
+	if !p.c.relays.Set(list, mode) {
+		return
+	}
+	p.c.mu.Lock()
+	running := p.c.running
+	p.c.mu.Unlock()
+	if running {
+		say("carry: the relays changed, the tunnel comes back with them")
+		go p.c.lost()
+	}
+}
+
+func (p platform) RelayStates() map[int]clientapi.RelayState { return p.c.relays.States() }
+
+func (p platform) ProbeRelays() { go p.c.relays.Probe(p.c.entrypoints()) }

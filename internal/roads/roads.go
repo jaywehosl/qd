@@ -19,6 +19,7 @@ type Rung int
 const (
 	QUIC Rung = iota
 	TCP
+	Relay
 )
 
 var (
@@ -30,17 +31,24 @@ type Path struct {
 	Endpoint string
 	OverTCP  bool
 	Hidden   bool
+	Relayed  bool
 }
 
 func (p Path) String() string {
-	if p.OverTCP {
+	switch {
+	case p.Relayed:
+		return p.Endpoint + " over tcp through the relay"
+	case p.OverTCP:
 		return p.Endpoint + " over tcp"
 	}
 	return p.Endpoint + " over quic"
 }
 
 func (p Path) Short() string {
-	if p.OverTCP {
+	switch {
+	case p.Relayed:
+		return "Relay"
+	case p.OverTCP:
 		return "H2"
 	}
 	return "H3"
@@ -71,8 +79,11 @@ type Try[T any] struct {
 }
 
 func due(rung, known Rung, remembered bool) time.Duration {
-	if rung == QUIC || (remembered && known >= rung) {
+	switch {
+	case rung == QUIC || (remembered && known >= rung):
 		return 0
+	case rung == Relay:
+		return pace.RelayHeadStart
 	}
 	return pace.QUICHeadStart
 }

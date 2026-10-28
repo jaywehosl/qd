@@ -140,7 +140,6 @@
   color: var(--text);
 }
 
-.cset-danger { color: #e03a2f; }
 
 .rt-danger {
   display: flex;
@@ -206,12 +205,6 @@
   gap: var(--step-2);
 }
 
-.cset-layout,
-.cset-grid {
-  display: flex;
-  flex-direction: column;
-  gap: var(--gap-card);
-}
 
 .setting-list-grid {
   display: flex;
@@ -259,58 +252,15 @@
 .setting-list-control > .ds-input,
 .setting-list-control > .ds-select { width: 100%; }
 
-.cset-sites {
-  display: flex;
-  flex-direction: column;
-}
 
-.cset-site {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--step-3);
-  min-height: 40px;
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--text);
-}
 
-.cset-site + .cset-site { border-top: 1px solid var(--edge); }
 
-.cset-site b { color: var(--bold); }
 
-.cset-about {
-  display: flex;
-  flex-direction: column;
-  gap: var(--gap-card);
-  font-size: var(--size-note);
-  color: var(--text);
-}
 
-.cset-about .cset-grid {
-  gap: 0;
-  padding: 0 var(--pad-card);
-  background: var(--card);
-  border-radius: var(--radius-card);
-}
 
-.cset-about .cset-grid > div {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--step-3);
-  min-height: 48px;
-}
 
-.cset-about .cset-grid > div + div { border-top: 1px solid var(--edge); }
 
-.cset-about .cset-grid b { color: var(--bold); }
 
-.cset-danger {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--step-2);
-}
 
 .rt-picker {
   display: flex;
@@ -453,7 +403,6 @@ html.in-phone .rt-bundle__id > .rt-rule__name { flex: none; }
 
 .setting-list-item > .setting-list-grid { flex: 1; min-width: 0; }
 
-.cset-about .cset-note { margin-top: var(--step-3); }
 
 html.in-phone { --pad-card: var(--step-3); --gap-card: var(--step-3); }
 html.in-phone .rt,
@@ -468,7 +417,7 @@ html.in-phone .rt-danger__actions .ds-btn { padding-inline: 6px; }
 html.in-phone .rt-rules { overflow: visible; }
 html.in-phone .rt-rule > .ds-tag:not(.ds-tag--warning) { display: none; }
 html.in-phone .rt-proc { gap: var(--step-2); padding: 9px var(--step-2); }
-html.in-phone .up-head { position: static; transform: none; padding: 0; margin-top: var(--step-2); }
+html.in-phone .up-head { left: auto; right: 0; transform: translateY(-50%); padding: 0; }
 html.in-phone .up-head .cx-power__main {
   width: auto;
   padding-inline: clamp(14px, 6.5vw, 26px);
@@ -508,3 +457,106 @@ html.in-phone .rt-rule { padding: var(--step-2) 0; }
 html.in-phone .rt-rule > .rt-dot { display: none; }
 html.in-phone .rt-rule__name { font-family: var(--font); font-size: var(--size-body); font-weight: 600; }
 html.in-phone .cset-check { font-size: var(--size-note); }
+
+.cset .ds-card .ds-tag:not([class*='--']),
+.cset .ds-card .ds-btn:not([class*='--primary']):not([class*='--danger']) {
+  background: var(--press);
+  color: var(--bold);
+}
+
+.cset .ds-tag { font-variant-numeric: tabular-nums; }
+
+.cset-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--step-2);
+  padding-bottom: var(--step-3);
+}
+
+.cset-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: var(--step-2);
+}
+
+.cset-end {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--step-3);
+  padding: 0 var(--pad-card);
+  font-size: var(--size-note);
+  color: var(--text);
+}
+
+.cset-warn {
+  margin: var(--step-2) 0 0;
+  font-size: var(--size-note);
+  color: #e03a2f;
+}
+
+.rl-list {
+  display: flex;
+  flex-direction: column;
+  margin-top: var(--step-3);
+  border-top: 1px solid var(--edge);
+}
+
+.rl-row {
+  display: flex;
+  align-items: center;
+  gap: var(--step-3);
+  padding: var(--step-3) 0;
+  border-bottom: 1px solid var(--edge);
+}
+
+.rl-row.is-off .rl-name { opacity: 0.55; }
+
+.rl-dot {
+  flex: 0 0 9px;
+  width: 9px;
+  height: 9px;
+  border-radius: var(--radius-round);
+  background: var(--idle);
+}
+
+.rl-dot.is-up { background: var(--good); }
+.rl-dot.is-half { background: #f5a524; }
+.rl-dot.is-down { background: #e03a2f; }
+
+.rl-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--bold);
+  font-weight: 600;
+}
+
+.rl-drop {
+  display: grid;
+  place-items: center;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--radius-round);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.rl-drop:hover { background: var(--press); color: var(--bold); }
+.rl-drop:disabled { opacity: 0.4; cursor: default; }
+
+.rl-add {
+  display: flex;
+  gap: var(--step-2);
+  margin-top: var(--step-4);
+}
+
+.rl-add .ds-input { flex: 1; min-width: 0; }
+
+html.in-phone .cset-end { padding: 0 var(--step-2); }
