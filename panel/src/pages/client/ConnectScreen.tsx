@@ -478,26 +478,28 @@ export default function ConnectScreen({
             <span className={slideTag('updating')}>{t('client.connect.updating')}</span>
           </span>
           <Roll text={tag === 'node' ? road : ''} tone={state.road === 'H3' ? '' : ' is-spare'} />
-          <button
-            type="button"
-            className="cx-ad"
-            aria-label="adblock"
-            aria-pressed={state.adblock}
-            onClick={() => void onAdblock(!state.adblock)}
-          >
-            <Roll text={t('client.connect.adblock')} tone={state.adblock ? '' : ' is-idle'} inline />
-          </button>
-          <button
-            type="button"
-            className={`cx-again${refreshing ? ' is-busy' : ''}`}
-            aria-label={t('client.connect.refresh')}
-            onClick={() => void refresh()}
-          >
-            <svg className="cx-again__icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M15.05 16.95A7 7 0 1 1 17.1 12" />
-              <path d="M12.34 10.46L16.4 14.1L20.9 10.04" />
-            </svg>
-          </button>
+          <span className="cx-head__end">
+            <button
+              type="button"
+              className="cx-ad"
+              aria-label="adblock"
+              aria-pressed={state.adblock}
+              onClick={() => void onAdblock(!state.adblock)}
+            >
+              <Roll text={t('client.connect.adblock')} tone={state.adblock ? '' : ' is-idle'} inline />
+            </button>
+            <button
+              type="button"
+              className={`cx-again${refreshing ? ' is-busy' : ''}`}
+              aria-label={t('client.connect.refresh')}
+              onClick={() => void refresh()}
+            >
+              <svg className="cx-again__icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M15.05 16.95A7 7 0 1 1 17.1 12" />
+                <path d="M12.34 10.46L16.4 14.1L20.9 10.04" />
+              </svg>
+            </button>
+          </span>
         </div>
         <div className={`cx-head__say${slide('wizard')}`} aria-hidden={headState !== 'wizard'}>
           {t('client.setup.wizardHead')}

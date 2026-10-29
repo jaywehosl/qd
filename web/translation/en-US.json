@@ -624,7 +624,7 @@
       "connectOnLaunch": "Connect when qd opens",
       "theme": "Theme",
       "navLow": "Navigation bar at the bottom",
-      "navLowDesc": "Moves the navigation buttons to a floating bar at the bottom.",
+      "navLowDesc": "Move the navigation buttons to a floating bar at the bottom.",
       "themeDesc": "Switch it with the button at the top, or match the OS setting.",
       "themeButton": "Manual",
       "themeSystem": "Match system",
@@ -659,7 +659,8 @@
       "diagnostics": "Troubleshooting",
       "journalSaved": "Saved to Downloads: {name}",
       "colsSwap": "Swap columns",
-      "colsSwapDesc": "Moves navigation and the connect button to the left side."
+      "colsSwapDesc": "Moves navigation and the connect button to the left side.",
+      "uiScale": "Interface scale"
     },
     "history": {
       "empty": "Nothing recorded yet. Stay connected for a moment.",

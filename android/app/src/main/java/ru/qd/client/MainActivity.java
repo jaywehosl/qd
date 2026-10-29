@@ -276,7 +276,9 @@ public class MainActivity extends Activity {
         set.setJavaScriptEnabled(true);
         set.setDomStorageEnabled(true);
         set.setTextZoom(100);
-        set.setSupportZoom(false);
+        set.setUseWideViewPort(true);
+        set.setLoadWithOverviewMode(true);
+        set.setSupportZoom(true);
         set.setBuiltInZoomControls(false);
         set.setDisplayZoomControls(false);
         web.addJavascriptInterface(new Bridge(), "qdHost");

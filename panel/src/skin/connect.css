@@ -28,6 +28,8 @@ html.is-dark .cx-card { box-shadow: none; }
 
 .cx-head .cx-tag { flex: 1; }
 
+.cx-head__end { display: flex; align-items: center; gap: inherit; }
+
 .cx-tag {
   font-size: var(--size-title);
   font-weight: 700;
@@ -787,6 +789,13 @@ html.in-phone .cx-head__row {
 }
 html.in-phone .cx-chip { height: 26px; padding: 0 10px 0 9px; gap: 6px; font-size: 11px; }
 html.in-phone .cx-head__row > .cx-chips { position: static; transform: none; }
+html.in-phone .cx-head__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(max-content, 1fr);
+  padding-left: var(--step-2);
+}
+html.in-phone .cx-head__row > .cx-tag { padding-left: var(--step-2); overflow-x: clip; }
+html.in-phone .cx-head__end { justify-self: end; }
 html.in-phone .cx-tag { font-size: clamp(13px, 4.2vw, 17px); }
 
 html.in-phone .cx-head__say { font-size: clamp(17px, 5.4vw, 22px); }

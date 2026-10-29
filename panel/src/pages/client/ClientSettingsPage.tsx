@@ -1,5 +1,5 @@
 import { unit } from '@/lib/unit';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { DownloadOutlined, RightOutlined } from '@ant-design/icons';
@@ -14,7 +14,7 @@ import { resetAll } from '@/stores/notificationStore';
 import { VersionPill } from './UpdateButton';
 import RelaysCard, { useRelays } from './RelaysCard';
 import { useTheme } from '@/hooks/useTheme';
-import { HOST_EVENT, colsSwap, hostChecks, navLow, phone, setColsSwap, setNavLow, usePortrait } from '@/lib/phone';
+import { HOST_EVENT, colsSwap, hostChecks, navLow, pageScale, phone, setColsSwap, setNavLow, setUiScale, uiScale, usePortrait } from '@/lib/phone';
 
 interface AboutPayload {
   version?: string;
@@ -31,6 +31,95 @@ function remainingLabel(ms: number | undefined, never: string): string {
   const days = Math.floor(left / 86400000);
   const hours = Math.floor((left % 86400000) / 3600000);
   return days > 0 ? `${days}${unit('d')} ${hours}${unit('h')}` : `${hours}${unit('h')}`;
+}
+
+const SCALE_TICKS = [80, 85, 90, 95, 100, 105, 110, 115, 120];
+const THUMB = 20;
+
+const stick = (scale: number) => {
+  const held = Math.min(1.2, Math.max(0.8, scale));
+  const tick = Math.round(held * 20) / 20;
+  return Math.abs(held - tick) < 0.012 ? tick : held;
+};
+
+function ScaleSlider({ label }: { label: string }) {
+  const [value, setValue] = useState(uiScale);
+  const track = useRef<HTMLSpanElement>(null);
+  const drag = useRef<{ x: number; from: number; width: number; top: number } | null>(null);
+  const pending = useRef(value);
+  const frame = useRef(0);
+
+  const show = (next: number) => {
+    setValue(next);
+    pending.current = next;
+    if (frame.current) return;
+    frame.current = requestAnimationFrame(() => {
+      frame.current = 0;
+      setUiScale(pending.current, false);
+      const held = drag.current;
+      const box = track.current?.getBoundingClientRect();
+      if (held && box) window.scrollBy(0, box.top - held.top / pageScale());
+    });
+  };
+
+  const grab = (e: PointerEvent<HTMLSpanElement>) => {
+    const box = e.currentTarget.getBoundingClientRect();
+    const scale = pageScale();
+    const at = Math.min(1, Math.max(0, (e.clientX - box.left - THUMB / 2) / (box.width - THUMB)));
+    const from = Math.abs(at - (value - 0.8) / 0.4) < 0.08 ? value : 0.8 + at * 0.4;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    drag.current = { x: e.clientX * scale, from, width: (box.width - THUMB) * scale, top: box.top * scale };
+    show(stick(from));
+  };
+
+  const move = (e: PointerEvent<HTMLSpanElement>) => {
+    const held = drag.current;
+    if (held) show(stick(held.from + ((e.clientX * pageScale() - held.x) / held.width) * 0.4));
+  };
+
+  const drop = () => {
+    if (!drag.current) return;
+    drag.current = null;
+    const kept = Math.round(pending.current * 100) / 100;
+    setValue(kept);
+    pending.current = kept;
+    setUiScale(kept);
+  };
+
+  const key = (e: KeyboardEvent<HTMLSpanElement>) => {
+    const step = e.key === 'ArrowRight' || e.key === 'ArrowUp' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? -1 : 0;
+    if (!step) return;
+    e.preventDefault();
+    const next = stick(Math.round(value * 20 + step) / 20);
+    setValue(next);
+    setUiScale(next);
+  };
+
+  return (
+    <span className="cset-scale">
+      <span
+        ref={track}
+        className="cset-track"
+        role="slider"
+        tabIndex={0}
+        aria-label={label}
+        aria-valuemin={80}
+        aria-valuemax={120}
+        aria-valuenow={Math.round(value * 100)}
+        style={{ '--fill': (value - 0.8) / 0.4 } as CSSProperties}
+        onPointerDown={grab}
+        onPointerMove={move}
+        onPointerUp={drop}
+        onPointerCancel={drop}
+        onKeyDown={key}
+      >
+        <span className="cset-thumb" />
+      </span>
+      <span className="cset-ticks" aria-hidden="true">
+        {SCALE_TICKS.map((v) => <i key={v} className={v % 10 ? undefined : 'is-major'} />)}
+      </span>
+    </span>
+  );
 }
 
 export default function ClientSettingsPage() {
@@ -150,6 +239,10 @@ export default function ClientSettingsPage() {
                   { value: 'system', label: t('client.settings.themeSystem') },
                 ]}
               />
+            </SettingListItem>
+
+            <SettingListItem paddings="small" title={t('client.settings.uiScale')}>
+              <ScaleSlider label={t('client.settings.uiScale')} />
             </SettingListItem>
 
             {portrait ? (
