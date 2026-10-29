@@ -469,7 +469,7 @@ export default function ConnectScreen({
   return (
     <div className="cx" ref={root}>
       <section className="cx-card cx-head" style={headEase}>
-        <div className={`cx-head__row${slide('normal')}`} aria-hidden={headState !== 'normal'}>
+        <div className={`cx-head__row${slide('normal')}${tag === 'node' ? ' is-node' : ''}`} aria-hidden={headState !== 'normal'}>
           <span className="cx-tag cx-reel" style={tagEase}>
             <span className={slideTag('ready')}>{t('client.connect.ready')}</span>
             <span className={slideTag('connecting')}>{t('client.connect.connecting')}</span>

@@ -794,8 +794,10 @@ html.in-phone .cx-head__row {
   grid-template-columns: minmax(0, 1fr) auto minmax(max-content, 1fr);
   padding-left: var(--step-2);
 }
-html.in-phone .cx-head__row > .cx-tag { padding-left: var(--step-2); overflow-x: clip; }
-html.in-phone .cx-head__end { justify-self: end; }
+html.in-phone .cx-head__row > .cx-tag { grid-area: 1 / 1 / 2 / 3; padding-left: var(--step-2); overflow-x: clip; }
+html.in-phone .cx-head__row.is-node > .cx-tag { grid-column: 1; }
+html.in-phone .cx-head__row > .cx-chips { grid-area: 1 / 2; }
+html.in-phone .cx-head__end { grid-area: 1 / 3; justify-self: end; }
 html.in-phone .cx-tag { font-size: clamp(13px, 4.2vw, 17px); }
 
 html.in-phone .cx-head__say { font-size: clamp(17px, 5.4vw, 22px); }

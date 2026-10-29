@@ -35,11 +35,16 @@ function remainingLabel(ms: number | undefined, never: string): string {
 
 const SCALE_TICKS = [80, 85, 90, 95, 100, 105, 110, 115, 120];
 const THUMB = 20;
+const LOW = 0.8;
+const TOP = 1.05;
 
-const stick = (scale: number) => {
-  const held = Math.min(1.2, Math.max(0.8, scale));
-  const tick = Math.round(held * 20) / 20;
-  return Math.abs(held - tick) < 0.012 ? tick : held;
+const toScale = (place: number) => (place <= 0.5 ? LOW + place * 2 * (1 - LOW) : 1 + (place - 0.5) * 2 * (TOP - 1));
+const toPlace = (scale: number) => (scale <= 1 ? (scale - LOW) / (1 - LOW) / 2 : 0.5 + (scale - 1) / (TOP - 1) / 2);
+
+const stick = (place: number) => {
+  const held = Math.min(1, Math.max(0, place));
+  const tick = Math.round(held * 8) / 8;
+  return Math.abs(held - tick) < 0.03 ? tick : held;
 };
 
 function ScaleSlider({ label }: { label: string }) {
@@ -48,6 +53,7 @@ function ScaleSlider({ label }: { label: string }) {
   const drag = useRef<{ x: number; from: number; width: number; top: number } | null>(null);
   const pending = useRef(value);
   const frame = useRef(0);
+  const place = toPlace(value);
 
   const show = (next: number) => {
     setValue(next);
@@ -66,21 +72,21 @@ function ScaleSlider({ label }: { label: string }) {
     const box = e.currentTarget.getBoundingClientRect();
     const scale = pageScale();
     const at = Math.min(1, Math.max(0, (e.clientX - box.left - THUMB / 2) / (box.width - THUMB)));
-    const from = Math.abs(at - (value - 0.8) / 0.4) < 0.08 ? value : 0.8 + at * 0.4;
+    const from = Math.abs(at - place) < 0.08 ? place : at;
     e.currentTarget.setPointerCapture(e.pointerId);
     drag.current = { x: e.clientX * scale, from, width: (box.width - THUMB) * scale, top: box.top * scale };
-    show(stick(from));
+    show(toScale(stick(from)));
   };
 
   const move = (e: PointerEvent<HTMLSpanElement>) => {
     const held = drag.current;
-    if (held) show(stick(held.from + ((e.clientX * pageScale() - held.x) / held.width) * 0.4));
+    if (held) show(toScale(stick(held.from + (e.clientX * pageScale() - held.x) / held.width)));
   };
 
   const drop = () => {
     if (!drag.current) return;
     drag.current = null;
-    const kept = Math.round(pending.current * 100) / 100;
+    const kept = Math.round(pending.current * 400) / 400;
     setValue(kept);
     pending.current = kept;
     setUiScale(kept);
@@ -90,7 +96,7 @@ function ScaleSlider({ label }: { label: string }) {
     const step = e.key === 'ArrowRight' || e.key === 'ArrowUp' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? -1 : 0;
     if (!step) return;
     e.preventDefault();
-    const next = stick(Math.round(value * 20 + step) / 20);
+    const next = toScale(stick(Math.round(place * 8 + step) / 8));
     setValue(next);
     setUiScale(next);
   };
@@ -103,10 +109,10 @@ function ScaleSlider({ label }: { label: string }) {
         role="slider"
         tabIndex={0}
         aria-label={label}
-        aria-valuemin={80}
-        aria-valuemax={120}
+        aria-valuemin={Math.round(LOW * 100)}
+        aria-valuemax={Math.round(TOP * 100)}
         aria-valuenow={Math.round(value * 100)}
-        style={{ '--fill': (value - 0.8) / 0.4 } as CSSProperties}
+        style={{ '--fill': place } as CSSProperties}
         onPointerDown={grab}
         onPointerMove={move}
         onPointerUp={drop}

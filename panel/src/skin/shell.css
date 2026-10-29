@@ -375,6 +375,7 @@ html.in-window .win-tray .sidebar-theme-cycle { position: relative; }
 
 html.in-phone {
   -webkit-tap-highlight-color: transparent;
+  overflow-x: hidden;
   overscroll-behavior: none;
   user-select: none;
   -webkit-user-select: none;
@@ -385,6 +386,8 @@ html.in-phone textarea {
   user-select: text;
   -webkit-user-select: text;
 }
+
+html.in-phone.is-fit { overflow-y: hidden; }
 
 html.in-phone :focus,
 html.in-phone :focus-visible { outline: none; }

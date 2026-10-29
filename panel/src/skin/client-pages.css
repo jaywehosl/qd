@@ -405,6 +405,8 @@ html.in-phone { --pad-card: var(--step-3); --gap-card: var(--step-3); }
 html.in-phone .rt,
 html.in-phone .client-settings { padding: var(--step-2) 0; }
 html.in-phone .rt-default { gap: var(--step-3); }
+html.in-phone.is-big .inb-roles .vtab-btn > span:not(.vtab-icon) { display: none; }
+html.in-phone.is-big .inb-roles .vertical-tabs-container { justify-content: center; }
 html.in-phone .rt-rule { gap: var(--step-2); }
 html.in-phone .rt-rule__id { flex-direction: column; align-items: flex-start; gap: 0; }
 html.in-phone .rt-rule__id > * { flex: 0 0 auto; max-width: 100%; }

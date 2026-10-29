@@ -67,7 +67,7 @@ export const colsSwap = () => localStorage.getItem(COLS_SWAP) === 'true';
 
 export const uiScale = () => {
   const held = Number(localStorage.getItem(UI_SCALE));
-  return held >= 0.8 && held <= 1.2 ? held : 1;
+  return held >= 0.8 ? Math.min(held, 1.05) : 1;
 };
 
 export function setUiScale(scale: number, keep = true) {
@@ -106,6 +106,8 @@ export function mountPhone() {
   const device = Math.abs(near - 1) < 0.02 ? 1 : Math.min(1.3, Math.max(0.75, near));
   const viewport = document.querySelector('meta[name="viewport"]');
   const plain = viewport?.getAttribute('content') ?? '';
+  const mark = (ui: number) => root.classList.toggle('is-big', ui > 1);
+  mark(uiScale());
   let want = device * uiScale();
   const sizeViewport = () => {
     let content = plain;
@@ -119,6 +121,9 @@ export function mountPhone() {
     if (viewport && viewport.getAttribute('content') !== content) viewport.setAttribute('content', content);
   };
   sizeViewport();
+  const settle = () => root.classList.toggle('is-fit', root.getBoundingClientRect().height <= (window.visualViewport?.height ?? innerHeight));
+  new ResizeObserver(settle).observe(root);
+  window.visualViewport?.addEventListener('resize', settle);
   root.classList.add('in-phone');
   root.classList.toggle('cols-swap', colsSwap());
   placeNav();
@@ -165,7 +170,9 @@ export function mountPhone() {
     seat();
   });
   window.addEventListener(SCALE_EVENT, (e) => {
-    want = device * ((e as CustomEvent<number>).detail ?? uiScale());
+    const ui = (e as CustomEvent<number>).detail ?? uiScale();
+    mark(ui);
+    want = device * ui;
     sizeViewport();
     seat();
   });
