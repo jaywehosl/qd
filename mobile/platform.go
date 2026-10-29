@@ -201,10 +201,26 @@ func (c *Client) appLists() (direct []string, allowed []string, carveOut bool) {
 		allowed = append(allowed, name)
 	}
 
-	if fallback == clientstate.RoleDirect {
+	if fallback == clientstate.RoleDirect && !c.pullsIn() {
 		return nil, allowed, true
 	}
 	return direct, nil, false
+}
+
+func (c *Client) pullsIn() bool {
+	domains, _ := c.db.DomainRulesInForce()
+	for _, d := range domains {
+		if d.Role != clientstate.RoleDirect && d.Role != clientstate.RoleInherit {
+			return true
+		}
+	}
+	bundles, _ := c.db.BundleRolesInForce()
+	for _, role := range bundles {
+		if role != clientstate.RoleDirect {
+			return true
+		}
+	}
+	return false
 }
 
 func (p platform) HoldAutostart(on bool) error { return nil }

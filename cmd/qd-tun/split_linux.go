@@ -9,6 +9,7 @@ import (
 	"net/netip"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -82,8 +83,10 @@ func splitRules(r *procRouter) {
 	if mode != splitNone && !readySplit(mode) {
 		return
 	}
-	if was != mode && was != splitNone {
-		evacuate(groupOf(was))
+	for _, group := range groupsOf(was) {
+		if !slices.Contains(groupsOf(mode), group) {
+			evacuate(group)
+		}
 	}
 	if start {
 		go keepSplit()
@@ -110,17 +113,22 @@ func readySplit(mode splitMode) bool {
 	if _, err := exec.LookPath("nft"); err != nil {
 		return fail("nft is missing, install nftables")
 	}
-	if err := os.MkdirAll(cgroupRoot+"/"+groupOf(mode), 0o755); err != nil {
-		return fail(err.Error())
+	for _, group := range groupsOf(mode) {
+		if err := os.MkdirAll(cgroupRoot+"/"+group, 0o755); err != nil {
+			return fail(err.Error())
+		}
 	}
 	return true
 }
 
-func groupOf(mode splitMode) string {
-	if mode == splitTunnel {
-		return tunnelGroup
+func groupsOf(mode splitMode) []string {
+	switch mode {
+	case splitTunnel:
+		return []string{directGroup, tunnelGroup}
+	case splitDirect:
+		return []string{directGroup}
 	}
-	return directGroup
+	return nil
 }
 
 func splitUp(addr netip.Addr) {
@@ -144,17 +152,18 @@ func renderSplit() {
 
 	script := "table inet qd\ndelete table inet qd\n"
 	if up && mode != splitNone && !broken {
-		match := `socket cgroupv2 level 1 "` + directGroup + `"`
-		if mode == splitTunnel {
-			match = `socket cgroupv2 level 1 != "` + tunnelGroup + `"`
-		}
 		mark := strconv.Itoa(socketMark)
+		aside := " meta mark set " + mark + " ct mark set " + mark + "\n"
+		out := "\t\tsocket cgroupv2 level 1 \"" + directGroup + "\"" + aside
+		if mode == splitTunnel {
+			out += "\t\tip daddr @inward4 return\n\t\tip6 daddr @inward6 return\n" +
+				"\t\tsocket cgroupv2 level 1 != \"" + tunnelGroup + "\"" + aside
+		}
 		script += "table inet qd {\n" +
 			"\tset inward4 { type ipv4_addr; flags timeout; }\n" +
 			"\tset inward6 { type ipv6_addr; flags timeout; }\n" +
 			"\tchain out {\n\t\ttype route hook output priority mangle; policy accept;\n" +
-			"\t\tip daddr @inward4 return\n\t\tip6 daddr @inward6 return\n" +
-			"\t\t" + match + " meta mark set " + mark + " ct mark set " + mark + "\n\t}\n" +
+			out + "\t}\n" +
 			"\tchain refuse {\n\t\ttype filter hook output priority filter; policy accept;\n" +
 			"\t\tmeta mark " + mark + " ip daddr " + ippkt.StandIn.String() + " meta l4proto tcp reject with tcp reset\n" +
 			"\t\tmeta mark " + mark + " ip daddr " + ippkt.StandIn.String() + " reject\n\t}\n" +
@@ -265,15 +274,21 @@ func place(pid uint32) {
 	if ident.name == "" {
 		return
 	}
-	role := r.roleNow(ident)
-	group := groupOf(mode)
-	want := (role == clientstate.RoleDirect) == (mode == splitDirect)
+	want := ""
+	if role, own := r.ownRole(ident); own {
+		switch {
+		case role == clientstate.RoleDirect:
+			want = "/" + directGroup
+		case mode == splitTunnel:
+			want = "/" + tunnelGroup
+		}
+	}
 	now := cgroupOf(pid)
-	inside := now == "/"+group
+	inside := now == "/"+directGroup || now == "/"+tunnelGroup
 
 	switch {
-	case want && !inside:
-		if !strings.HasPrefix(now, sessionTree) {
+	case want != "" && now != want:
+		if !inside && !strings.HasPrefix(now, sessionTree) {
 			split.mu.Lock()
 			if !split.warned[ident.name] {
 				split.warned[ident.name] = true
@@ -282,12 +297,12 @@ func place(pid uint32) {
 			split.mu.Unlock()
 			return
 		}
-		if moveTo(pid, "/"+group) {
+		if moveTo(pid, want) && !inside {
 			split.mu.Lock()
 			split.origin[pid] = now
 			split.mu.Unlock()
 		}
-	case !want && inside:
+	case want == "" && inside:
 		giveBack(pid)
 	}
 }
@@ -332,10 +347,10 @@ func cgroupOf(pid uint32) string {
 	return ""
 }
 
-func (r *procRouter) roleNow(ident procIdent) string {
+func (r *procRouter) ownRole(ident procIdent) (string, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return roleIn(ident, r.byPath, r.byName, r.def)
+	return roleIn(ident, r.byPath, r.byName)
 }
 
 func watchExecs(out chan<- uint32) error {

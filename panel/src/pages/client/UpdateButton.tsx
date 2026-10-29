@@ -1,10 +1,9 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { SyncOutlined } from '@ant-design/icons';
 
 import { toast } from '@/components/ds';
 import { progressOf, useUpdate, type UpdateInfo } from '@/hooks/useUpdate';
-import UpdateShell from './UpdateShell';
-import '@/skin/connect.css';
 
 export function updateWord(t: (key: string, opts?: Record<string, unknown>) => string, info: UpdateInfo | null, idle: string): string {
   const progress = progressOf(info);
@@ -15,7 +14,7 @@ export function updateWord(t: (key: string, opts?: Record<string, unknown>) => s
   return idle;
 }
 
-export default function UpdateButton() {
+export function VersionPill({ version }: { version?: string }) {
   const { t } = useTranslation();
   const { info, run } = useUpdate();
   const [checking, setChecking] = useState(false);
@@ -37,27 +36,25 @@ export default function UpdateButton() {
     }
   };
 
+  const busy = checking || !!info?.status;
   const idle = checking
     ? t('client.update.checking')
     : latest
-      ? t('client.update.latest', { version: info?.version ?? '' })
+      ? t('client.update.latest', { version: info?.version ?? version ?? '' })
       : info?.offer
         ? t('client.update.to', { version: info.offer.version })
-        : t('client.update.check');
+        : `qd ${version ?? info?.version ?? ''}`;
 
   return (
-    <UpdateShell progress={progressOf(info) ?? 0} busy={checking || !!info?.status} className="up-head">
-      <div className={`cx-power${info?.status ? ' is-on' : ''}`}>
-        <button
-          type="button"
-          className="cx-power__main"
-          title={info?.version}
-          disabled={checking || !!info?.status}
-          onClick={() => void click()}
-        >
-          {updateWord(t, info, idle)}
-        </button>
-      </div>
-    </UpdateShell>
+    <button
+      type="button"
+      className={`cset-version${info?.offer && !latest ? ' is-offer' : ''}`}
+      title={t('client.update.check')}
+      disabled={busy}
+      onClick={() => void click()}
+    >
+      <SyncOutlined spin={busy} />
+      <span>{updateWord(t, info, idle)}</span>
+    </button>
   );
 }

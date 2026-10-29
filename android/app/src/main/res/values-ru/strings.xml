@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="err_too_old">Эта версия устарела. Обновите qd, чтобы подключиться.</string>
+    <string name="err_refused">Сервер не принял вашу подписку. Обратитесь к администратору.</string>
+    <string name="err_expired">Срок действия подписки закончился.</string>
+    <string name="err_blocked">Администратор заблокировал это устройство.</string>
+    <string name="err_devices">Подписка уже используется на всех разрешённых устройствах.</string>
+    <string name="err_no_subscription">Подписка ещё не добавлена.</string>
+    <string name="err_no_servers">В подписке нет серверов для подключения.</string>
+    <string name="err_vpn_refused">Android не дал включить VPN. Проверьте, не включён ли другой VPN.</string>
+    <string name="err_no_answer">Сервер не отвечает. Проверьте интернет и попробуйте ещё раз.</string>
+    <string name="err_connect_failed">Не удалось подключиться. Подробности — в журнале.</string>
+    <string name="channel_tunnel">Подключение</string>
+    <string name="channel_updates">Обновления</string>
+    <string name="connected">Подключено</string>
+    <string name="connected_via">Подключено через %1$s</string>
+    <string name="disconnected">Отключено</string>
+    <string name="connecting">Подключение…</string>
+    <string name="disconnecting">Отключение…</string>
+    <string name="action_connect">Подключить</string>
+    <string name="action_disconnect">Отключить</string>
+    <string name="tile_on">Вкл</string>
+    <string name="tile_off">Выкл</string>
+    <string name="no_reply">нет ответа</string>
+    <string name="units">Б КБ МБ ГБ ТБ</string>
+    <string name="update_ready">Обновление qd готово</string>
+    <string name="tap_to_install">Нажмите, чтобы установить</string>
+    <string name="widget_connecting">подключение</string>
+    <string name="widget_disconnecting">отключение</string>
+    <string name="widget_connected">подключено</string>
+    <string name="widget_connect">подключить</string>
+    <string name="journal_empty">Журнал пуст</string>
+    <string name="not_saved">Не сохранено: %1$s</string>
+    <string name="no_file">нет файла</string>
+</resources>

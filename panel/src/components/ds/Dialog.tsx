@@ -1,3 +1,4 @@
+import i18next from 'i18next';
 import * as RDialog from '@radix-ui/react-dialog';
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -92,7 +93,7 @@ export function Dialog({
               <RDialog.Title className="ds-dialog__title">{title}</RDialog.Title>
               {!hideClose && (
                 <RDialog.Close asChild>
-                  <button className="ds-dialog__close" aria-label="Close">
+                  <button className="ds-dialog__close" aria-label={i18next.t('close')}>
                     <CloseOutlined />
                   </button>
                 </RDialog.Close>

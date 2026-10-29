@@ -23,7 +23,7 @@ public final class Notes {
         }
         manager.deleteNotificationChannel("tunnel");
         NotificationChannel channel = new NotificationChannel(
-                CHANNEL, "Туннель", NotificationManager.IMPORTANCE_MIN);
+                CHANNEL, context.getString(R.string.channel_tunnel), NotificationManager.IMPORTANCE_MIN);
         channel.setShowBadge(false);
         channel.setSound(null, null);
         manager.createNotificationChannel(channel);
@@ -57,8 +57,8 @@ public final class Notes {
         Notification.Builder note = new Notification.Builder(context, CHANNEL)
                 .setSmallIcon(R.drawable.ic_tile)
                 .setContentTitle(up
-                        ? (where.isEmpty() ? "Подключён" : "Подключён через " + where)
-                        : "Отключён")
+                        ? (where.isEmpty() ? context.getString(R.string.connected) : context.getString(R.string.connected_via, where))
+                        : context.getString(R.string.disconnected))
                 .setContentIntent(openIntent(context))
                 .setOngoing(true)
                 .setShowWhen(false)
@@ -66,8 +66,8 @@ public final class Notes {
 
         note.addAction(new Notification.Action.Builder(null,
                 Core.turning()
-                        ? (up ? "Отключение" : "Подключение")
-                        : (up ? "Отключить" : "Подключить"),
+                        ? context.getString(up ? R.string.disconnecting : R.string.connecting)
+                        : context.getString(up ? R.string.action_disconnect : R.string.action_connect),
                 powerIntent(context, up)).build());
 
         if (Core.mayExit()) {

@@ -42,9 +42,9 @@ func (s Standing) Refused() bool { return !s.Carried && s.Why() != "" }
 func (s Standing) Why() string {
 	switch {
 	case !s.Known:
-		return "This subscription is no longer valid — ask the administrator for a new link."
+		return "This subscription is no longer valid. Ask your administrator for a new link."
 	case !s.Enable:
-		return "This client has been disabled by the administrator."
+		return "This subscription was disabled by the administrator."
 	case s.Expired:
 		return "This subscription has expired."
 	case s.Denied != "":

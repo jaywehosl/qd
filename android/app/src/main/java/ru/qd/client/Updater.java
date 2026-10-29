@@ -98,14 +98,14 @@ public final class Updater {
         }
         if (manager.getNotificationChannel(CHANNEL) == null) {
             manager.createNotificationChannel(new NotificationChannel(
-                    CHANNEL, "Обновления", NotificationManager.IMPORTANCE_HIGH));
+                    CHANNEL, context.getString(R.string.channel_updates), NotificationManager.IMPORTANCE_HIGH));
         }
         PendingIntent open = PendingIntent.getActivity(context, NOTE, confirm,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         Notification note = new Notification.Builder(context, CHANNEL)
                 .setSmallIcon(R.drawable.ic_tile)
-                .setContentTitle("Обновление qd готово")
-                .setContentText("Нажмите, чтобы установить")
+                .setContentTitle(context.getString(R.string.update_ready))
+                .setContentText(context.getString(R.string.tap_to_install))
                 .setContentIntent(open)
                 .setAutoCancel(true)
                 .build();

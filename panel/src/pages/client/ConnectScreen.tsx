@@ -1,3 +1,4 @@
+import { unit } from '@/lib/unit';
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
@@ -249,7 +250,9 @@ export default function ConnectScreen({
   });
 
   const exiting = state.egress && state.allowExit !== false;
-  const road = state.connected && state.road ? state.road + (exiting ? '+H3' : '') : '';
+  const road = state.connected && state.road
+    ? t(`client.connect.road.${state.road}`, { defaultValue: state.road }) + (exiting ? '+H3' : '')
+    : '';
   const lastNode = useRef('');
   if (state.node?.name) lastNode.current = state.node.name;
 
@@ -474,7 +477,7 @@ export default function ConnectScreen({
             <span className={slideTag('disconnecting')}>{t('client.connect.disconnecting')}</span>
             <span className={slideTag('updating')}>{t('client.connect.updating')}</span>
           </span>
-          <Roll text={tag === 'node' ? road : ''} tone={road.startsWith('H3') ? '' : ' is-spare'} />
+          <Roll text={tag === 'node' ? road : ''} tone={state.road === 'H3' ? '' : ' is-spare'} />
           <button
             type="button"
             className="cx-ad"
@@ -482,7 +485,7 @@ export default function ConnectScreen({
             aria-pressed={state.adblock}
             onClick={() => void onAdblock(!state.adblock)}
           >
-            <Roll text="Adblock" tone={state.adblock ? '' : ' is-idle'} inline />
+            <Roll text={t('client.connect.adblock')} tone={state.adblock ? '' : ' is-idle'} inline />
           </button>
           <button
             type="button"
@@ -542,7 +545,7 @@ export default function ConnectScreen({
                 <span className="cx-node__name">{n.name}</span>
                 <span className={`cx-dot${n.reachable ? ' is-up' : ''}`} />
                 <span className="cx-node__ping">
-                  {n.reachable && n.latencyMs ? `${n.latencyMs}ms` : '—'}
+                  {n.reachable && n.latencyMs ? `${n.latencyMs}\u00a0${unit('ms')}` : '—'}
                 </span>
               </div>
             ))}

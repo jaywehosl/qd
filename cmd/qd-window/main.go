@@ -10,6 +10,7 @@ package main
 import "C"
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -19,6 +20,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"strings"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -212,15 +214,15 @@ func watch() {
 		}
 		imported.Store(err == nil && st.Imported)
 
-		status, tip := 0, appName+" — отключён"
+		status, tip := 0, appName+" — "+say("disconnected", "отключено")
 		switch {
 		case err == nil && st.Connected:
-			status, tip = 1, appName+" — подключён"
+			status, tip = 1, appName+" — "+say("connected", "подключено")
 			if st.Node != nil && st.Node.Name != "" {
 				tip = appName + " — " + st.Node.Name
 			}
 		case err == nil && st.Failed:
-			status, tip = 2, appName+" — не удалось подключиться"
+			status, tip = 2, appName+" — "+say("couldn't connect", "не удалось подключиться")
 		}
 
 		key := fmt.Sprint(status, tip, st.Connected)
@@ -285,4 +287,11 @@ func arrive(atLogin bool) {
 			}
 		}
 	}
+}
+
+func say(en, ru string) string {
+	if strings.HasPrefix(cmp.Or(os.Getenv("LC_ALL"), os.Getenv("LC_MESSAGES"), os.Getenv("LANG")), "ru") {
+		return ru
+	}
+	return en
 }

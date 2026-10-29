@@ -6,6 +6,7 @@ import (
 )
 
 const (
+	RoleInherit  = "default"
 	RoleDirect   = "direct"
 	RoleTunnel   = "tunnel"
 	RoleEgress   = "egress"
@@ -14,10 +15,39 @@ const (
 
 func ValidRole(role string) bool {
 	switch role {
-	case RoleDirect, RoleTunnel, RoleEgress, RoleNoEgress:
+	case RoleInherit, RoleDirect, RoleTunnel, RoleEgress, RoleNoEgress:
 		return true
 	}
 	return false
+}
+
+func exitRole(role string) bool { return role == RoleEgress || role == RoleNoEgress }
+
+func (d *DB) exits() bool {
+	sub, err := d.Subscription()
+	return err == nil && sub.AllowExit
+}
+
+func (d *DB) DropExitRoles() (int64, error) {
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	var moved int64
+	for _, q := range []string{
+		`UPDATE rules SET role = 'default' WHERE role IN ('egress', 'noEgress')`,
+		`UPDATE domain_rules SET role = 'default' WHERE role IN ('egress', 'noEgress')`,
+		`DELETE FROM bundle_rules WHERE role IN ('egress', 'noEgress')`,
+	} {
+		res, err := tx.Exec(q)
+		if err != nil {
+			return 0, err
+		}
+		n, _ := res.RowsAffected()
+		moved += n
+	}
+	return moved, tx.Commit()
 }
 
 type Rule struct {
@@ -52,7 +82,7 @@ func (d *DB) Rules() ([]Rule, error) {
 func (d *DB) DefaultRole() (string, error) {
 	var v string
 	err := d.sql.QueryRow(`SELECT value FROM settings WHERE key = 'defaultRole'`).Scan(&v)
-	if err != nil || !ValidRole(v) {
+	if err != nil || !plainRole(v) {
 		return RoleTunnel, nil
 	}
 	return v, nil
@@ -66,23 +96,24 @@ func (d *DB) RulesInForce() (string, []Rule, error) {
 		return "", nil, err
 	}
 	def, _ := d.DefaultRole()
-	sub, err := d.Subscription()
-	exits := err == nil && sub.AllowExit
-	if !exits && !plainRole(def) {
-		def = RoleDirect
-	}
-	for i := range rules {
-		if rules[i].Role == RoleTunnel || (!exits && !plainRole(rules[i].Role)) {
-			rules[i].Role = def
+	exits := d.exits()
+	kept := rules[:0]
+	for _, r := range rules {
+		if r.Role != RoleInherit && (exits || !exitRole(r.Role)) {
+			kept = append(kept, r)
 		}
 	}
-	return def, rules, nil
+	return def, kept, nil
 }
 
 func (d *DB) ReplaceRules(defaultRole string, rules []Rule) error {
-	if !ValidRole(defaultRole) {
-		return fmt.Errorf("clientstate: %q is not a role", defaultRole)
+	if exitRole(defaultRole) {
+		defaultRole = RoleTunnel
 	}
+	if !plainRole(defaultRole) {
+		return fmt.Errorf("clientstate: %q is not a role for everything else", defaultRole)
+	}
+	exits := d.exits()
 
 	existing, err := d.Rules()
 	if err != nil {
@@ -101,6 +132,9 @@ func (d *DB) ReplaceRules(defaultRole string, rules []Rule) error {
 		}
 		if r.Process == "" {
 			return fmt.Errorf("clientstate: a rule needs a process")
+		}
+		if !exits && exitRole(r.Role) {
+			r.Role = RoleInherit
 		}
 		key := targetKey(r.Process, r.Path)
 		if seen[key] {
@@ -194,18 +228,19 @@ func (d *DB) DomainRulesInForce() ([]DomainRule, error) {
 	if err != nil {
 		return nil, err
 	}
-	if sub, err := d.Subscription(); err == nil && sub.AllowExit {
+	if d.exits() {
 		return rules, nil
 	}
 	for i := range rules {
-		if !plainRole(rules[i].Role) {
-			rules[i].Role = RoleTunnel
+		if exitRole(rules[i].Role) {
+			rules[i].Role = RoleInherit
 		}
 	}
 	return rules, nil
 }
 
 func (d *DB) ReplaceDomainRules(rules []DomainRule) error {
+	exits := d.exits()
 	tx, err := d.sql.Begin()
 	if err != nil {
 		return err
@@ -228,6 +263,9 @@ func (d *DB) ReplaceDomainRules(rules []DomainRule) error {
 			continue
 		}
 		seen[name] = true
+		if !exits && exitRole(r.Role) {
+			r.Role = RoleInherit
+		}
 		if _, err := tx.Exec(`INSERT INTO domain_rules (domain, role) VALUES (?, ?)`,
 			name, r.Role); err != nil {
 			return err
@@ -259,18 +297,19 @@ func (d *DB) BundleRolesInForce() (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	if sub, err := d.Subscription(); err == nil && sub.AllowExit {
+	if d.exits() {
 		return roles, nil
 	}
 	for bundle, role := range roles {
-		if !plainRole(role) {
-			roles[bundle] = RoleTunnel
+		if exitRole(role) {
+			delete(roles, bundle)
 		}
 	}
 	return roles, nil
 }
 
 func (d *DB) ReplaceBundleRoles(roles map[string]string) error {
+	exits := d.exits()
 	tx, err := d.sql.Begin()
 	if err != nil {
 		return err
@@ -281,11 +320,11 @@ func (d *DB) ReplaceBundleRoles(roles map[string]string) error {
 		return err
 	}
 	for bundle, role := range roles {
-		if role == "" || role == RoleTunnel {
-			continue
-		}
-		if !ValidRole(role) {
+		if !ValidRole(role) && role != "" {
 			return fmt.Errorf("clientstate: unknown role %s for %s", role, bundle)
+		}
+		if role == "" || role == RoleInherit || (!exits && exitRole(role)) {
+			continue
 		}
 		if _, err := tx.Exec(`INSERT INTO bundle_rules (bundle, role) VALUES (?, ?)`, bundle, role); err != nil {
 			return err

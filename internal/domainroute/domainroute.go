@@ -125,19 +125,20 @@ func New() *Table {
 func (t *Table) Load(rules map[string]string, lower map[string]Entry, nets []Net) {
 	quietLow := map[string]string{}
 	for name, e := range lower {
-		if e.Role == clientstate.RoleTunnel {
+		if e.Role == clientstate.RoleInherit {
 			quietLow[name] = e.Rule
 		}
 	}
-	opinions := 0
-	for _, role := range rules {
-		if role != clientstate.RoleTunnel {
-			opinions++
+	for name, role := range rules {
+		if role == clientstate.RoleInherit {
+			quietLow[name] = name
 		}
 	}
-	quietFew, quietMany := sortNets(slices.DeleteFunc(slices.Clone(nets), func(n Net) bool { return n.Role != clientstate.RoleTunnel }))
-	maps.DeleteFunc(lower, func(_ string, e Entry) bool { return e.Role == clientstate.RoleTunnel })
-	nets = slices.DeleteFunc(nets, func(n Net) bool { return n.Role == clientstate.RoleTunnel })
+	maps.DeleteFunc(rules, func(_ string, role string) bool { return role == clientstate.RoleInherit })
+	opinions := len(rules)
+	quietFew, quietMany := sortNets(slices.DeleteFunc(slices.Clone(nets), func(n Net) bool { return n.Role != clientstate.RoleInherit }))
+	maps.DeleteFunc(lower, func(_ string, e Entry) bool { return e.Role == clientstate.RoleInherit })
+	nets = slices.DeleteFunc(nets, func(n Net) bool { return n.Role == clientstate.RoleInherit })
 	now := time.Now().Unix()
 	few, many := sortNets(nets)
 	t.mu.Lock()
@@ -197,7 +198,7 @@ func (t *Table) RoleOfName(name string) (string, bool) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	found, ok := t.ruleOf(strings.Trim(strings.ToLower(name), "."))
-	return found.role, ok && found.role != clientstate.RoleTunnel
+	return found.role, ok && found.role != clientstate.RoleInherit
 }
 
 func (t *Table) held(addr netip.Addr) (learned, bool) {
@@ -225,7 +226,7 @@ func (t *Table) RoleOf(addr netip.Addr) (string, bool) {
 		return "", false
 	}
 	held, ok := t.held(addr)
-	return held.role, ok && held.role != clientstate.RoleTunnel
+	return held.role, ok && held.role != clientstate.RoleInherit
 }
 
 func (t *Table) RuleOf(addr netip.Addr) (string, bool) {
@@ -278,7 +279,7 @@ func (t *Table) place(name string, got answer) {
 		}
 		t.addrs[a] = found
 	}
-	if t.Placed != nil && found.role != clientstate.RoleTunnel {
+	if t.Placed != nil && found.role != clientstate.RoleInherit {
 		t.Placed(found.role, got.addrs)
 	}
 }

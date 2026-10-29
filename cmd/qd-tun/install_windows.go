@@ -152,7 +152,7 @@ func settleUpdate(db *clientstate.DB) {
 		return
 	}
 	if os.Remove(exe+".bad") == nil {
-		db.Notify("error", "The update did not start, so the previous version is back.", time.Now().UnixMilli())
+		db.Notify("error", "The update didn't start, so the previous version is back.", time.Now().UnixMilli())
 	}
 	go func() {
 		for i := 0; i < 12; i++ {

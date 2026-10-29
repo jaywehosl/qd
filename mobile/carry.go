@@ -215,7 +215,7 @@ func (c *Client) comeBack() {
 		if err != nil || !sub.Imported {
 			return
 		}
-		err = c.api.Connect()
+		err = c.api.Reconnect()
 		if err == nil {
 			return
 		}
@@ -251,9 +251,28 @@ func (c *Client) loadNames() {
 	c.names.Load(named, steerlist.Lower(bundles), steerlist.Nets(bundles))
 }
 
-func (c *Client) detours(dst netip.Addr) bool {
-	role, known := c.names.RoleOf(dst)
-	return known && role == clientstate.RoleDirect
+func (c *Client) roleFor(src, dst netip.AddrPort, udp bool) string {
+	if role, own := c.marks.forFlow(src, dst, udp); own {
+		return role
+	}
+	if role, known := c.names.RoleOf(dst.Addr()); known {
+		return role
+	}
+	return c.marks.global()
+}
+
+func (c *Client) detours(src, dst netip.AddrPort, udp bool) bool {
+	return c.roleFor(src, dst, udp) == clientstate.RoleDirect
+}
+
+func (c *Client) exitOfRole(role string) string {
+	switch role {
+	case clientstate.RoleEgress:
+		return qsrv.AnyExit
+	case clientstate.RoleNoEgress:
+		return ""
+	}
+	return c.route()
 }
 
 func (c *Client) outside(ctx context.Context, network string, dst netip.AddrPort) (net.Conn, error) {
@@ -263,31 +282,12 @@ func (c *Client) outside(ctx context.Context, network string, dst netip.AddrPort
 }
 
 func (c *Client) nameLeaves(name string) bool {
-	if role, known := c.names.RoleOfName(name); known {
-		switch role {
-		case clientstate.RoleEgress:
-			return true
-		case clientstate.RoleNoEgress:
-			return false
-		}
-	}
-	return c.marks.fallback() == qdcrypt.ExitEgress
+	role, _ := c.names.RoleOfName(name)
+	return c.exitOfRole(role) == qsrv.AnyExit
 }
 
 func (c *Client) exitFor(src, dst netip.AddrPort, udp bool) string {
-	if role, known := c.names.RoleOf(dst.Addr()); known {
-		switch role {
-		case clientstate.RoleEgress:
-			return qsrv.AnyExit
-		case clientstate.RoleNoEgress:
-			return ""
-		}
-		return c.route()
-	}
-	if c.marks.forFlow(src, dst, udp) == qdcrypt.ExitEgress {
-		return qsrv.AnyExit
-	}
-	return ""
+	return c.exitOfRole(c.roleFor(src, dst, udp))
 }
 
 func (c *Client) goesDirect(pkt []byte) bool { return false }

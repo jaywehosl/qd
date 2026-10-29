@@ -1,3 +1,4 @@
+import '@/dev-host';
 import { createRoot } from 'react-dom/client';
 import { RouterProvider } from 'react-router-dom';
 import '@/styles/reset.css';

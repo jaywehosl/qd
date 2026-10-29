@@ -101,7 +101,33 @@ func withSetup(routes http.Handler, db *clientstate.DB, tun *tunnel) http.Handle
 	mux.Handle("/", routes)
 	mux.HandleFunc("/client/api/setup", s.state)
 	mux.HandleFunc("/client/api/setup/install", s.install)
+	mux.HandleFunc("/client/api/journal", saveJournal)
 	return mux
+}
+
+func saveJournal(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "", http.StatusMethodNotAllowed)
+		return
+	}
+	name, err := shelveJournal()
+	answer(w, map[string]any{"name": name}, err)
+}
+
+func shelveJournal() (string, error) {
+	raw, err := os.ReadFile(filepath.Join(stateDir, "client.log"))
+	if err != nil {
+		return "", err
+	}
+	if len(raw) == 0 {
+		return "", errors.New("the log is empty")
+	}
+	dir, err := windows.KnownFolderPath(windows.FOLDERID_Downloads, 0)
+	if err != nil {
+		return "", err
+	}
+	name := "qd-" + time.Now().Format("0102-150405") + ".log.txt"
+	return name, os.WriteFile(filepath.Join(dir, name), raw, 0o644)
 }
 
 func answer(w http.ResponseWriter, obj any, err error) {

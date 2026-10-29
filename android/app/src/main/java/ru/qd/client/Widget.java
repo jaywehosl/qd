@@ -46,8 +46,8 @@ public class Widget extends AppWidgetProvider {
         view.setInt(R.id.widget_pill, "setBackgroundResource",
                 up ? R.drawable.note_pill_on : R.drawable.note_pill_off);
         view.setTextViewText(R.id.widget_text, Core.turning()
-                ? (up ? "отключение" : "подключение")
-                : (up ? "подключено" : "подключить"));
+                ? context.getString(up ? R.string.widget_disconnecting : R.string.widget_connecting)
+                : context.getString(up ? R.string.widget_connected : R.string.widget_connect));
         view.setTextColor(R.id.widget_text,
                 context.getColor(up ? R.color.ink : R.color.ink_text));
         view.setOnClickPendingIntent(R.id.widget_pill, Notes.powerIntent(context, up));

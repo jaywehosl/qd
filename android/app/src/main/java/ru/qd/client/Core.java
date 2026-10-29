@@ -23,7 +23,7 @@ public final class Core {
         Qdmobile.setZone(java.util.TimeZone.getDefault().getID());
     }
 
-    private static Client client;
+    private static volatile Client client;
     private static volatile Context app;
     private static volatile boolean up;
     private static volatile String where = "";
@@ -141,8 +141,12 @@ public final class Core {
     };
 
     public static void say(Context context, String text) {
+        Client live = client;
+        if (live == null) {
+            return;
+        }
         try {
-            client(context).say(text);
+            live.say(text);
         } catch (Exception ignored) {
         }
     }
@@ -203,35 +207,40 @@ public final class Core {
             return "";
         }
         if (why.contains("too old") || why.contains("update qd")) {
-            return "Эта версия устарела. Обновите приложение, чтобы подключиться.";
+            return text(R.string.err_too_old);
         }
         if (why.contains("refused this subscription") || why.contains("disabled by the administrator")
                 || why.contains("no longer valid")) {
-            return "Сервер отклонил подписку. Обратитесь к администратору.";
+            return text(R.string.err_refused);
         }
         if (why.contains("expired")) {
-            return "Срок подписки истёк.";
+            return text(R.string.err_expired);
         }
         if (why.contains("blocked by the administrator")) {
-            return "Это устройство заблокировано администратором.";
+            return text(R.string.err_blocked);
         }
         if (why.contains("allowance of devices")) {
-            return "Достигнут предел устройств для этой подписки.";
+            return text(R.string.err_devices);
         }
         if (why.contains("nothing imported") || why.contains("no network key")) {
-            return "Подписка не добавлена.";
+            return text(R.string.err_no_subscription);
         }
         if (why.contains("no entrypoint to dial")) {
-            return "В подписке нет серверов для подключения.";
+            return text(R.string.err_no_servers);
         }
         if (why.contains("refused to establish the tunnel") || why.contains("establish")) {
-            return "Android не дал создать VPN. Проверьте, не включён ли другой VPN.";
+            return text(R.string.err_vpn_refused);
         }
         if (why.contains("no entrypoint answered") || why.contains("deadline exceeded")
                 || why.contains("timeout")) {
-            return "Сервер не отвечает. Проверьте интернет и попробуйте ещё раз.";
+            return text(R.string.err_no_answer);
         }
-        return "Не удалось подключиться. Подробности в журнале.";
+        return text(R.string.err_connect_failed);
+    }
+
+    static String text(int id, Object... args) {
+        Context context = app;
+        return context == null ? "" : context.getString(id, args);
     }
 
     public static boolean turning() {

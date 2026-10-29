@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { CloseOutlined } from '@ant-design/icons';
+import { CloseOutlined, SyncOutlined } from '@ant-design/icons';
 
 import { Button, Card, Input, Select, Switch, toast } from '@/components/ds';
 import { HttpUtil } from '@/utils';
@@ -59,6 +59,7 @@ export default function RelaysCard({ data }: { data: RelaysPayload }) {
   const { settings, patch } = useClientSettings();
   const [link, setLink] = useState('');
   const [busy, setBusy] = useState(false);
+  const [probing, setProbing] = useState(false);
 
   const call = async (path: string, body: object) => {
     setBusy(true);
@@ -75,8 +76,14 @@ export default function RelaysCard({ data }: { data: RelaysPayload }) {
     return true;
   };
 
+  const probe = async () => {
+    setProbing(true);
+    await call('probe', {});
+    setProbing(false);
+  };
+
   useEffect(() => {
-    void call('probe', {});
+    void probe();
   }, []);
 
   const add = async () => {
@@ -86,28 +93,40 @@ export default function RelaysCard({ data }: { data: RelaysPayload }) {
   const mode = settings?.relayMode || data.mode || 'auto';
   const stranded = mode === 'only' && !data.relays.some((r) => r.enabled && !r.state.broken);
 
-  const tone: Record<string, string> = { off: 'direct', auto: 'tunnel', only: 'egress' };
+  const tone: Record<string, string> = { off: 'default', auto: 'tunnel', only: 'egress' };
 
   return (
     <Card
       title={t('client.settings.relays')}
       extra={(
-        <Select
-          className={`rt-role rt-role--${tone[mode] ?? 'tunnel'}`}
-          value={mode}
-          onChange={(v) => patch({ relayMode: v })}
-          options={[
-            { value: 'off', label: t('client.settings.relayOff') },
-            { value: 'auto', label: t('client.settings.relayAuto') },
-            { value: 'only', label: t('client.settings.relayOnly') },
-          ]}
-        />
+        <div className="rl-head">
+          <Button
+            variant="text"
+            icon={<SyncOutlined spin={probing} />}
+            aria-label={t('client.settings.relayCheck')}
+            title={t('client.settings.relayCheck')}
+            disabled={probing || data.relays.length === 0}
+            onClick={() => void probe()}
+          />
+          <Select
+            className={`rt-role rt-role--${tone[mode] ?? 'tunnel'}`}
+            value={mode}
+            onChange={(v) => patch({ relayMode: v })}
+            options={[
+              { value: 'off', label: t('client.settings.relayOff') },
+              { value: 'auto', label: t('client.settings.relayAuto') },
+              { value: 'only', label: t('client.settings.relayOnly') },
+            ]}
+          />
+        </div>
       )}
     >
-      {stranded && <p className="cset-warn">{t('client.settings.relayStranded')}</p>}
-
       <div className="rl-list">
-        {data.relays.length === 0 && <div className="cset-empty">{t('client.settings.relayNone')}</div>}
+        {data.relays.length === 0 && (
+          <div className={`cset-empty${stranded ? ' is-warn' : ''}`}>
+            {t(stranded ? 'client.settings.relayNoneForced' : 'client.settings.relayNone')}
+          </div>
+        )}
         {data.relays.map((r) => (
           <div
             key={r.id}
@@ -134,6 +153,8 @@ export default function RelaysCard({ data }: { data: RelaysPayload }) {
         ))}
       </div>
 
+      {stranded && data.relays.length > 0 && <p className="cset-warn">{t('client.settings.relayStranded')}</p>}
+
       <div className="rl-add">
         <Input
           value={link}
@@ -143,9 +164,6 @@ export default function RelaysCard({ data }: { data: RelaysPayload }) {
           onKeyDown={(e) => e.key === 'Enter' && void add()}
         />
         <Button disabled={busy || !link.trim()} onClick={() => void add()}>{t('client.settings.relayAdd')}</Button>
-        <Button disabled={busy || data.relays.length === 0} onClick={() => void call('probe', {})}>
-          {t('client.settings.relayCheck')}
-        </Button>
       </div>
     </Card>
   );

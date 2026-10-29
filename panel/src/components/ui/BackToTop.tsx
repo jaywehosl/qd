@@ -1,3 +1,4 @@
+import i18next from 'i18next';
 import { useEffect, useState } from 'react';
 import { ArrowUpOutlined } from '@ant-design/icons';
 interface BackToTopProps {
@@ -28,7 +29,7 @@ export default function BackToTop({ target, visibilityHeight = 200 }: BackToTopP
   };
 
   return (
-    <button type="button" className="ds-backtop" aria-label="Back to top" onClick={scrollToTop}>
+    <button type="button" className="ds-backtop" aria-label={i18next.t('aria.backToTop')} onClick={scrollToTop}>
       <ArrowUpOutlined />
     </button>
   );

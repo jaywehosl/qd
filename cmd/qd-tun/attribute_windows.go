@@ -387,7 +387,7 @@ func openRemotes() []netip.Addr {
 	out := make([]netip.Addr, 0, len(rows))
 	for _, row := range rows {
 		if addr := row.remoteAddr; addr != 0 {
-			out = append(out, netip.AddrFrom4([4]byte{byte(addr), byte(addr >> 8), byte(addr >> 16), byte(addr >> 24)}))
+			out = append(out, addrOfRow(addr))
 		}
 	}
 	if buf, ok := extendedTable(procGetExtendedTcpTable, afInet6, tcpTableOwnerPidAll); ok && len(buf) >= 4 {
@@ -438,7 +438,7 @@ func dropMoved(moved []netip.Addr) int {
 		if row.pid == self || addr == 0 {
 			continue
 		}
-		if hit[netip.AddrFrom4([4]byte{byte(addr), byte(addr >> 8), byte(addr >> 16), byte(addr >> 24)})] && dropConnection(row) {
+		if hit[addrOfRow(addr)] && dropConnection(row) {
 			dropped++
 		}
 	}
@@ -465,7 +465,10 @@ func (r *procRouter) dropRerouted() int {
 		if !ok {
 			continue
 		}
-		if roleIn(ident, oldPath, oldName, oldDef) == roleIn(ident, newPath, newName, newDef) {
+		to := addrOfRow(row.remoteAddr)
+		oldRole, oldOwn := roleIn(ident, oldPath, oldName)
+		newRole, newOwn := roleIn(ident, newPath, newName)
+		if chained(oldRole, oldOwn, to, oldDef) == chained(newRole, newOwn, to, newDef) {
 			continue
 		}
 		if dropConnection(row) {
@@ -497,10 +500,11 @@ func (r *procRouter) dropRoles(pick func(role string) bool) int {
 		if row.pid == 0 || row.pid == self || row.remoteAddr == 0 || goesAround(row.remoteAddr) {
 			continue
 		}
-		role := def
+		own, held := "", false
 		if ident, ok := identFor(row.pid); ok {
-			role = roleIn(ident, byPath, byName, def)
+			own, held = roleIn(ident, byPath, byName)
 		}
+		role := chained(own, held, addrOfRow(row.remoteAddr), def)
 		if !pick(role) {
 			continue
 		}
@@ -511,8 +515,12 @@ func (r *procRouter) dropRoles(pick func(role string) bool) int {
 	return dropped
 }
 
+func addrOfRow(addr uint32) netip.Addr {
+	return netip.AddrFrom4([4]byte{byte(addr), byte(addr >> 8), byte(addr >> 16), byte(addr >> 24)})
+}
+
 func goesAround(addr uint32) bool {
-	to := netip.AddrFrom4([4]byte{byte(addr), byte(addr >> 8), byte(addr >> 16), byte(addr >> 24)})
+	to := addrOfRow(addr)
 	if around.Bypass(to) {
 		return true
 	}

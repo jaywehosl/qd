@@ -45,7 +45,7 @@ type Options struct {
 	Resolver  string
 	Exit      func(src, dst netip.AddrPort, udp bool) string
 	Direct    func(pkt []byte) bool
-	Detour    func(dst netip.Addr) bool
+	Detour    func(src, dst netip.AddrPort, udp bool) bool
 	Outside   func(ctx context.Context, network string, dst netip.AddrPort) (net.Conn, error)
 	Bypass    []netip.Prefix
 	Fast      func()
@@ -498,7 +498,7 @@ func (t *Tunnel) FlowDsts() []netip.Addr {
 }
 
 func (t *Tunnel) exitOf(f netstack.Flow) string {
-	if t.opts.Detour != nil && t.opts.Detour(f.Dst.Addr()) {
+	if t.opts.Detour != nil && t.opts.Detour(f.Src, f.Dst, f.UDP) {
 		return asideTag
 	}
 	return exitTag(currentRoute(&t.route), t.opts.Exit, f, true)
@@ -554,7 +554,7 @@ func (t *Tunnel) dialer() routed {
 
 const asideTag = "aside"
 
-func (t *Tunnel) detour() func(dst netip.Addr) bool {
+func (t *Tunnel) detour() func(src, dst netip.AddrPort, udp bool) bool {
 	if t.opts.Outside == nil {
 		return nil
 	}
@@ -567,18 +567,22 @@ type routed struct {
 	resolver string
 	exit     func(src, dst netip.AddrPort, udp bool) string
 	took     func(f netstack.Flow, tag string)
-	detour   func(dst netip.Addr) bool
+	detour   func(src, dst netip.AddrPort, udp bool) bool
 	outside  func(ctx context.Context, network string, dst netip.AddrPort) (net.Conn, error)
 }
 
 func (r routed) aside(ctx context.Context, network string, dst netip.AddrPort) (net.Conn, bool, error) {
-	if r.detour == nil || !r.detour(dst.Addr()) {
+	if r.detour == nil {
+		return nil, false, nil
+	}
+	flow, known := netstack.FlowOf(ctx)
+	if !r.detour(flow.Src, dst, network == "udp") {
 		return nil, false, nil
 	}
 	if ippkt.StandIn.Contains(dst.Addr().Unmap()) {
 		return nil, true, errors.New("a stand-in address means nothing outside the tunnel")
 	}
-	if flow, known := netstack.FlowOf(ctx); known {
+	if known {
 		r.took(flow, asideTag)
 	}
 	conn, err := r.outside(ctx, network, dst)

@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   CheckCircleOutlined,
   ExclamationCircleOutlined,
@@ -21,13 +22,13 @@ import {
   type SensorKey,
   type Severity,
 } from '@/stores/notificationStore';
-const SENSOR_LABELS: { key: SensorKey; label: string; hint: string; unit: string }[] = [
-  { key: 'cpu', label: 'CPU usage', hint: 'Alert when CPU load exceeds the threshold', unit: '%' },
-  { key: 'mem', label: 'Memory usage', hint: 'Alert when RAM usage exceeds the threshold', unit: '%' },
-  { key: 'disk', label: 'Disk usage', hint: 'Alert when disk usage exceeds the threshold', unit: '%' },
-  { key: 'sockets', label: 'Open TCP sockets', hint: 'Alert on an abnormal number of open TCP sockets', unit: '' },
-  { key: 'udpSockets', label: 'Open UDP sockets', hint: 'Alert on an abnormal number of open UDP sockets', unit: '' },
-  { key: 'clientOffline', label: 'Client offline', hint: 'Alert when a client that was online goes silent for N hours', unit: 'h' },
+const SENSORS: { key: SensorKey; unit: string }[] = [
+  { key: 'cpu', unit: '%' },
+  { key: 'mem', unit: '%' },
+  { key: 'disk', unit: '%' },
+  { key: 'sockets', unit: '' },
+  { key: 'udpSockets', unit: '' },
+  { key: 'clientOffline', unit: 'h' },
 ];
 
 const SEVERITY_ICON: Record<Severity, ReactNode> = {
@@ -36,10 +37,7 @@ const SEVERITY_ICON: Record<Severity, ReactNode> = {
   info: <CheckCircleOutlined />,
 };
 
-const CATEGORY_LABELS: { key: AlertCategory; label: string; hint: string }[] = [
-  { key: 'security', label: 'Security warnings', hint: 'Default port / base path / HTTP exposure alerts' },
-  { key: 'nodes', label: 'Node reachability', hint: 'A node stopped answering the panel' },
-];
+const CATEGORIES: AlertCategory[] = ['security', 'nodes'];
 
 function formatTime(ts: number): string {
   try {
@@ -50,38 +48,33 @@ function formatTime(ts: number): string {
 }
 
 export default function NotificationsTab() {
+  const { t } = useTranslation();
   const { history, dismissed, prefs, sensors, maintenance } = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
   return (
     <div className="notif-tab">
-      <Card title="Alert sources">
-        <p className="notif-tab__lead">
-          Toggle which live alerts may appear in the header strip. Dismissed alerts
-          and all pop-up toasts are kept in the history log below.
-        </p>
-        {CATEGORY_LABELS.map((c) => (
-          <div className="notif-tab__source" key={c.key}>
+      <Card title={t('pages.notifications.sources')}>
+        <p className="notif-tab__lead">{t('pages.notifications.sourcesLead')}</p>
+        {CATEGORIES.map((c) => (
+          <div className="notif-tab__source" key={c}>
             <div className="notif-tab__source-label">
-              <span>{c.label}</span>
-              <span className="notif-tab__source-hint">{c.hint}</span>
+              <span>{t(`pages.notifications.category.${c}`)}</span>
+              <span className="notif-tab__source-hint">{t(`pages.notifications.categoryHint.${c}`)}</span>
             </div>
-            <Switch checked={prefs[c.key]} onChange={(v) => setAlertPref(c.key, v)} />
+            <Switch checked={prefs[c]} onChange={(v) => setAlertPref(c, v)} />
           </div>
         ))}
       </Card>
 
-      <Card title="Threshold sensors">
-        <p className="notif-tab__lead">
-          Watch the live server status and notify when a value crosses its
-          threshold. Each fires once per crossing and re-arms after it drops back.
-        </p>
-        {SENSOR_LABELS.map((s) => {
+      <Card title={t('pages.notifications.sensors')}>
+        <p className="notif-tab__lead">{t('pages.notifications.sensorsLead')}</p>
+        {SENSORS.map((s) => {
           const cfg = sensors[s.key];
           return (
             <div className="notif-tab__source" key={s.key}>
               <div className="notif-tab__source-label">
-                <span>{s.label}</span>
-                <span className="notif-tab__source-hint">{s.hint}</span>
+                <span>{t(`pages.notifications.sensor.${s.key}`)}</span>
+                <span className="notif-tab__source-hint">{t(`pages.notifications.sensorHint.${s.key}`)}</span>
               </div>
               <div className="notif-tab__sensor-ctl">
                 <span className="notif-tab__sensor-thresh">
@@ -101,11 +94,11 @@ export default function NotificationsTab() {
 
       </Card>
 
-      <Card title="Maintenance">
+      <Card title={t('pages.notifications.maintenance')}>
         <div className="notif-tab__source">
           <div className="notif-tab__source-label">
-            <span>Backup reminder</span>
-            <span className="notif-tab__source-hint">Remind to export the database if none has been done in N days</span>
+            <span>{t('pages.notifications.backupReminder')}</span>
+            <span className="notif-tab__source-hint">{t('pages.notifications.backupReminderHint')}</span>
           </div>
           <div className="notif-tab__sensor-ctl">
             <span className="notif-tab__sensor-thresh">
@@ -123,7 +116,7 @@ export default function NotificationsTab() {
       </Card>
 
       <Card
-        title="History"
+        title={t('pages.notifications.history')}
         extra={
           <Button
             size="sm"
@@ -132,12 +125,12 @@ export default function NotificationsTab() {
             disabled={!history.some((r) => !(r.source === 'alert' && r.key && dismissed.includes(r.key)))}
             onClick={clearHistory}
           >
-            Clear
+            {t('clear')}
           </Button>
         }
       >
         {history.length === 0 ? (
-          <div className="notif-tab__empty">No notifications yet.</div>
+          <div className="notif-tab__empty">{t('pages.notifications.empty')}</div>
         ) : (
           <ul className="notif-tab__log">
             {history.map((r) => (
@@ -148,7 +141,7 @@ export default function NotificationsTab() {
                   <span className="notif-tab__item-time">{formatTime(r.ts)}</span>
                   {r.source === 'alert' && r.key && dismissed.includes(r.key) && (
                     <Button size="sm" variant="text" onClick={() => restoreAlert(r.key!)}>
-                      Restore
+                      {t('pages.notifications.restore')}
                     </Button>
                   )}
                 </span>

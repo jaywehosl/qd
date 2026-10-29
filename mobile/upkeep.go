@@ -3,9 +3,6 @@ package qdmobile
 import (
 	"time"
 
-	"github.com/quic-go/quic-go"
-	"github.com/quic-go/quic-go/http3"
-
 	"github.com/jaywehosl/qd/internal/clientdns"
 	"github.com/jaywehosl/qd/internal/clientstate"
 	"github.com/jaywehosl/qd/internal/qcli"
@@ -18,23 +15,12 @@ func (c *Client) upkeep() {
 	go c.api.Greet()
 }
 
-type heard struct {
-	lost, drops uint64
-}
-
-func heardWire() heard {
-	lost, _ := quic.LossStats()
-	_, missed := quic.DatagramStats()
-	return heard{lost: lost, drops: missed + quic.DatagramsShed() + http3.StreamDatagramsDropped()}
-}
-
 func (c *Client) meter() {
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
 
 	var prev qcli.Counters
 	var prevDNS clientdns.Stats
-	prevWire := heardWire()
 
 	for {
 		select {
@@ -46,9 +32,8 @@ func (c *Client) meter() {
 		c.mu.Lock()
 		live, warm := c.live, c.dns
 		c.mu.Unlock()
-		now := heardWire()
 		if live == nil {
-			prev, prevDNS, prevWire = qcli.Counters{}, clientdns.Stats{}, now
+			prev, prevDNS = qcli.Counters{}, clientdns.Stats{}
 			continue
 		}
 
@@ -68,10 +53,6 @@ func (c *Client) meter() {
 			Down:        down,
 			PktOut:      gap(got.Out, prev.Out),
 			PktIn:       gap(got.In, prev.In),
-			Lost:        gap(now.lost, prevWire.lost),
-			Drops:       gap(now.drops, prevWire.drops),
-			SendDrop:    gap(got.Shed, prev.Shed),
-			SendErr:     gap(got.Failed, prev.Failed),
 			DNSQueries:  gap(dns.Queries, prevDNS.Queries),
 			DNSCached:   gap(dns.Hits, prevDNS.Hits),
 			DNSUpstream: gap(dns.Upstream, prevDNS.Upstream),
@@ -80,7 +61,7 @@ func (c *Client) meter() {
 		if !sample.Quiet() {
 			c.db.AddSample(sample)
 		}
-		prev, prevDNS, prevWire = got, dns, now
+		prev, prevDNS = got, dns
 	}
 }
 

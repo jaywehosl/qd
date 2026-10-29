@@ -18,10 +18,16 @@ export function MetricsPanelProvider({ children }: { children: ReactNode }) {
     () => ({
       open,
       setOpen,
-      toggle: () => setOpen((o) => !o),
+      toggle: () => {
+        setOpen(!open);
+        if (!open) setNotifyOpen(false);
+      },
       notifyOpen,
       setNotifyOpen,
-      toggleNotify: () => setNotifyOpen((o) => !o),
+      toggleNotify: () => {
+        setNotifyOpen(!notifyOpen);
+        if (!notifyOpen) setOpen(false);
+      },
     }),
     [open, notifyOpen],
   );

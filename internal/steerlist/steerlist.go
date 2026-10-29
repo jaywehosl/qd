@@ -69,7 +69,7 @@ func Lower(roles map[string]string) map[string]domainroute.Entry {
 	for _, b := range Bundles {
 		role := roles[b.ID]
 		if role == "" {
-			role = clientstate.RoleTunnel
+			role = clientstate.RoleInherit
 		}
 		for _, s := range b.Services() {
 			for _, name := range s.Entries {
@@ -85,7 +85,7 @@ func Nets(roles map[string]string) []domainroute.Net {
 	for _, b := range Bundles {
 		role := roles[b.ID]
 		if role == "" {
-			role = clientstate.RoleTunnel
+			role = clientstate.RoleInherit
 		}
 		for _, s := range b.Services() {
 			for _, p := range s.Nets {

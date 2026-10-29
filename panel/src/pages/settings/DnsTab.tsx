@@ -236,7 +236,7 @@ export default function DnsTab({ allSetting, updateSetting }: DnsTabProps) {
 
   return (
     <div className="dns-tab">
-      <Card title={t('pages.settings.dns', { defaultValue: 'Resolver' })}>
+      <Card title={t('pages.settings.resolver', { defaultValue: 'Resolver' })}>
       <SettingListItem
         paddings="small"
         title={t('pages.settings.dnsPrimary')}

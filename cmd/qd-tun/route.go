@@ -55,9 +55,33 @@ func routeTag() string {
 
 var routeByDomain = domainroute.New()
 
-func detours(dst netip.Addr) bool {
-	role, known := routeByDomain.RoleOf(dst)
-	return known && role == clientstate.RoleDirect
+func roleFor(src, dst netip.AddrPort, udp bool) string {
+	def := clientstate.RoleTunnel
+	if r := routeByProcess.Load(); r != nil {
+		proto := uint8(protoTCP)
+		if udp {
+			proto = protoUDP
+		}
+		if role, own := r.OwnRoleForFlow(proto, src); own {
+			return role
+		}
+		def = r.fallback()
+	}
+	return chained("", false, dst.Addr(), def)
+}
+
+func detours(src, dst netip.AddrPort, udp bool) bool {
+	return roleFor(src, dst, udp) == clientstate.RoleDirect
+}
+
+func exitOfRole(role string) string {
+	switch role {
+	case clientstate.RoleEgress:
+		return anyExit
+	case clientstate.RoleNoEgress:
+		return ""
+	}
+	return routeTag()
 }
 
 func (p hostPlatform) DomainFlows() map[string]int {
@@ -76,44 +100,12 @@ func namedDirect(name string) bool {
 }
 
 func nameLeaves(name string) bool {
-	role, known := routeByDomain.RoleOfName(name)
-	if r := routeByProcess.Load(); !known && r != nil {
-		role = r.fallback()
-	}
-	switch role {
-	case clientstate.RoleEgress:
-		return true
-	case clientstate.RoleNoEgress:
-		return false
-	}
-	return routeTag() == anyExit
+	role, _ := routeByDomain.RoleOfName(name)
+	return exitOfRole(role) == anyExit
 }
 
 func exitFor(src, dst netip.AddrPort, udp bool) string {
-	if role, ok := routeByDomain.RoleOf(dst.Addr()); ok {
-		switch role {
-		case clientstate.RoleEgress:
-			return anyExit
-		case clientstate.RoleNoEgress:
-			return ""
-		}
-		return routeTag()
-	}
-	r := routeByProcess.Load()
-	if r == nil || !r.Active() {
-		return routeTag()
-	}
-	proto := uint8(protoTCP)
-	if udp {
-		proto = protoUDP
-	}
-	switch r.RoleForFlow(proto, src) {
-	case clientstate.RoleEgress:
-		return anyExit
-	case clientstate.RoleNoEgress:
-		return ""
-	}
-	return routeTag()
+	return exitOfRole(roleFor(src, dst, udp))
 }
 
 var (

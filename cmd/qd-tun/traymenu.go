@@ -98,11 +98,11 @@ func trayTip(db *clientstate.DB, tun *tunnel, status tray.Status) string {
 				}
 			}
 		}
-		return appName + " — подключён"
+		return appName + " — " + tray.Say("connected", "подключено")
 	case tray.StatusError:
-		return appName + " — не удалось подключиться"
+		return appName + " — " + tray.Say("couldn't connect", "не удалось подключиться")
 	default:
-		return appName + " — отключён"
+		return appName + " — " + tray.Say("disconnected", "отключено")
 	}
 }
 

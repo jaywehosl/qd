@@ -1,11 +1,14 @@
 package relay
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
+	"strconv"
 
 	"github.com/xtls/xray-core/app/dispatcher"
 	"github.com/xtls/xray-core/app/proxyman"
@@ -29,30 +32,45 @@ import (
 
 type Dialer struct {
 	Link vlesslink.Link
+	At   netip.Addr
 	core *core.Instance
 }
 
-func New(l vlesslink.Link) (*Dialer, error) {
+func (d *Dialer) Target() string {
+	if d.At.IsValid() {
+		return net.JoinHostPort(d.At.String(), strconv.Itoa(d.Link.Port))
+	}
+	return d.Link.Server()
+}
+
+func New(l vlesslink.Link, at netip.Addr) (*Dialer, error) {
+	addr, sni, host := l.Host, l.SNI, ""
+	if at.IsValid() {
+		addr, host = at.String(), l.Host
+		if sni == "" && l.Security != "none" {
+			sni = l.Host
+		}
+	}
 	stream := &internet.StreamConfig{ProtocolName: "tcp"}
 	if l.XHTTP != nil {
 		stream.ProtocolName = "splithttp"
 		stream.TransportSettings = []*internet.TransportConfig{{
 			ProtocolName: "splithttp",
-			Settings:     serial.ToTypedMessage(xhttpOf(l.XHTTP)),
+			Settings:     serial.ToTypedMessage(xhttpOf(l.XHTTP, host)),
 		}}
 	}
 	if l.WS != nil {
 		stream.ProtocolName = "websocket"
 		stream.TransportSettings = []*internet.TransportConfig{{
 			ProtocolName: "websocket",
-			Settings:     serial.ToTypedMessage(&websocket.Config{Host: l.WS.Host, Path: l.WS.Path, Ed: l.WS.Ed}),
+			Settings:     serial.ToTypedMessage(&websocket.Config{Host: cmp.Or(l.WS.Host, host), Path: l.WS.Path, Ed: l.WS.Ed}),
 		}}
 	}
 	switch l.Security {
 	case "reality":
 		secure(stream, &reality.Config{
 			Fingerprint: l.Fingerprint,
-			ServerName:  l.SNI,
+			ServerName:  sni,
 			PublicKey:   l.PublicKey,
 			ShortId:     l.ShortID,
 			SpiderX:     l.SpiderX,
@@ -60,7 +78,7 @@ func New(l vlesslink.Link) (*Dialer, error) {
 		})
 	case "tls":
 		secure(stream, &xtls.Config{
-			ServerName:    l.SNI,
+			ServerName:    sni,
 			Fingerprint:   l.Fingerprint,
 			NextProtocol:  l.ALPN,
 			AllowInsecure: l.Insecure,
@@ -76,7 +94,7 @@ func New(l vlesslink.Link) (*Dialer, error) {
 		Outbound: []*core.OutboundHandlerConfig{{
 			SenderSettings: serial.ToTypedMessage(&proxyman.SenderConfig{StreamSettings: stream}),
 			ProxySettings: serial.ToTypedMessage(&vlessout.Config{Vnext: &protocol.ServerEndpoint{
-				Address: xnet.NewIPOrDomain(xnet.ParseAddress(l.Host)),
+				Address: xnet.NewIPOrDomain(xnet.ParseAddress(addr)),
 				Port:    uint32(l.Port),
 				User:    &protocol.User{Account: serial.ToTypedMessage(account)},
 			}}),
@@ -91,16 +109,16 @@ func New(l vlesslink.Link) (*Dialer, error) {
 		inst.Close()
 		return nil, fmt.Errorf("relay: %w", err)
 	}
-	return &Dialer{Link: l, core: inst}, nil
+	return &Dialer{Link: l, At: at, core: inst}, nil
 }
 
 func span(s vlesslink.Span) *splithttp.RangeConfig {
 	return &splithttp.RangeConfig{From: s.From, To: s.To}
 }
 
-func xhttpOf(x *vlesslink.XHTTP) *splithttp.Config {
+func xhttpOf(x *vlesslink.XHTTP, host string) *splithttp.Config {
 	return &splithttp.Config{
-		Host:                 x.Host,
+		Host:                 cmp.Or(x.Host, host),
 		Path:                 x.Path,
 		Mode:                 x.Mode,
 		Headers:              x.Headers,
@@ -190,4 +208,11 @@ func (c *carried) Read(b []byte) (int, error) {
 func (c *carried) Write(b []byte) (int, error) {
 	n, err := c.Conn.Write(b)
 	return n, dropped(err)
+}
+
+func (d *Dialer) host() string {
+	if d.At.IsValid() {
+		return d.At.String()
+	}
+	return d.Link.Host
 }

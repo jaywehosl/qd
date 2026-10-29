@@ -83,7 +83,7 @@
 
 .topbar-shell { view-transition-name: qd-topbar; }
 
-::view-transition-old(qd-topbar),
+::view-transition-old(qd-topbar) { display: none; }
 ::view-transition-new(qd-topbar) { animation: none; }
 
 ::view-transition-old(root) {

@@ -255,7 +255,7 @@ export default function GroupsPage() {
                         <div className="mc__body">
                           <span className="mc__name">{g.tag}</span>
                           <span className="mc__sub">
-                            <span className={ids.length ? 'is-group' : ''}>{ids.length ? ids.map(inboundLabel).join(', ') : t('pages.groups.noInbounds', { defaultValue: 'No inbounds' })}</span>
+                            <span className={ids.length ? 'is-group' : ''}>{ids.length ? ids.map(inboundLabel).join(', ') : t('pages.groups.noEntrypoints', { defaultValue: 'No entry points' })}</span>
                             <span>{t('pages.groups.clientCount')}: {g.clientCount || 0}</span>
                           </span>
                         </div>

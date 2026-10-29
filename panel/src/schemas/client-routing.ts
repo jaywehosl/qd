@@ -1,9 +1,10 @@
 import { z } from 'zod';
 
-export const ROUTING_ROLES = ['direct', 'tunnel', 'egress', 'noEgress'] as const;
+export const ROUTING_ROLES = ['default', 'direct', 'tunnel', 'egress', 'noEgress'] as const;
 export type RoutingRole = (typeof ROUTING_ROLES)[number];
+export type GlobalRole = 'direct' | 'tunnel';
 
-const RoleSchema = z.enum(ROUTING_ROLES).catch('tunnel');
+const RoleSchema = z.enum(ROUTING_ROLES).catch('default');
 
 export const RoutingRuleSchema = z.object({
   id: z.number(),
@@ -32,7 +33,7 @@ export const BundleSchema = z.object({
 }).loose();
 
 export const RoutingStateSchema = z.object({
-  defaultRole: RoleSchema,
+  defaultRole: z.enum(['direct', 'tunnel']).catch('tunnel'),
   allowExit: z.boolean().catch(false),
   byDomain: z.boolean().optional(),
   applyMode: z.enum(['live', 'restart']).catch('live'),

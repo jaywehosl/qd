@@ -44,6 +44,10 @@ func Open(path string) (*DB, error) {
 		`ALTER TABLE domain_rules DROP COLUMN matched`,
 		`ALTER TABLE samples DROP COLUMN reorder`,
 		`ALTER TABLE samples DROP COLUMN retries`,
+		`ALTER TABLE samples DROP COLUMN lost`,
+		`ALTER TABLE samples DROP COLUMN drops`,
+		`ALTER TABLE samples DROP COLUMN send_drop`,
+		`ALTER TABLE samples DROP COLUMN send_err`,
 		`DELETE FROM settings WHERE key = 'ratePinned'`,
 		`INSERT OR IGNORE INTO relays (link, enabled, created)
 		 SELECT value, 1, CAST(strftime('%s', 'now') AS INTEGER) * 1000 FROM settings WHERE key = 'relay' AND value != ''`,

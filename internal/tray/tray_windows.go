@@ -42,6 +42,7 @@ var (
 	procDeleteObject     = gdi32.NewProc("DeleteObject")
 
 	procGetModuleHandle = kernel32.NewProc("GetModuleHandleW")
+	procUILanguage      = kernel32.NewProc("GetUserDefaultUILanguage")
 )
 
 const (
@@ -352,10 +353,10 @@ func (i *Icon) showMenu() {
 		disconnectFlags |= mfGrayed
 	}
 
-	appendItem(hmenu, connectFlags, idConnect, "Подключиться")
-	appendItem(hmenu, disconnectFlags, idDisconnect, "Отключиться")
+	appendItem(hmenu, connectFlags, idConnect, Say("Connect", "Подключиться"))
+	appendItem(hmenu, disconnectFlags, idDisconnect, Say("Disconnect", "Отключиться"))
 	procAppendMenu.Call(hmenu, mfSeparator, 0, 0)
-	appendItem(hmenu, mfString, idQuit, "Выход")
+	appendItem(hmenu, mfString, idQuit, Say("Quit", "Выход"))
 
 	var pt point
 	procGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
@@ -473,4 +474,11 @@ func makeIcon(s Status) uintptr {
 
 func scale(v byte, alpha float64) byte {
 	return byte(float64(v) * alpha)
+}
+
+func Say(en, ru string) string {
+	if lang, _, _ := procUILanguage.Call(); lang&0x3ff == 0x19 {
+		return ru
+	}
+	return en
 }

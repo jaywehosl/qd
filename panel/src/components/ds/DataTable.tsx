@@ -1,3 +1,4 @@
+import i18next from 'i18next';
 import { Fragment, useState } from 'react';
 import type { ReactNode } from 'react';
 import { RightOutlined } from '@ant-design/icons';
@@ -130,7 +131,7 @@ export function DataTable<T>({
                     className="ds-check"
                     checked={allSelected}
                     onChange={toggleAll}
-                    aria-label="Select all"
+                    aria-label={i18next.t('aria.selectAll')}
                   />
                 </th>
               )}
@@ -176,7 +177,7 @@ export function DataTable<T>({
                             type="button"
                             className={`ds-table__expand-btn${isOpen ? ' is-open' : ''}`}
                             onClick={() => toggleExpand(row.id)}
-                            aria-label="Toggle row"
+                            aria-label={i18next.t('aria.toggleRow')}
                           >
                             <RightOutlined />
                           </button>
@@ -191,7 +192,7 @@ export function DataTable<T>({
                           checked={rowSelection.selectedIds.includes(row.id)}
                           disabled={!selectable}
                           onChange={() => toggleRow(row.id)}
-                          aria-label="Select row"
+                          aria-label={i18next.t('aria.selectRow')}
                         />
                       </td>
                     )}

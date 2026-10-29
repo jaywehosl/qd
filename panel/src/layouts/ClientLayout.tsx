@@ -185,7 +185,7 @@ function ClientShell() {
                   ariaLabel={t('menu.theme')}
                 />
               )}
-              {ready && <LanguageSelector />}
+              {ready && !phone() && <LanguageSelector />}
               <WindowButtons />
             </div>
           </div>

@@ -1,3 +1,5 @@
+import i18next from 'i18next';
+import { unit } from '@/lib/unit';
 import axios from 'axios';
 import type { AxiosError, AxiosRequestConfig, AxiosResponse } from 'axios';
 import { getMessage } from './messageBus';
@@ -370,14 +372,25 @@ export class SizeFormatter {
   static readonly ONE_TB = SizeFormatter.ONE_GB * 1024;
   static readonly ONE_PB = SizeFormatter.ONE_TB * 1024;
 
+  static short(size: number | null | undefined): string {
+    const names = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+    let v = Math.max(0, size ?? 0);
+    let i = 0;
+    while (v >= 1024 && i < names.length - 1) {
+      v /= 1024;
+      i += 1;
+    }
+    return `${i === 0 ? Math.round(v) : Number(v.toPrecision(3))} ${unit(names[i])}`;
+  }
+
   static sizeFormat(size: number | null | undefined): string {
-    if (size == null || size <= 0) return '0 B';
-    if (size < SizeFormatter.ONE_KB) return size.toFixed(0) + ' B';
-    if (size < SizeFormatter.ONE_MB) return (size / SizeFormatter.ONE_KB).toFixed(2) + ' KB';
-    if (size < SizeFormatter.ONE_GB) return (size / SizeFormatter.ONE_MB).toFixed(2) + ' MB';
-    if (size < SizeFormatter.ONE_TB) return (size / SizeFormatter.ONE_GB).toFixed(2) + ' GB';
-    if (size < SizeFormatter.ONE_PB) return (size / SizeFormatter.ONE_TB).toFixed(2) + ' TB';
-    return (size / SizeFormatter.ONE_PB).toFixed(2) + ' PB';
+    if (size == null || size <= 0) return `0 ${unit('B')}`;
+    if (size < SizeFormatter.ONE_KB) return size.toFixed(0) + ' ' + unit('B');
+    if (size < SizeFormatter.ONE_MB) return (size / SizeFormatter.ONE_KB).toFixed(2) + ' ' + unit('KB');
+    if (size < SizeFormatter.ONE_GB) return (size / SizeFormatter.ONE_MB).toFixed(2) + ' ' + unit('MB');
+    if (size < SizeFormatter.ONE_TB) return (size / SizeFormatter.ONE_GB).toFixed(2) + ' ' + unit('GB');
+    if (size < SizeFormatter.ONE_PB) return (size / SizeFormatter.ONE_TB).toFixed(2) + ' ' + unit('TB');
+    return (size / SizeFormatter.ONE_PB).toFixed(2) + ' ' + unit('PB');
   }
 }
 
@@ -398,13 +411,37 @@ export interface SupportedLanguage {
   icon: string;
 }
 
+const LANGUAGE_KEY = 'qd.language';
+
 export class LanguageManager {
   static readonly supportedLanguages: readonly SupportedLanguage[] = [
     { name: 'English', value: 'en-US', icon: '🇺🇸' },
+    { name: 'Русский', value: 'ru-RU', icon: '🇷🇺' },
   ];
 
   static getLanguage(): string {
-    return 'en-US';
+    let held = '';
+    try {
+      held = localStorage.getItem(LANGUAGE_KEY) ?? '';
+    } catch {
+      held = '';
+    }
+    if (LanguageManager.supportedLanguages.some((l) => l.value === held)) return held;
+    return (navigator.language || '').toLowerCase().startsWith('ru') ? 'ru-RU' : 'en-US';
+  }
+
+  static setLanguage(lang: string): void {
+    try {
+      localStorage.setItem(LANGUAGE_KEY, lang);
+    } catch {
+      return;
+    }
+  }
+
+  static apply(lang: string): void {
+    LanguageManager.setLanguage(lang);
+    document.documentElement.lang = lang;
+    void i18next.changeLanguage(lang);
   }
 }
 

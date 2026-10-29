@@ -1,3 +1,4 @@
+import i18next from 'i18next';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { LeftOutlined, RightOutlined } from '@ant-design/icons';
@@ -42,11 +43,11 @@ export default function Calendar({ value, onChange, showTime = true, onDone }: C
   return (
     <div className="cal">
       <div className="cal-head">
-        <button type="button" className="cal-step" onClick={() => setMonth(month.subtract(1, 'month'))} aria-label="Previous month">
+        <button type="button" className="cal-step" onClick={() => setMonth(month.subtract(1, 'month'))} aria-label={i18next.t('aria.prevMonth')}>
           <LeftOutlined />
         </button>
         <span className="cal-title">{month.format('MMMM YYYY')}</span>
-        <button type="button" className="cal-step" onClick={() => setMonth(month.add(1, 'month'))} aria-label="Next month">
+        <button type="button" className="cal-step" onClick={() => setMonth(month.add(1, 'month'))} aria-label={i18next.t('aria.nextMonth')}>
           <RightOutlined />
         </button>
       </div>
@@ -82,7 +83,7 @@ export default function Calendar({ value, onChange, showTime = true, onDone }: C
             className="ds-input"
             value={String(value ? value.hour() : 0).padStart(2, '0')}
             onChange={(e) => setPart('hour', e.target.value)}
-            aria-label="Hour"
+            aria-label={i18next.t('hour')}
           />
           <span className="cal-colon">:</span>
           <input
@@ -92,7 +93,7 @@ export default function Calendar({ value, onChange, showTime = true, onDone }: C
             className="ds-input"
             value={String(value ? value.minute() : 0).padStart(2, '0')}
             onChange={(e) => setPart('minute', e.target.value)}
-            aria-label="Minute"
+            aria-label={i18next.t('minute')}
           />
         </div>
       )}

@@ -37,6 +37,21 @@
   color: #fff;
 }
 
+.ds-btn--text {
+  background: transparent;
+  color: var(--text);
+}
+
+.ds-btn--text:hover {
+  filter: none;
+  background: var(--press);
+  color: var(--bold);
+}
+
+.ds-btn--text.ds-btn--icon { color: var(--bold); }
+.ds-btn--text.ds-btn--danger { background: transparent; color: #e03a2f; }
+.ds-btn--text.ds-btn--danger:hover { background: rgba(224, 58, 47, 0.1); color: #e03a2f; }
+
 .ds-btn--sm { padding: 6px var(--step-2); font-size: 12px; }
 .ds-btn--lg { padding: 12px var(--step-4); font-size: var(--size-body); }
 .ds-btn--block { width: 100%; }

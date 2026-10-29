@@ -66,7 +66,7 @@ func (r *procRouter) keepTable() {
 	tick := time.NewTicker(tableTTL)
 	defer tick.Stop()
 	for {
-		if r.fixed.Load() == nil {
+		if r.active.Load() {
 			next := make(map[portKey]uint32, 512)
 			readSockets(next)
 			if len(next) > 0 {
@@ -216,7 +216,7 @@ func (r *procRouter) dropRerouted() int {
 	identFor := identMemo()
 	return dropTunnelled(func(pid uint32) bool {
 		ident, ok := identFor(pid)
-		return ok && roleIn(ident, oldPath, oldName, oldDef) != roleIn(ident, newPath, newName, newDef)
+		return ok && ownOr(ident, oldPath, oldName, oldDef) != ownOr(ident, newPath, newName, newDef)
 	})
 }
 
@@ -239,7 +239,7 @@ func (r *procRouter) dropRoles(pick func(role string) bool) int {
 	return dropTunnelled(func(pid uint32) bool {
 		role := def
 		if ident, ok := identFor(pid); ok {
-			role = roleIn(ident, byPath, byName, def)
+			role = ownOr(ident, byPath, byName, def)
 		}
 		return pick(role)
 	})
@@ -350,4 +350,11 @@ func destroySock(fd int, id [48]byte) bool {
 		return false
 	}
 	return int32(binary.NativeEndian.Uint32(msgs[0].Data[:4])) == 0
+}
+
+func ownOr(ident procIdent, byPath, byName map[string]string, def string) string {
+	if role, own := roleIn(ident, byPath, byName); own {
+		return role
+	}
+	return def
 }

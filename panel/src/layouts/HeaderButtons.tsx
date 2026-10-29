@@ -41,7 +41,10 @@ export function LanguageSelector() {
           <span>{l.name}</span>
         </>
       ),
-      onSelect: () => setLang(l.value),
+      onSelect: () => {
+        LanguageManager.apply(l.value);
+        setLang(l.value);
+      },
     })),
     [lang],
   );

@@ -47,6 +47,7 @@ type API struct {
 	updatedAt   time.Time
 
 	failed atomic.Value
+	misses atomic.Int32
 }
 
 func New(db *clientstate.DB, platform Platform, adblock *Adblock, key *qdcrypt.Key) *API {
@@ -230,7 +231,7 @@ func (a *API) Import(uri string) error {
 	}
 	a.platform.RulesChanged()
 
-	go a.check("imported")
+	go a.check("added")
 	return nil
 }
 
@@ -250,7 +251,7 @@ func (a *API) check(verb string) (int, error) {
 	}
 	if reached == 0 {
 		a.db.Notify("warning",
-			"No entrypoint answered — the subscription was left as it stands.", now)
+			"Couldn't reach any server to update the subscription. Nothing was changed.", now)
 		return 0, fmt.Errorf("no entrypoint answered")
 	}
 
@@ -258,11 +259,11 @@ func (a *API) check(verb string) (int, error) {
 
 	nodes, _ := a.db.Nodes()
 	a.db.Notify("info",
-		fmt.Sprintf("Subscription %s: %d of %d entrypoints reachable.", verb, reached, len(nodes)), now)
+		fmt.Sprintf("Subscription %s: %d of %d servers reachable.", verb, reached, len(nodes)), now)
 	return reached, nil
 }
 
-func (a *API) Refresh() (int, error) { return a.check("checked") }
+func (a *API) Refresh() (int, error) { return a.check("updated") }
 
 func (a *API) KeepFresh(stop <-chan struct{}) {
 	missed := 0
@@ -443,7 +444,7 @@ func (a *API) adoptEntrypoints(answer Standing) {
 		return
 	}
 	a.db.Notify("info",
-		fmt.Sprintf("The network changed the entrypoints on offer: %d now.", len(fresh)),
+		fmt.Sprintf("The list of servers changed. %d available now.", len(fresh)),
 		time.Now().UnixMilli())
 }
 
@@ -464,10 +465,21 @@ func (a *API) adoptExit(answer Standing) {
 		return
 	}
 	sub, err := a.db.Subscription()
-	if err != nil || !sub.Imported || sub.AllowExit == answer.AllowExit {
+	if err != nil || !sub.Imported {
 		return
 	}
-	a.db.SetAllowExit(answer.AllowExit)
+	changed := sub.AllowExit != answer.AllowExit
+	if changed {
+		a.db.SetAllowExit(answer.AllowExit)
+	}
+	if !answer.AllowExit {
+		if moved, _ := a.db.DropExitRoles(); moved > 0 {
+			changed = true
+		}
+	}
+	if !changed {
+		return
+	}
 	a.platform.RulesChanged()
 
 	if !answer.AllowExit {
@@ -476,7 +488,7 @@ func (a *API) adoptExit(answer Standing) {
 			a.db.SaveSettings(settings)
 			a.platform.SetExit(false)
 			a.db.Notify("warning",
-				"Exit nodes are no longer allowed for this subscription.",
+				"Your subscription no longer includes the exit server.",
 				time.Now().UnixMilli())
 		}
 	}
@@ -540,7 +552,16 @@ func (a *API) connect(w http.ResponseWriter, r *http.Request) {
 	a.state(w, r)
 }
 
+const quietTries = 3
+
 func (a *API) Connect() error {
+	a.misses.Store(0)
+	return a.bringUp(true)
+}
+
+func (a *API) Reconnect() error { return a.bringUp(a.misses.Add(1) >= quietTries) }
+
+func (a *API) bringUp(loud bool) error {
 	if a.platform.Running() {
 		return nil
 	}
@@ -565,7 +586,7 @@ func (a *API) Connect() error {
 	}
 	lane := Entrypoints(nodes)
 	if len(lane) == 0 {
-		a.db.Notify("warning", "No entrypoint to dial on this network.", time.Now().UnixMilli())
+		a.db.Notify("warning", "There's no server to connect to on this network.", time.Now().UnixMilli())
 		return fmt.Errorf("no entrypoint to dial")
 	}
 
@@ -574,19 +595,21 @@ func (a *API) Connect() error {
 	}
 
 	if err := a.platform.Start(lane, qdcrypt.SessionID(sub.Key)); err != nil {
-		if prev, _ := a.failed.Swap(err.Error()).(string); prev != err.Error() && !errors.Is(err, ErrStopped) {
-			a.db.Notify("warning", "Could not bring the tunnel up: "+err.Error(), time.Now().UnixMilli())
+		if prev, _ := a.failed.Load().(string); loud && prev != err.Error() && !errors.Is(err, ErrStopped) {
+			a.failed.Store(err.Error())
+			a.db.Notify("warning", "Couldn't connect: "+err.Error(), time.Now().UnixMilli())
 		}
 		return err
 	}
 
 	a.failed.Store("")
+	a.misses.Store(0)
 	a.db.ClearSelection()
 	won := a.platform.ServerName()
 	for _, n := range nodes {
 		if n.Endpoint() == won {
 			a.db.MarkNode(n.ID, n.LatencyMs, true, true)
-			a.db.Notify("info", fmt.Sprintf("Connected through %s.", n.Name), time.Now().UnixMilli())
+			a.db.Notify("info", fmt.Sprintf("Connected via %s.", n.Name), time.Now().UnixMilli())
 			break
 		}
 	}
@@ -657,7 +680,7 @@ func (a *API) SetEgress(on bool) error {
 	}
 	if on && !sub.AllowExit {
 		a.db.Notify("warning",
-			"Exit nodes were refused: this subscription's group does not allow them.",
+			"The exit server isn't included in your subscription.",
 			time.Now().UnixMilli())
 		return fmt.Errorf("this subscription does not allow exit nodes")
 	}
@@ -737,7 +760,7 @@ func (a *API) bundles(open map[string]int) []bundleView {
 	for _, b := range steerlist.Bundles {
 		role := roles[b.ID]
 		if role == "" {
-			role = clientstate.RoleTunnel
+			role = clientstate.RoleInherit
 		}
 		view := bundleView{ID: b.ID, Name: b.Name, Role: role, Matched: open[steerlist.BundleMark+b.ID], Services: []bundleService{}}
 		for _, s := range b.Services() {

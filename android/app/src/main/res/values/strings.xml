@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="err_too_old">This version is out of date. Update qd to connect.</string>
+    <string name="err_refused">The server turned down your subscription. Contact your administrator.</string>
+    <string name="err_expired">Your subscription has expired.</string>
+    <string name="err_blocked">This device was blocked by the administrator.</string>
+    <string name="err_devices">This subscription is already on as many devices as it allows.</string>
+    <string name="err_no_subscription">No subscription added yet.</string>
+    <string name="err_no_servers">Your subscription has no servers to connect to.</string>
+    <string name="err_vpn_refused">Android wouldn\'t start the VPN. Check that no other VPN is turned on.</string>
+    <string name="err_no_answer">The server isn\'t responding. Check your internet connection and try again.</string>
+    <string name="err_connect_failed">Couldn\'t connect. See the log for details.</string>
+    <string name="channel_tunnel">Connection</string>
+    <string name="channel_updates">Updates</string>
+    <string name="connected">Connected</string>
+    <string name="connected_via">Connected via %1$s</string>
+    <string name="disconnected">Disconnected</string>
+    <string name="connecting">Connecting…</string>
+    <string name="disconnecting">Disconnecting…</string>
+    <string name="action_connect">Connect</string>
+    <string name="action_disconnect">Disconnect</string>
+    <string name="tile_on">On</string>
+    <string name="tile_off">Off</string>
+    <string name="no_reply">no reply</string>
+    <string name="units">B KB MB GB TB</string>
+    <string name="update_ready">qd update is ready</string>
+    <string name="tap_to_install">Tap to install</string>
+    <string name="widget_connecting">connecting</string>
+    <string name="widget_disconnecting">disconnecting</string>
+    <string name="widget_connected">connected</string>
+    <string name="widget_connect">connect</string>
+    <string name="journal_empty">The log is empty</string>
+    <string name="not_saved">Not saved: %1$s</string>
+    <string name="no_file">no file</string>
+</resources>

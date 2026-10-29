@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"net"
+	"net/netip"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -24,6 +25,7 @@ import (
 
 type Pool struct {
 	Keep   func(fd uintptr)
+	Lookup func(host string) []netip.Addr
 	Riding func() int
 	Fresh  func(hosts []string)
 
@@ -92,7 +94,7 @@ func (p *Pool) Set(list []clientstate.Relay, mode string) bool {
 		if _, held := p.open[id]; held {
 			continue
 		}
-		d, err := open(r.Link)
+		d, err := p.dial(r.Link, netip.Addr{})
 		if err != nil {
 			p.broken[id] = err.Error()
 			fmt.Printf("relay    #%d does not open: %v\n", id, err)
@@ -103,7 +105,7 @@ func (p *Pool) Set(list []clientstate.Relay, mode string) bool {
 			p.stats[id] = &stat{}
 		}
 		p.open[id] = &member{id: id, link: r.Link, dialer: d, stat: p.stats[id]}
-		fresh = append(fresh, d.Link.Host)
+		fresh = append(fresh, d.host())
 		fmt.Printf("relay    #%d %s %s\n", id, cmp.Or(d.Link.Name, "relay"), d.Link.Summary())
 	}
 	for id := range p.stats {
@@ -118,12 +120,42 @@ func (p *Pool) Set(list []clientstate.Relay, mode string) bool {
 	return redial
 }
 
-func open(link string) (*Dialer, error) {
+func (p *Pool) dial(link string, was netip.Addr) (*Dialer, error) {
 	parsed, err := vlesslink.Parse(link)
 	if err != nil {
 		return nil, err
 	}
-	return New(parsed)
+	at := p.resolve(parsed.Host)
+	if !at.IsValid() {
+		at = was
+	}
+	return New(parsed, at)
+}
+
+const lookupWait = 4 * time.Second
+
+func (p *Pool) resolve(host string) netip.Addr {
+	if at, err := netip.ParseAddr(host); err == nil {
+		return at.Unmap()
+	}
+	var found []netip.Addr
+	if p.Lookup != nil {
+		found = p.Lookup(host)
+	}
+	if len(found) == 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), lookupWait)
+		found, _ = net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+		cancel()
+	}
+	for _, at := range found {
+		if at = at.Unmap(); at.Is4() {
+			return at
+		}
+	}
+	if len(found) > 0 {
+		return found[0].Unmap()
+	}
+	return netip.Addr{}
 }
 
 func (m *member) via(ctx context.Context, endpoint string) (net.Conn, error) {
@@ -158,7 +190,7 @@ func (p *Pool) Now() ([]qcli.Relay, bool) {
 func (p *Pool) Hosts() []string {
 	var out []string
 	for _, m := range p.members() {
-		out = append(out, m.dialer.Link.Host)
+		out = append(out, m.dialer.host())
 	}
 	return out
 }
@@ -201,7 +233,7 @@ func (p *Pool) probe(m *member, endpoints []string) {
 		dialer.Control = func(_, _ string, c syscall.RawConn) error { return c.Control(p.Keep) }
 	}
 	began := time.Now()
-	conn, err := dialer.Dial("tcp", m.dialer.Link.Server())
+	conn, err := dialer.Dial("tcp", m.dialer.Target())
 	if err != nil {
 		s.reach.Store(-1)
 		s.shake.Store(-1)
@@ -272,7 +304,7 @@ func (p *Pool) Renew() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for id, m := range p.open {
-		d, err := open(m.link)
+		d, err := p.dial(m.link, m.dialer.At)
 		if err != nil {
 			continue
 		}

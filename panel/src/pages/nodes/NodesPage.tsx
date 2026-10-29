@@ -1,3 +1,4 @@
+import { unit } from '@/lib/unit';
 import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -81,11 +82,11 @@ export default function NodesPage() {
 
   const onSync = useCallback((node: NodeRecord) => {
     setConfirm({
-      title: t('pages.nodes.syncConfirmTitle', { defaultValue: `Copy the network database onto ${node.tag}?` }),
+      title: t('pages.nodes.syncConfirmTitle', { tag: node.tag }),
       content: t('pages.nodes.syncConfirmContent', {
         defaultValue: 'The freshest node in the network hands over its database and it replaces everything this node holds.',
       }),
-      okText: t('pages.nodes.syncNode', { defaultValue: 'Synchronize' }),
+      okText: t('pages.nodes.sync'),
       onOk: async () => {
         const msg = await HttpUtil.post('/panel/api/server/sync', { nodeId: node.id },
           { headers: { 'Content-Type': 'application/json' }, silent: true });
@@ -122,7 +123,7 @@ export default function NodesPage() {
             {isMobile ? (
               <button type="button" className={`ds-stats-grid is-fold${statsOpen ? ' is-open' : ''}`} aria-expanded={statsOpen} onClick={() => setStatsOpen(!statsOpen)}>
                 <Stat title={t('pages.nodes.onlineNodes')} value={totals.online} prefix={<WifiOutlined />} />
-                <Stat title={t('pages.nodes.avgLatency')} value={totals.avgLatency > 0 ? `${totals.avgLatency} ms` : '-'} prefix={<ThunderboltOutlined />} />
+                <Stat title={t('pages.nodes.avgLatency')} value={totals.avgLatency > 0 ? `${totals.avgLatency} ${unit('ms')}` : '-'} prefix={<ThunderboltOutlined />} />
                 <Stat title={t('pages.nodes.offlineNodes')} value={totals.offline} prefix={<CloseCircleOutlined style={{ color: 'var(--color-error)' }} />} />
                 <Stat title={t('pages.nodes.totalNodes')} value={totals.total} prefix={<CloudServerOutlined />} />
               </button>
@@ -131,7 +132,7 @@ export default function NodesPage() {
                 <Stat title={t('pages.nodes.totalNodes')} value={totals.total} prefix={<CloudServerOutlined />} />
                 <Stat title={t('pages.nodes.onlineNodes')} value={totals.online} prefix={<WifiOutlined />} />
                 <Stat title={t('pages.nodes.offlineNodes')} value={totals.offline} prefix={<CloseCircleOutlined style={{ color: 'var(--color-error)' }} />} />
-                <Stat title={t('pages.nodes.avgLatency')} value={totals.avgLatency > 0 ? `${totals.avgLatency} ms` : '-'} prefix={<ThunderboltOutlined />} />
+                <Stat title={t('pages.nodes.avgLatency')} value={totals.avgLatency > 0 ? `${totals.avgLatency} ${unit('ms')}` : '-'} prefix={<ThunderboltOutlined />} />
               </div>
             )}
           </Card>

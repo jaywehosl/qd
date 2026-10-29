@@ -1,9 +1,8 @@
+import { unit } from '@/lib/unit';
 import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
 import {
-  ApiOutlined,
-  CloudUploadOutlined,
   DeploymentUnitOutlined,
   GlobalOutlined,
   SearchOutlined,
@@ -15,6 +14,7 @@ import { Sparkline } from '@/components/viz';
 import { HttpUtil } from '@/utils';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { bitsPerSec } from '@/lib/rate';
+import { phone, usePortrait } from '@/lib/phone';
 interface HistPoint {
   t: number;
   [key: string]: number;
@@ -43,22 +43,6 @@ const METRICS: MetricDef[] = [
     series: [
       { field: 'pktIn', name: 'client.history.in', stroke: '#36cfc9' },
       { field: 'pktOut', name: 'client.history.out', stroke: '#2f54eb' },
-    ],
-  },
-  {
-    key: 'link', label: 'client.history.tab.link', icon: <ApiOutlined />, unit: 'rate',
-    series: [
-      { field: 'lost', name: 'client.history.lost', stroke: '#f5222d' },
-      { field: 'drops', name: 'client.history.drops', stroke: '#fa8c16' },
-      { field: 'reorder', name: 'client.history.reorder', stroke: '#faad14' },
-    ],
-  },
-  {
-    key: 'sending', label: 'client.history.tab.sending', icon: <CloudUploadOutlined />, unit: 'rate',
-    series: [
-      { field: 'retries', name: 'client.history.retries', stroke: '#fa8c16' },
-      { field: 'sendDrop', name: 'client.history.gaveUp', stroke: '#f5222d' },
-      { field: 'sendErr', name: 'client.history.sendErr', stroke: '#eb2f96' },
     ],
   },
   {
@@ -98,6 +82,7 @@ function clockLabel(unixSec: number, window: number): string {
 function ClientHistoryPanel({ live }: { live: boolean }) {
   const { t } = useTranslation();
   const { isMobile } = useMediaQuery();
+  const fill = !!phone() && !usePortrait();
   const [activeKey, setActiveKey] = useState('throughput');
   const [window_, setWindow] = useState(5);
 
@@ -150,7 +135,7 @@ function ClientHistoryPanel({ live }: { live: boolean }) {
       name2={metric.series[1] ? t(metric.series[1].name) : undefined}
       name3={metric.series[2] ? t(metric.series[2].name) : undefined}
       labels={labels}
-      height={210}
+      height={fill ? '100%' : 210}
       strokeWidth={2.2}
       showGrid
       showAxes
@@ -190,7 +175,7 @@ function ClientHistoryPanel({ live }: { live: boolean }) {
             className={`chp-win ${w === window_ ? 'is-active' : ''}`}
             onClick={() => setWindow(w)}
           >
-            {w >= 60 ? `${w / 60}h` : `${w}m`}
+            {w >= 60 ? `${w / 60}${unit('h')}` : `${w}${unit('m')}`}
           </button>
         ))}
       </div>

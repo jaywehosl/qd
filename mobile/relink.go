@@ -116,7 +116,7 @@ func (c *Client) relink() {
 		}
 
 		c.stopCarry()
-		if err := c.api.Connect(); err != nil {
+		if err := c.api.Reconnect(); err != nil {
 			say("relink: could not come back: %v", err)
 			go c.comeBack()
 		}

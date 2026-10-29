@@ -55,7 +55,7 @@ func (a *API) ExportRules() (string, error) {
 		return "", err
 	}
 	for _, b := range steerlist.Bundles {
-		if role := bundles[b.ID]; role != "" && role != clientstate.RoleTunnel {
+		if role := bundles[b.ID]; role != "" && role != clientstate.RoleInherit {
 			f.Bundles = append(f.Bundles, [2]string{b.ID, role})
 		}
 	}

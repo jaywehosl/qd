@@ -1,3 +1,4 @@
+import { unit } from '@/lib/unit';
 import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -80,7 +81,7 @@ function formatUptime(secs?: number): string {
   if (!secs) return '-';
   const days = Math.floor(secs / 86400);
   const hours = Math.floor((secs % 86400) / 3600);
-  if (days > 0) return `${days}d ${hours}h`;
+  if (days > 0) return `${days}${unit('d')} ${hours}${unit('h')}`;
   const mins = Math.floor((secs % 3600) / 60);
   if (hours > 0) return `${hours}h ${mins}m`;
   return `${mins}m`;
@@ -94,7 +95,7 @@ function useRelativeTime() {
     if (diffSec < 5) return t('pages.nodes.justNow');
     if (diffSec < 60) return `${diffSec}s`;
     if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m`;
-    if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h`;
+    if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}${unit('h')}`;
     return `${Math.floor(diffSec / 86400)}d`;
   };
 }
@@ -269,7 +270,7 @@ export default function NodeList({
               <Button size="sm" icon={<ThunderboltOutlined />} onClick={() => onProbe(record)} />
             </Tooltip>
             <Tooltip title={`${t('pages.nodes.lastHeartbeat')}: ${relativeTime(record.lastHeartbeat)}`}>
-              <Tag tone={ms > 0 ? 'success' : 'neutral'}>{ms > 0 ? `${ms} ms` : '—'}</Tag>
+              <Tag tone={ms > 0 ? 'success' : 'neutral'}>{ms > 0 ? `${ms} ${unit('ms')}` : '—'}</Tag>
             </Tooltip>
           </HStack>
         );
@@ -322,7 +323,7 @@ export default function NodeList({
                         <span>{(record as { role?: string }).role || '-'}</span>
                         {record.status === 'online' && <span>{formatUptime(record.uptimeSecs)}</span>}
                         <span>{record.onlineCount || 0} / {record.clientCount || 0}</span>
-                        <span>{ms > 0 ? `${ms} ms` : t(`pages.nodes.statusValues.${record.status || 'unknown'}`)}</span>
+                        <span>{ms > 0 ? `${ms} ${unit('ms')}` : t(`pages.nodes.statusValues.${record.status || 'unknown'}`)}</span>
                       </span>
                       {lagging && (
                         <span className="mc__note is-warning">
@@ -393,7 +394,7 @@ export default function NodeList({
                     </div>
                     <div className="ms-row">
                       <span className="ms-row__key">{t('pages.nodes.latency')}</span>
-                      <span className="ms-row__val">{(opened.latencyMs || 0) > 0 ? `${opened.latencyMs} ms` : '—'}</span>
+                      <span className="ms-row__val">{(opened.latencyMs || 0) > 0 ? `${opened.latencyMs} ${unit('ms')}` : '—'}</span>
                       <button type="button" className="mc-icon" aria-label={t('pages.nodes.probe')} onClick={() => onProbe(opened)}>
                         <ThunderboltOutlined />
                       </button>

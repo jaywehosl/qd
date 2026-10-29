@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { HttpUtil } from '@/utils';
 import { parseMsg } from '@/utils/zodValidate';
 import {
+  type GlobalRole,
   RoutingStateSchema,
   ProcessListSchema,
   type DomainRule,
@@ -31,7 +32,7 @@ export function useClientRouting() {
     refetchInterval: 15000,
   });
 
-  const write = useCallback(async (rules: RoutingRule[], defaultRole: RoutingRole) => {
+  const write = useCallback(async (rules: RoutingRule[], defaultRole: GlobalRole) => {
     const msg = await HttpUtil.post(
       '/client/api/routing',
       { defaultRole, rules: rules.map(({ process, path, role }) => ({ process, path, role })) },
@@ -79,7 +80,7 @@ export function useClientRouting() {
     return write(state.rules.filter((r) => r.id !== id), state.defaultRole);
   }, [state, write]);
 
-  const setDefaultRole = useCallback((role: RoutingRole) => {
+  const setDefaultRole = useCallback((role: GlobalRole) => {
     if (!state) return Promise.resolve(null);
     return write(state.rules, role);
   }, [state, write]);

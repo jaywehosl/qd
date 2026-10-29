@@ -44,7 +44,7 @@ type Options struct {
 	Fast     func()
 	CatchDNS bool
 	Direct   func(pkt []byte) bool
-	Detour   func(dst netip.Addr) bool
+	Detour   func(src, dst netip.AddrPort, udp bool) bool
 	Mark     func(pkt []byte) uint64
 	Loud     bool
 	Jumbo    uint16
@@ -218,7 +218,7 @@ func (e *Engine) pumpOutbound(ctx context.Context, rd packet.Reader, src packet.
 				reinject = refuse(reinject, p)
 				continue
 			}
-			aside := !catch && e.Detour != nil && ippkt.IsUDP(p.Data) && e.Detour(dst)
+			aside := !catch && e.Detour != nil && ippkt.IsUDP(p.Data) && e.detours(p.Data)
 			if aside && e.cut(p.Data, tagAside) {
 				reinject = refuse(reinject, p)
 				continue
@@ -483,6 +483,11 @@ func (t *tcpTunnel) deliver(st *netstack.Stack, w packet.Composer) {
 
 func (e *Engine) stepsAside(pkt []byte) bool {
 	return e.Direct != nil && e.Direct(pkt)
+}
+
+func (e *Engine) detours(pkt []byte) bool {
+	src, dst, udp, ok := ippkt.Flow(pkt)
+	return ok && e.Detour(src, dst, udp)
 }
 
 func (e *Engine) mark(pkt []byte) uint64 {

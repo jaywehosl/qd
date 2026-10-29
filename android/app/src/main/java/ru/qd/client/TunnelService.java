@@ -446,7 +446,7 @@ public class TunnelService extends VpnService {
                     String plain = Core.plain(e.getMessage());
                     Core.say(TunnelService.this, "java: connect failed: " + e.getMessage());
                     Core.mark(TunnelService.this, false, "");
-                    update(plain.isEmpty() ? "Отключён" : plain);
+                    update(plain.isEmpty() ? getString(R.string.disconnected) : plain);
                     showNote();
                 } finally {
                     Core.turning(TunnelService.this, false);
@@ -479,7 +479,7 @@ public class TunnelService extends VpnService {
                         Core.label(TunnelService.this,
                                 node + (ping >= 0 ? " · " + ping + " ms" : ""));
                         update(node
-                                + (ping >= 0 ? " · " + ping + " ms" : " · нет ответа")
+                                + (ping >= 0 ? " · " + ping + " ms" : " · " + getString(R.string.no_reply))
                                 + " · ↑" + human(s.optLong("bytesOut"))
                                 + " ↓" + human(s.optLong("bytesIn")));
                     } catch (InterruptedException stopped) {
@@ -501,7 +501,7 @@ public class TunnelService extends VpnService {
     }
 
     static String human(long n) {
-        String[] units = {"Б", "КБ", "МБ", "ГБ", "ТБ"};
+        String[] units = Core.text(R.string.units).split(" ");
         double v = n;
         int i = 0;
         while (v >= 1024 && i < units.length - 1) {

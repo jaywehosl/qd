@@ -1,11 +1,11 @@
 import { lazy, useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  AppstoreOutlined, BlockOutlined, DeleteOutlined, DownloadOutlined, DownOutlined, GlobalOutlined, PlusOutlined,
-  UploadOutlined,
+  AppstoreOutlined, BlockOutlined, DeleteOutlined, DownloadOutlined, DownOutlined, EllipsisOutlined, GlobalOutlined,
+  PlusOutlined, UploadOutlined,
 } from '@ant-design/icons';
 
-import { Alert, Button, Card, Dialog, Field, Input, Select, Tag, toast } from '@/components/ds';
+import { Alert, Button, Card, Dialog, DropdownMenu, Field, Input, Select, Tag, toast } from '@/components/ds';
 import { Spin, VerticalTabs } from '@/components/ui';
 import { LazyMount } from '@/components/utility';
 import { iconOf } from '@/pages/settings/routeServices';
@@ -58,15 +58,19 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
     }
   }, [onReconnect, refresh]);
 
+  const global = state?.defaultRole ?? 'tunnel';
   const roleOptions = useMemo(
-    () => ROUTING_ROLES.map((r) => ({ value: r, label: t(`client.routing.role.${r}`) })),
-    [t],
+    () => ROUTING_ROLES.map((r) => ({
+      value: r,
+      label: t(`client.routing.role.${r}`, { role: t(`client.routing.role.${global}`) }),
+      face: r === 'default' ? t(`client.routing.role.${global}`) : undefined,
+    })),
+    [t, global],
   );
 
   const baseOptions = useMemo(
-    () => roleOptions.filter((o) => o.value === 'direct' || o.value === 'tunnel'
-      || o.value === state?.defaultRole),
-    [roleOptions, state?.defaultRole],
+    () => roleOptions.filter((o) => o.value === 'direct' || o.value === 'tunnel'),
+    [roleOptions],
   );
 
   const existing = useMemo(
@@ -76,7 +80,7 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
 
   const onPick = useCallback((pick: { process: string; path?: string }) => {
     if (!state) return;
-    void add({ ...pick, role: 'tunnel' });
+    void add({ ...pick, role: 'default' });
   }, [state, add]);
 
   const pages = useMemo(() => [
@@ -92,7 +96,7 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
     if (!state || !host || hostTaken) return;
     setBusy(true);
     try {
-      const next = await addDomain(host, 'tunnel');
+      const next = await addDomain(host, 'default');
       if (next) {
         setNaming(false);
         setName('');
@@ -109,7 +113,9 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
     if (!msg?.success || !msg.obj) return;
     const host = phone();
     if (host?.save) {
-      toast.success(host.save(msg.obj.name, msg.obj.code));
+      const said = host.save(msg.obj.name, msg.obj.code);
+      if (said.startsWith('Downloads/')) toast.success(said);
+      else toast.error(said);
       return;
     }
     const url = URL.createObjectURL(new Blob([msg.obj.code], { type: 'application/octet-stream' }));
@@ -150,9 +156,10 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
   const view: Page = byDomain ? page : 'process';
   const stack = phone() ? 7 : 9;
   const named = view === 'domain';
-  const idle = view === 'bundle' ? !bundles.some((b) => b.role && b.role !== 'tunnel') : (named ? domains : rules).length === 0;
-  const plain = (r: RoutingRole) => r === 'direct' || r === 'tunnel';
+  const idle = view === 'bundle' ? !bundles.some((b) => b.role && b.role !== 'default') : (named ? domains : rules).length === 0;
+  const plain = (r: string) => r !== 'egress' && r !== 'noEgress';
   const shownRoles = ROUTING_ROLES.filter((r) => allowExit || plain(r));
+  const offered = (role: string) => roleOptions.filter((o) => allowExit || plain(o.value) || o.value === role);
 
   return (
     <div className="rt">
@@ -181,7 +188,7 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
             className={`rt-role rt-role--${defaultRole}`}
             value={defaultRole}
             options={baseOptions}
-            onChange={(v) => void setDefaultRole(v as RoutingRole)}
+            onChange={(v) => void setDefaultRole(v as 'direct' | 'tunnel')}
           />
         </div>
       </Card>
@@ -193,21 +200,43 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
       )}
 
       <Card
+        className="rt-main"
         title={t('client.routing.rules')}
-        extra={view === 'bundle' ? null : (
-          <Button size="sm" icon={<PlusOutlined />} onClick={() => (named ? setNaming(true) : setPicking(true))}>
-            {t(named ? 'client.routing.addDomain' : 'client.routing.addRule')}
-          </Button>
+        extra={(
+          <div className="rt-head">
+            {view !== 'bundle' && (
+              <Button icon={<PlusOutlined />} onClick={() => (named ? setNaming(true) : setPicking(true))}>
+                {t(named ? 'client.routing.addDomain' : 'client.routing.addRule')}
+              </Button>
+            )}
+            <DropdownMenu
+              align="end"
+              trigger={<Button variant="text" icon={<EllipsisOutlined />} aria-label={t('client.routing.more')} />}
+              items={[
+                { key: 'save', icon: <DownloadOutlined />, label: t('client.routing.exportRules'), onSelect: () => void doExport() },
+                { key: 'load', icon: <UploadOutlined />, label: t('client.routing.importRules'), onSelect: () => fileRef.current?.click() },
+                { type: 'divider' },
+                {
+                  key: 'reset',
+                  icon: <DeleteOutlined />,
+                  danger: true,
+                  disabled: idle,
+                  label: t(view === 'bundle' ? 'client.routing.resetBundles' : named ? 'client.routing.resetDomains' : 'client.routing.resetRules', worded()),
+                  onSelect: () => setConfirmReset(true),
+                },
+              ]}
+            />
+          </div>
         )}
         flush
       >
         <div className="rt-rules qd-page-swap" key={view}>
           {view === 'bundle' ? bundles.map((b) => {
-            const role = b.role || 'tunnel';
+            const role = b.role || 'default';
             return (
               <div key={b.id} className="rt-rule rt-bundle">
                 <div className="rt-bundle__id">
-                  <span className="rt-rule__name">{b.name}</span>
+                  <span className="rt-rule__name">{t(`client.routing.bundleName.${b.id}`, { defaultValue: b.name })}</span>
                   <span className="rt-stack">
                     {b.services.slice(0, stack).map((s, i) => {
                       const icon = iconOf(s.id);
@@ -244,7 +273,7 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
                 <Select
                   className={`rt-role rt-role--${role}`}
                   value={role}
-                  options={roleOptions.filter((o) => allowExit || plain(o.value) || o.value === role)}
+                  options={offered(role)}
                   onChange={(v) => void setBundleRole(b.id, String(v))}
                 />
               </div>
@@ -262,7 +291,7 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
               <Select
                 className={`rt-role rt-role--${d.role}`}
                 value={d.role}
-                options={roleOptions.filter((o) => allowExit || plain(o.value) || o.value === d.role)}
+                options={offered(d.role)}
                 onChange={(v) => void setDomainRole(d.id, v as RoutingRole)}
               />
               <Button
@@ -290,7 +319,7 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
               <Select
                 className={`rt-role rt-role--${r.role}`}
                 value={r.role}
-                options={roleOptions.filter((o) => allowExit || plain(o.value) || o.value === r.role)}
+                options={offered(r.role)}
                 onChange={(v) => void setRole(r.id, v as RoutingRole)}
               />
               <Button
@@ -314,20 +343,24 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
             <DownOutlined className="rt-legend__chev" />
             {t('client.routing.legend')}
           </button>
-          <div className="rt-danger__actions">
-            <Button icon={<DownloadOutlined />} onClick={() => void doExport()}>
-              {t('client.routing.exportRules', worded())}
-            </Button>
-            <Button icon={<UploadOutlined />} onClick={() => fileRef.current?.click()}>
-              {t('client.routing.importRules', worded())}
-            </Button>
-            <Button
-              danger
-              disabled={idle}
-              onClick={() => setConfirmReset(true)}
-            >
-              {t('client.routing.resetRules', worded())}
-            </Button>
+          <div className={`rt-legend__fold${legendOpen ? ' is-open' : ''}`}>
+            <div className="rt-legend__inner">
+              <div className="rt-legend">
+                {shownRoles.map((r) => (
+                  <div key={r} className="rt-legend__row">
+                    <Tag className={`rt-role rt-role--${r}`}>
+                      {t(r === 'default' ? 'client.routing.defaultWord' : `client.routing.role.${r}`)}
+                    </Tag>
+                    <span>{t(`client.routing.roleDesc.${r}`, worded())}</span>
+                  </div>
+                ))}
+              </div>
+              {[
+                t('client.routing.chainNote', worded()),
+                t('client.routing.newFlowsNote'),
+                t(view === 'bundle' ? 'client.routing.bundleNote' : named ? 'client.routing.domainNote' : 'client.routing.matchNote', worded()),
+              ].filter(Boolean).map((note) => <p key={note} className="rt-note">{note}</p>)}
+            </div>
           </div>
           <input
             ref={fileRef}
@@ -340,24 +373,6 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
               if (file) void doImport(file);
             }}
           />
-        </div>
-
-        <div className={`rt-legend__fold${legendOpen ? ' is-open' : ''}`}>
-          <div className="rt-legend__inner">
-            <div className="rt-legend">
-              {shownRoles.map((r) => (
-                <div key={r} className="rt-legend__row">
-                  <Tag className={`rt-role rt-role--${r}`}>{t(`client.routing.role.${r}`)}</Tag>
-                  <span>{t(`client.routing.roleDesc.${r}`, worded())}</span>
-                </div>
-              ))}
-            </div>
-            <p className="rt-note">{t('client.routing.newFlowsNote')}</p>
-            <p className="rt-note">
-              {t(view === 'bundle' ? 'client.routing.bundleNote'
-                : named ? 'client.routing.domainNote' : 'client.routing.matchNote', worded())}
-            </p>
-          </div>
         </div>
       </Card>
 
@@ -373,7 +388,7 @@ export default function RoutingSection({ connected, onReconnect }: RoutingSectio
       <Dialog
         open={confirmReset}
         onOpenChange={setConfirmReset}
-        title={t('client.routing.resetRules')}
+        title={t(view === 'bundle' ? 'client.routing.resetBundles' : named ? 'client.routing.resetDomains' : 'client.routing.resetRules', worded())}
         okText={t('client.settings.resetConfirm')}
         okDanger
         confirmLoading={busy}

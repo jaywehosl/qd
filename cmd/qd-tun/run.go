@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -159,7 +160,7 @@ func runClient(opts runOptions) error {
 				if err != nil || !sub.Imported || api == nil {
 					return
 				}
-				err = api.Connect()
+				err = api.Reconnect()
 				if err == nil {
 					return
 				}
@@ -215,6 +216,7 @@ func runClient(opts runOptions) error {
 		if u, err := url.Parse(paneDev); err == nil {
 			ui.Allow(u.Scheme + "://" + u.Host)
 		}
+		fmt.Printf("dev      %s/client?t=%s\n", strings.TrimSuffix(paneDev, "/"), ui.Token())
 	}
 	fmt.Printf("version  %s %s\n", update.Version, update.Kind)
 	fmt.Printf("state    %s\n", opts.StatePath)

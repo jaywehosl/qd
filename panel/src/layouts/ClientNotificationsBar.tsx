@@ -11,6 +11,7 @@ import {
 import { Button } from '@/components/ds';
 import { useMetricsPanel } from '@/layouts/MetricsPanelContext';
 import { useClientNotifications, type ClientNotif } from '@/layouts/useClientNotifications';
+import { noticeText } from '@/lib/notice';
 const SEVERITY_ICON: Record<ClientNotif['severity'], ReactNode> = {
   danger: <ExclamationCircleOutlined />,
   error: <ExclamationCircleOutlined />,
@@ -50,7 +51,7 @@ export default function ClientNotificationsBar() {
               {items.map((n) => (
                 <li key={n.id} className={`notif-row notif-row--${n.severity}`}>
                   <span className="notif-row__icon">{SEVERITY_ICON[n.severity]}</span>
-                  <span className="notif-row__text">{n.text}</span>
+                  <span className="notif-row__text">{noticeText(n.text, t)}</span>
                   <span className="notif-row__ts">{ago(n.ts, t)}</span>
                   <button
                     type="button"

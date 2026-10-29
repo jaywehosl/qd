@@ -101,41 +101,6 @@
   white-space: nowrap;
 }
 
-.danger-modal {
-  display: flex;
-  flex-direction: column;
-  gap: var(--step-3);
-}
-
-.danger-modal__title {
-  font-size: var(--size-title);
-  font-weight: 700;
-  color: #e03a2f;
-}
-
-.danger-modal__lead { color: var(--text); }
-
-.danger-modal__fields,
-.danger-modal__backup {
-  display: flex;
-  flex-direction: column;
-  gap: var(--step-2);
-}
-
-.danger-modal__ack {
-  display: flex;
-  align-items: center;
-  gap: var(--step-2);
-  font-size: var(--size-note);
-  color: var(--text);
-}
-
-.danger-modal__actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--step-2);
-}
-
 .notif-bar {
   display: grid;
   grid-template-rows: 0fr;
@@ -546,7 +511,8 @@ html.in-phone .metrics-bar.is-open .mb-container { padding: var(--step-3); }
 html.in-phone .chp { padding: var(--step-3); }
 html.in-phone .chp-tabs .ds-tabs__list { margin: 0 0 var(--step-2); }
 html.in-phone .chp-window {
-  position: static;
+  position: relative;
+  inset: auto;
   flex-direction: row;
   justify-content: space-between;
   margin-top: var(--step-2);

@@ -148,7 +148,11 @@ func Open(stateDir string, host Host, protector Protector, deviceID, model, name
 	c.marks.reload(db)
 	c.names = domainroute.New()
 	c.loadNames()
-	c.relays = &relay.Pool{Keep: c.keeper(), Riding: c.ridingRelay}
+	c.relays = &relay.Pool{
+		Keep:   c.keeper(),
+		Riding: c.ridingRelay,
+		Lookup: func(host string) []netip.Addr { return lookupOn(c.protector, host) },
+	}
 	c.loadRelays()
 	go c.relays.Follow(c.entrypoints)
 

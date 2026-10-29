@@ -9,21 +9,14 @@ import (
 	"time"
 
 	"github.com/jaywehosl/qd/internal/clientstate"
-	"github.com/jaywehosl/qd/internal/qdcrypt"
-)
-
-const (
-	markGlobal = 1
-	markEgress = 2
-	markLocal  = 3
 )
 
 type marks struct {
 	host Host
 
 	mu   sync.RWMutex
-	role map[string]byte
-	def  byte
+	role map[string]string
+	def  string
 
 	flows sync.Map
 	ports sync.Map
@@ -40,23 +33,14 @@ const (
 )
 
 type held struct {
-	mark byte
+	role string
+	own  bool
 	at   int64
 	sure bool
 }
 
 func newMarks(host Host) *marks {
-	return &marks{host: host, role: map[string]byte{}, seed: maphash.MakeSeed()}
-}
-
-func markFor(role string) byte {
-	switch role {
-	case clientstate.RoleEgress:
-		return markEgress
-	case clientstate.RoleNoEgress:
-		return markLocal
-	}
-	return markGlobal
+	return &marks{host: host, role: map[string]string{}, def: clientstate.RoleTunnel, seed: maphash.MakeSeed()}
 }
 
 func (m *marks) reload(db *clientstate.DB) {
@@ -65,15 +49,15 @@ func (m *marks) reload(db *clientstate.DB) {
 		return
 	}
 
-	fresh := map[string]byte{}
+	fresh := map[string]string{}
 	for _, rule := range rules {
 		if name := strings.TrimSpace(rule.Process); name != "" {
-			fresh[name] = markFor(rule.Role)
+			fresh[name] = rule.Role
 		}
 	}
 
 	m.mu.Lock()
-	m.role, m.def = fresh, markFor(def)
+	m.role, m.def = fresh, def
 	m.mu.Unlock()
 
 	m.forget()
@@ -88,22 +72,21 @@ func (m *marks) forget() {
 	m.live.Store(0)
 }
 
-func (m *marks) interested() (bool, byte) {
+func (m *marks) global() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return len(m.role) > 0, m.def
+	return m.def
 }
 
-func (m *marks) fallback() qdcrypt.Exit {
-	_, def := m.interested()
-	return exitOf(def, qdcrypt.Exit(exit.Load()))
+func (m *marks) some() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.role) > 0
 }
 
-func (m *marks) forFlow(src, dst netip.AddrPort, udp bool) qdcrypt.Exit {
-	global := qdcrypt.Exit(exit.Load())
-	some, def := m.interested()
-	if !some || !src.IsValid() || !dst.IsValid() {
-		return exitOf(def, global)
+func (m *marks) forFlow(src, dst netip.AddrPort, udp bool) (string, bool) {
+	if !m.some() || !src.IsValid() || !dst.IsValid() {
+		return "", false
 	}
 
 	proto := byte(6)
@@ -116,25 +99,25 @@ func (m *marks) forFlow(src, dst netip.AddrPort, udp bool) qdcrypt.Exit {
 	kept, known := m.flows.Load(key)
 	if known {
 		if was := kept.(held); was.sure || now-was.at < unsureFor.Milliseconds() {
-			return exitOf(was.mark, global)
+			return was.role, was.own
 		}
 	}
 
-	var mark byte
-	sure := false
+	var fresh held
 	if recent, seen := m.ports.Load(src.Port()); udp && seen && now-recent.(held).at < portFresh.Milliseconds() {
-		mark, sure = recent.(held).mark, true
-	} else if mark, sure = m.owner(proto, src, dst); sure && udp {
-		m.ports.Store(src.Port(), held{mark: mark, at: now})
+		fresh = recent.(held)
+	} else if fresh = m.owner(proto, src, dst); fresh.sure && udp {
+		fresh.at = now
+		m.ports.Store(src.Port(), fresh)
 	}
+	fresh.at = now
 
-	fresh := held{mark: mark, at: now, sure: sure}
 	if known {
 		m.flows.Store(key, fresh)
 	} else {
 		m.remember(key, fresh)
 	}
-	return exitOf(mark, global)
+	return fresh.role, fresh.own
 }
 
 func (m *marks) key(proto byte, sourcePort uint16, target netip.Addr) uint64 {
@@ -148,17 +131,7 @@ func (m *marks) key(proto byte, sourcePort uint16, target netip.Addr) uint64 {
 	return h.Sum64()
 }
 
-func exitOf(mark byte, global qdcrypt.Exit) qdcrypt.Exit {
-	switch mark {
-	case markEgress:
-		return qdcrypt.ExitEgress
-	case markLocal:
-		return qdcrypt.ExitLocal
-	}
-	return global
-}
-
-func (m *marks) owner(proto byte, src, dst netip.AddrPort) (byte, bool) {
+func (m *marks) owner(proto byte, src, dst netip.AddrPort) held {
 	started := time.Now()
 	named := m.host.Owner(int(proto),
 		src.Addr().String(), int(src.Port()),
@@ -166,17 +139,13 @@ func (m *marks) owner(proto byte, src, dst netip.AddrPort) (byte, bool) {
 	if spent := time.Since(started).Milliseconds(); spent > 20 {
 		say("owner: lookup took %d ms for proto=%d port=%d", spent, proto, src.Port())
 	}
-	m.mu.RLock()
-	mark, known := m.role[named]
-	def := m.def
-	m.mu.RUnlock()
 	if named == "" {
-		return def, false
+		return held{}
 	}
-	if !known {
-		return def, true
-	}
-	return mark, true
+	m.mu.RLock()
+	role, own := m.role[named]
+	m.mu.RUnlock()
+	return held{role: role, own: own, sure: true}
 }
 
 func (m *marks) remember(key uint64, fresh held) {

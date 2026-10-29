@@ -22,6 +22,7 @@ export default function VerticalTabs({ items, activeKey, onChange }: VerticalTab
           type="button"
           onClick={() => onChange(item.key)}
           className={`vtab-btn${item.key === activeKey ? ' is-active' : ''}`}
+          title={typeof item.label === 'string' ? item.label : undefined}
         >
           {item.icon && <span className="vtab-icon">{item.icon}</span>}
           <span>{item.label}</span>

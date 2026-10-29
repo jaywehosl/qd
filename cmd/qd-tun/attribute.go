@@ -63,18 +63,21 @@ type procRouter struct {
 	prevDef    string
 
 	active atomic.Bool
-	fixed  atomic.Pointer[string]
+	global atomic.Pointer[string]
 
 	owners sync.Map
 	plat   platformRouter
 }
 
 func newProcRouter() *procRouter {
-	return &procRouter{
+	r := &procRouter{
 		byPath: map[string]string{},
 		byName: map[string]string{},
 		def:    clientstate.RoleTunnel,
 	}
+	held := clientstate.RoleTunnel
+	r.global.Store(&held)
+	return r
 }
 
 func (r *procRouter) Load(defaultRole string, rules []clientstate.Rule) {
@@ -87,7 +90,7 @@ func (r *procRouter) Load(defaultRole string, rules []clientstate.Rule) {
 		}
 		byName[strings.ToLower(rule.Process)] = rule.Role
 	}
-	if !clientstate.ValidRole(defaultRole) {
+	if defaultRole != clientstate.RoleDirect {
 		defaultRole = clientstate.RoleTunnel
 	}
 
@@ -96,44 +99,38 @@ func (r *procRouter) Load(defaultRole string, rules []clientstate.Rule) {
 	r.byPath, r.byName, r.def = byPath, byName, defaultRole
 	r.mu.Unlock()
 
-	if len(byPath) == 0 && len(byName) == 0 {
-		held := defaultRole
-		r.fixed.Store(&held)
-		r.active.Store(defaultRole != clientstate.RoleTunnel)
-		return
-	}
-	r.fixed.Store(nil)
-	r.active.Store(true)
+	r.global.Store(&defaultRole)
+	r.active.Store(len(byPath)+len(byName) > 0)
 }
 
 func (r *procRouter) Active() bool { return r.active.Load() }
 
-func (r *procRouter) RoleFor(pkt []byte) string {
-	if held := r.fixed.Load(); held != nil {
-		return *held
+func (r *procRouter) OwnRole(pkt []byte) (string, bool) {
+	if !r.active.Load() {
+		return "", false
 	}
 	key, src, flags, ok := flowOf(pkt)
 	if !ok {
-		return r.fallback()
+		return "", false
 	}
 	return r.roleOf(r.ownerOf(key, src, flags&(tcpSyn|tcpAck) == tcpSyn, flags&tcpRst != 0))
 }
 
-func (r *procRouter) RoleForFlow(proto uint8, src netip.AddrPort) string {
-	if held := r.fixed.Load(); held != nil {
-		return *held
+func (r *procRouter) OwnRoleForFlow(proto uint8, src netip.AddrPort) (string, bool) {
+	if !r.active.Load() || !src.IsValid() {
+		return "", false
 	}
 	addr := src.Addr().Unmap()
 	return r.roleOf(r.ownerOf(portKey{proto: proto, v6: addr.Is6(), port: src.Port()}, addr, false, false))
 }
 
-func (r *procRouter) roleOf(ident procIdent, known bool) string {
+func (r *procRouter) roleOf(ident procIdent, known bool) (string, bool) {
+	if !known {
+		return "", false
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	if !known {
-		return r.def
-	}
-	return roleIn(ident, r.byPath, r.byName, r.def)
+	return roleIn(ident, r.byPath, r.byName)
 }
 
 func (r *procRouter) ownerOf(key portKey, src netip.Addr, opens, resets bool) (procIdent, bool) {
@@ -222,11 +219,7 @@ func missed(key portKey, pid uint32) {
 	st.procMiss.Add(1)
 }
 
-func (r *procRouter) fallback() string {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.def
-}
+func (r *procRouter) fallback() string { return *r.global.Load() }
 
 const (
 	tcpSyn = 0x02
@@ -331,14 +324,24 @@ func reloadProcessRules(db *clientstate.DB) {
 	}
 }
 
-func roleIn(ident procIdent, byPath, byName map[string]string, def string) string {
+func roleIn(ident procIdent, byPath, byName map[string]string) (string, bool) {
 	if ident.path != "" {
 		if role, ok := byPath[strings.ToLower(ident.path)]; ok {
-			return role
+			return role, true
 		}
 	}
-	if role, ok := byName[strings.ToLower(ident.name)]; ok {
+	role, ok := byName[strings.ToLower(ident.name)]
+	return role, ok
+}
+
+func chained(role string, own bool, dst netip.Addr, def string) string {
+	if own {
 		return role
+	}
+	if dst.IsValid() {
+		if role, known := routeByDomain.RoleOf(dst); known {
+			return role
+		}
 	}
 	return def
 }

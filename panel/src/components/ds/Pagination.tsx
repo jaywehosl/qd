@@ -1,3 +1,4 @@
+import i18next from 'i18next';
 import { LeftOutlined, RightOutlined } from '@ant-design/icons';
 import { Select } from './Select';
 
@@ -47,7 +48,7 @@ export function Pagination({
       )}
 
       <div className="ds-pagination__pages">
-        <button className="ds-pager__btn" disabled={current <= 1} onClick={() => go(current - 1)} aria-label="Previous">
+        <button className="ds-pager__btn" disabled={current <= 1} onClick={() => go(current - 1)} aria-label={i18next.t('aria.previous')}>
           <LeftOutlined />
         </button>
         {pageList(current, totalPages).map((p, i) =>
@@ -63,7 +64,7 @@ export function Pagination({
             </button>
           ),
         )}
-        <button className="ds-pager__btn" disabled={current >= totalPages} onClick={() => go(current + 1)} aria-label="Next">
+        <button className="ds-pager__btn" disabled={current >= totalPages} onClick={() => go(current + 1)} aria-label={i18next.t('aria.next')}>
           <RightOutlined />
         </button>
       </div>
@@ -72,7 +73,7 @@ export function Pagination({
         <Select
           value={String(pageSize)}
           onChange={(v) => onChange(1, Number(v))}
-          options={pageSizeOptions.map((n) => ({ value: String(n), label: `${n} / page` }))}
+          options={pageSizeOptions.map((n) => ({ value: String(n), label: i18next.t('aria.perPage', { n }) }))}
         />
       </div>
     </div>

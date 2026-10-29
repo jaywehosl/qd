@@ -1,18 +1,20 @@
+import { unit } from '@/lib/unit';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
+import { DownloadOutlined, RightOutlined } from '@ant-design/icons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { Button, Card, Dialog, Input, Select, Switch, Tag, toast } from '@/components/ds';
 import { SettingListItem, Spin } from '@/components/ui';
-import { HttpUtil, SizeFormatter } from '@/utils';
+import { HttpUtil, LanguageManager, SizeFormatter } from '@/utils';
 import { useClientState } from '@/hooks/useClientState';
 import { useClientSettings } from '@/layouts/ClientSettingsController';
 import { resetAll } from '@/stores/notificationStore';
-import UpdateButton from './UpdateButton';
+import { VersionPill } from './UpdateButton';
 import RelaysCard, { useRelays } from './RelaysCard';
 import { useTheme } from '@/hooks/useTheme';
-import { HOST_EVENT, hostChecks, navLow, phone, setNavLow } from '@/lib/phone';
+import { HOST_EVENT, colsSwap, hostChecks, navLow, phone, setColsSwap, setNavLow, usePortrait } from '@/lib/phone';
 
 interface AboutPayload {
   version?: string;
@@ -28,7 +30,7 @@ function remainingLabel(ms: number | undefined, never: string): string {
   if (left <= 0) return '—';
   const days = Math.floor(left / 86400000);
   const hours = Math.floor((left % 86400000) / 3600000);
-  return days > 0 ? `${days}d ${hours}h` : `${hours}h`;
+  return days > 0 ? `${days}${unit('d')} ${hours}${unit('h')}` : `${hours}${unit('h')}`;
 }
 
 export default function ClientSettingsPage() {
@@ -39,16 +41,29 @@ export default function ClientSettingsPage() {
   const { settings, patch } = useClientSettings();
   const { data: relays } = useRelays();
 
-  const [confirm, setConfirm] = useState<'data' | 'all' | null>(null);
+  const [confirm, setConfirm] = useState(false);
   const [low, setLow] = useState(navLow);
+  const [swapped, setSwapped] = useState(colsSwap);
+  const portrait = usePortrait();
+  const [lang, setLang] = useState(() => LanguageManager.getLanguage());
 
   const onPhone = !!phone();
   const { follow, setFollow } = useTheme();
   const [checks, setChecks] = useState(hostChecks);
-  const saveJournal = () => {
-    const said = phone()?.journal?.() ?? '';
-    if (said.startsWith('Downloads/')) toast.success(said);
-    else toast.warning(said);
+  const saveJournal = async () => {
+    const host = phone();
+    if (host) {
+      const said = host.journal?.() ?? '';
+      if (said.startsWith('Downloads/')) toast.success(said);
+      else toast.warning(said);
+      return;
+    }
+    const msg = await HttpUtil.post<{ name: string }>('/client/api/journal', {}, {
+      headers: { 'Content-Type': 'application/json' },
+      silent: true,
+    });
+    if (msg?.success && msg.obj) toast.success(t('client.settings.journalSaved', { name: msg.obj.name }));
+    else toast.error(msg?.msg || t('somethingWentWrong'));
   };
   useEffect(() => {
     const read = () => setChecks(hostChecks());
@@ -65,12 +80,12 @@ export default function ClientSettingsPage() {
     refetchInterval: 10000,
   });
 
-  const doReset = useCallback(async (withSubscription: boolean) => {
-    await reset(withSubscription);
-    if (withSubscription) resetAll();
+  const doReset = useCallback(async () => {
+    await reset(true);
+    resetAll();
     await queryClient.invalidateQueries({ queryKey: ['client'] });
-    setConfirm(null);
-    if (withSubscription) navigate('/client');
+    setConfirm(false);
+    navigate('/client');
   }, [reset, queryClient, navigate]);
 
   if (!settings) {
@@ -85,31 +100,29 @@ export default function ClientSettingsPage() {
     <section className="feed-section">
       <div className="section-header">
         <h2>{t('client.menu.settings')}</h2>
-        <UpdateButton />
       </div>
 
       <div className="client-settings cset">
-        <Card title={t('client.settings.subscription')}>
+        <Card title={t('client.settings.subscription')} extra={<Tag tone="primary">{about?.tag || '—'}</Tag>}>
           <div className="cset-facts">
-            <Tag tone="primary">{about?.tag || '—'}</Tag>
             <Tag>{remainingLabel(about?.expiresAt, t('client.settings.noExpiry'))}</Tag>
-            <Tag>↑ {SizeFormatter.sizeFormat(about?.up ?? 0)} ↓ {SizeFormatter.sizeFormat(about?.down ?? 0)}</Tag>
+            <Tag>↓ {SizeFormatter.short(about?.down)} ↑ {SizeFormatter.short(about?.up)}</Tag>
           </div>
-          <SettingListItem
-            paddings="small"
-            title={t('client.settings.refreshInterval')}
-            description={t('client.settings.refreshIntervalDesc')}
-          >
-            <Input
-              type="number"
-              min={1}
-              max={1440}
-              value={settings.refreshMinutes}
-              onChange={(e) => patch({ refreshMinutes: Number(e.target.value) || 1 })}
-            />
+          <SettingListItem paddings="small" title={t('client.settings.refreshInterval')}>
+            <span className="cset-num">
+              <Input
+                type="number"
+                min={1}
+                max={1440}
+                value={settings.refreshMinutes}
+                onChange={(e) => patch({ refreshMinutes: Math.min(1440, Number(e.target.value) || 1) })}
+              />
+              <span>{unit('min')}</span>
+            </span>
           </SettingListItem>
           <div className="cset-foot">
-            <Button danger size="sm" onClick={() => setConfirm('all')}>{t('client.settings.resetAll')}</Button>
+            <VersionPill version={about?.version} />
+            <Button variant="text" danger onClick={() => setConfirm(true)}>{t('client.settings.resetAll')}</Button>
           </div>
         </Card>
 
@@ -139,41 +152,53 @@ export default function ClientSettingsPage() {
               />
             </SettingListItem>
 
-            <SettingListItem
-              paddings="small"
-              title={t('client.settings.navLow')}
-              description={t('client.settings.navLowDesc')}
-            >
-              <Switch checked={low} onChange={(v) => { setNavLow(v); setLow(v); }} />
+            {portrait ? (
+              <SettingListItem
+                paddings="small"
+                title={t('client.settings.navLow')}
+                description={t('client.settings.navLowDesc')}
+              >
+                <Switch checked={low} onChange={(v) => { setNavLow(v); setLow(v); }} />
+              </SettingListItem>
+            ) : (
+              <SettingListItem
+                paddings="small"
+                title={t('client.settings.colsSwap')}
+                description={t('client.settings.colsSwapDesc')}
+              >
+                <Switch checked={swapped} onChange={(v) => { setColsSwap(v); setSwapped(v); }} />
+              </SettingListItem>
+            )}
+
+            <SettingListItem paddings="small" title={t('pages.settings.language')}>
+              <Select
+                value={lang}
+                onChange={(v) => { LanguageManager.apply(v); setLang(v); }}
+                options={LanguageManager.supportedLanguages.map((l) => ({ value: l.value, label: l.name }))}
+              />
             </SettingListItem>
 
             {(settings.fixedRate ?? 0) > 0 && (
               <SettingListItem paddings="small" title={t('client.settings.rate')}>
-                <b>{settings.fixedRate} Mbit/s</b>
+                <b>{settings.fixedRate} {unit('Mbit/s')}</b>
               </SettingListItem>
             )}
 
             <div className="cset-head">{t('client.settings.resilience')}</div>
-            {checks.map((c) => (
-              <SettingListItem
-                key={c.id}
-                paddings="small"
-                title={(
-                  <span className="cset-check">
-                    <i className={`cset-check__dot is-${c.state}`} />
-                    {t(`client.settings.host.${c.id}.${c.state}`)}
-                  </span>
-                )}
-              >
-                <Button size="sm" onClick={() => phone()?.open?.(c.id)}>{t('client.settings.open')}</Button>
-              </SettingListItem>
-            ))}
-
-            <SettingListItem paddings="small" title={t('client.settings.journal')}>
-              <Button size="sm" onClick={saveJournal}>
-                {t('client.settings.journalSave')}
-              </Button>
-            </SettingListItem>
+            <div className="cset-links">
+              {checks.map((c) => (
+                <button key={c.id} type="button" className="cset-link" onClick={() => phone()?.open?.(c.id)}>
+                  <span className="cset-link__lead"><i className={`cset-check__dot is-${c.state}`} /></span>
+                  <span className="cset-link__text">{t(`client.settings.host.${c.id}.${c.state}`)}</span>
+                  <RightOutlined className="cset-link__go" />
+                </button>
+              ))}
+              <button type="button" className="cset-link" onClick={() => void saveJournal()}>
+                <span className="cset-link__lead"><DownloadOutlined /></span>
+                <span className="cset-link__text">{t('client.settings.journalRow')}</span>
+                <RightOutlined className="cset-link__go" />
+              </button>
+            </div>
           </Card>
         ) : (
           <Card title={t('client.settings.startup')}>
@@ -214,26 +239,29 @@ export default function ClientSettingsPage() {
                 ]}
               />
             </SettingListItem>
+
+            <div className="cset-head">{t('client.settings.diagnostics')}</div>
+            <div className="cset-links">
+              <button type="button" className="cset-link" onClick={() => void saveJournal()}>
+                <span className="cset-link__lead"><DownloadOutlined /></span>
+                <span className="cset-link__text">{t('client.settings.journalRow')}</span>
+                <RightOutlined className="cset-link__go" />
+              </button>
+            </div>
           </Card>
         )}
 
-        <div className="cset-end">
-          <span>qd {about?.version || ''}</span>
-          <Button size="sm" onClick={() => setConfirm('data')}>{t('client.settings.resetData')}</Button>
-        </div>
       </div>
 
       <Dialog
-        open={confirm !== null}
-        onOpenChange={(o) => !o && setConfirm(null)}
-        title={confirm === 'all' ? t('client.settings.resetAll') : t('client.settings.resetData')}
+        open={confirm}
+        onOpenChange={setConfirm}
+        title={t('client.settings.resetAll')}
         okText={t('client.settings.resetConfirm')}
         okDanger
-        onOk={() => void doReset(confirm === 'all')}
+        onOk={() => void doReset()}
       >
-        <p style={{ margin: 0 }}>
-          {confirm === 'all' ? t('client.settings.resetAllDesc') : t('client.settings.resetDataDesc')}
-        </p>
+        <p style={{ margin: 0 }}>{t('client.settings.resetAllDesc')}</p>
       </Dialog>
     </section>
   );

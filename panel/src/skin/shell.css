@@ -472,6 +472,11 @@ html.in-phone body {
   padding: var(--inset-top, 0px) var(--inset-right, 0px) var(--inset-bottom, 0px) var(--inset-left, 0px);
 }
 
+html.in-phone body[data-scroll-locked] {
+  padding-left: var(--inset-left, 0px) !important;
+  padding-right: var(--inset-right, 0px) !important;
+}
+
 html.in-phone body::before {
   content: '';
   position: fixed;

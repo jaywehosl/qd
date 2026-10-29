@@ -52,6 +52,13 @@ func goesDirect(pkt []byte) bool {
 			}
 		}
 	}
+	r := routeByProcess.Load()
+	if r == nil {
+		return false
+	}
+	if role, own := r.OwnRole(pkt); own {
+		return role == clientstate.RoleDirect
+	}
 	if routeByDomain.Active() {
 		if dst, ok := ippkt.Dst(pkt); ok {
 			if role, known := routeByDomain.RoleOf(dst); known {
@@ -59,11 +66,7 @@ func goesDirect(pkt []byte) bool {
 			}
 		}
 	}
-	r := routeByProcess.Load()
-	if r == nil || !r.Active() {
-		return false
-	}
-	return r.RoleFor(pkt) == clientstate.RoleDirect
+	return r.fallback() == clientstate.RoleDirect
 }
 
 const icmpRule = "qd ICMPv4 unreachable"

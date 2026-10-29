@@ -19,6 +19,7 @@ import android.provider.MediaStore;
 import android.text.format.DateFormat;
 import android.util.Log;
 import android.view.View;
+import android.view.ViewTreeObserver;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.webkit.JavascriptInterface;
@@ -61,6 +62,8 @@ public class MainActivity extends Activity {
     private String wanted = "";
     private boolean loaded;
     private boolean shown;
+    private boolean held;
+    private long turns;
     private long born;
     private volatile String link = "";
     private volatile String seat = "0,0";
@@ -165,12 +168,12 @@ public class MainActivity extends Activity {
                 String path = client.logPath();
                 File from = path == null || path.isEmpty() ? null : new File(path);
                 if (from == null || !from.exists() || from.length() == 0) {
-                    return "The journal is empty";
+                    return getString(R.string.journal_empty);
                 }
                 String name = "qd-" + DateFormat.format("MMdd-HHmmss", System.currentTimeMillis()) + ".log.txt";
                 return shelve(name, new File(from.getPath() + ".1"), from);
             } catch (Exception e) {
-                return "Not saved: " + e.getMessage();
+                return getString(R.string.not_saved, e.getMessage());
             }
         }
 
@@ -184,7 +187,7 @@ public class MainActivity extends Activity {
             try {
                 return put(name, android.util.Base64.decode(base64, android.util.Base64.DEFAULT));
             } catch (Exception e) {
-                return "Not saved: " + e.getMessage();
+                return getString(R.string.not_saved, e.getMessage());
             }
         }
 
@@ -198,7 +201,7 @@ public class MainActivity extends Activity {
                 draft.delete();
                 return said;
             } catch (Exception e) {
-                return "Not saved: " + e.getMessage();
+                return getString(R.string.not_saved, e.getMessage());
             }
         }
     }
@@ -211,7 +214,7 @@ public class MainActivity extends Activity {
 
         Uri put = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, row);
         if (put == null) {
-            return "Not saved: no file";
+            return getString(R.string.not_saved, getString(R.string.no_file));
         }
 
         long written = 0;
@@ -249,7 +252,8 @@ public class MainActivity extends Activity {
                 int keys = insets.getInsets(WindowInsets.Type.ime()).bottom;
                 float dense = getResources().getDisplayMetrics().density;
                 String fresh = Math.round(bars.top / dense) + "," + Math.round(Math.max(keys, bars.bottom) / dense)
-                        + "," + Math.round(bars.left / dense) + "," + Math.round(bars.right / dense);
+                        + "," + Math.round(bars.left / dense) + "," + Math.round(bars.right / dense)
+                        + "," + Math.round(bars.bottom / dense);
                 if (!fresh.equals(seat)) {
                     seat = fresh;
                     poke();
@@ -316,6 +320,21 @@ public class MainActivity extends Activity {
             }
         });
 
+        web.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
+            @Override
+            public void onLayoutChange(View view, int left, int top, int right, int bottom,
+                                       int wasLeft, int wasTop, int wasRight, int wasBottom) {
+                if (shown && (right - left != wasRight - wasLeft || bottom - top != wasBottom - wasTop)) {
+                    hold();
+                }
+            }
+        });
+        shell.getViewTreeObserver().addOnPreDrawListener(new ViewTreeObserver.OnPreDrawListener() {
+            @Override
+            public boolean onPreDraw() {
+                return !held;
+            }
+        });
         shell.addView(web, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         setContentView(shell);
@@ -356,6 +375,35 @@ public class MainActivity extends Activity {
                 }
             }
         }).start();
+    }
+
+    private void hold() {
+        held = true;
+        final long turn = ++turns;
+        web.postVisualStateCallback(turn, new WebView.VisualStateCallback() {
+            @Override
+            public void onComplete(long id) {
+                if (id == turns) {
+                    release();
+                }
+            }
+        });
+        shell.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (turn == turns) {
+                    release();
+                }
+            }
+        }, 400);
+    }
+
+    private void release() {
+        if (!held) {
+            return;
+        }
+        held = false;
+        web.invalidate();
     }
 
     private void reveal() {
